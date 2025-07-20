@@ -745,6 +745,14 @@ class Y1HelperApp(tk.Tk):
         self.apps_menu.add_command(label="Install APK...", command=self.install_apk)
         self.apps_menu.add_separator()
         self.refresh_apps()  # Populate on startup
+        
+        # Debug menu (hidden by default, shown with Ctrl+D)
+        self.debug_menu = Menu(menubar, tearoff=0)
+        self.debug_menu.add_command(label="Change Update Branch...", command=self.change_update_branch)
+        self.debug_menu.add_command(label="Show Current Branch", command=self.show_current_branch)
+        self.debug_menu.add_separator()
+        self.debug_menu.add_command(label="Run Updater", command=self.run_updater)
+        
         self.update_device_menu()
         
         # Apply theme colors to menus
@@ -2481,11 +2489,111 @@ class Y1HelperApp(tk.Tk):
         self.status_var.set("Recent Apps opened")
         debug_print("Recent apps key sent")
 
+    def toggle_debug_menu(self, event=None):
+        """Toggle debug menu visibility with Ctrl+D"""
+        try:
+            # Get the menubar
+            menubar = self.nametowidget(self.cget("menu"))
+            
+            # Check if debug menu is already visible
+            debug_visible = False
+            for i in range(menubar.index('end') + 1):
+                try:
+                    if menubar.entrycget(i, 'label') == 'Debug':
+                        debug_visible = True
+                        break
+                except:
+                    continue
+            
+            if debug_visible:
+                # Remove debug menu
+                for i in range(menubar.index('end') + 1):
+                    try:
+                        if menubar.entrycget(i, 'label') == 'Debug':
+                            menubar.delete(i)
+                            break
+                    except:
+                        continue
+            else:
+                # Add debug menu
+                menubar.add_cascade(label="Debug", menu=self.debug_menu)
+                self.apply_menu_colors()
+                
+        except Exception as e:
+            debug_print(f"Error toggling debug menu: {e}")
+
+    def change_update_branch(self):
+        """Change the update branch via dialog"""
+        try:
+            # Read current branch
+            current_branch = "master"
+            if os.path.exists("branch.txt"):
+                with open("branch.txt", 'r', encoding='utf-8') as f:
+                    current_branch = f.read().strip() or "master"
+            
+            # Show dialog to change branch
+            new_branch = simpledialog.askstring(
+                "Change Update Branch",
+                f"Enter the branch name for updates:\n\nCurrent branch: {current_branch}",
+                initialvalue=current_branch
+            )
+            
+            if new_branch and new_branch.strip():
+                new_branch = new_branch.strip()
+                with open("branch.txt", 'w', encoding='utf-8') as f:
+                    f.write(new_branch)
+                
+                messagebox.showinfo(
+                    "Branch Updated",
+                    f"Update branch changed to: {new_branch}\n\nThis will be used by the updater for future updates."
+                )
+                debug_print(f"Update branch changed to: {new_branch}")
+            else:
+                debug_print("Branch change cancelled")
+                
+        except Exception as e:
+            debug_print(f"Error changing update branch: {e}")
+            messagebox.showerror("Error", f"Failed to change update branch: {e}")
+
+    def show_current_branch(self):
+        """Show the current update branch"""
+        try:
+            current_branch = "master"
+            if os.path.exists("branch.txt"):
+                with open("branch.txt", 'r', encoding='utf-8') as f:
+                    current_branch = f.read().strip() or "master"
+            
+            messagebox.showinfo(
+                "Current Update Branch",
+                f"Current update branch: {current_branch}\n\nUse Ctrl+D → Change Update Branch to modify this."
+            )
+            debug_print(f"Current update branch: {current_branch}")
+            
+        except Exception as e:
+            debug_print(f"Error showing current branch: {e}")
+            messagebox.showerror("Error", f"Failed to read current branch: {e}")
+
+    def run_updater(self):
+        """Run the Y1 updater"""
+        try:
+            debug_print("Launching Y1 updater")
+            subprocess.Popen([sys.executable, "y1_updater.py"])
+            self.status_var.set("Updater launched")
+            debug_print("Y1 updater launched successfully")
+        except Exception as e:
+            debug_print(f"Error launching updater: {e}")
+            messagebox.showerror("Error", f"Failed to launch updater: {e}")
+
     def setup_bindings(self):
         debug_print("Setting up key bindings")
         # Global key bindings
         self.bind("<Alt_L>", self.toggle_launcher_control)
         self.bind("<Alt_R>", self.toggle_launcher_control)
+        
+        # Debug menu toggle with Ctrl+D
+        self.bind("<Control-d>", self.toggle_debug_menu)
+        self.bind("<Control-D>", self.toggle_debug_menu)
+        
         # Global key handling for all key presses
         self.bind_all("<Key>", self.on_key_press)
         # Global key release handling for cursor control
