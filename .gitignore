@@ -1,0 +1,51 @@
+# Build artifacts and installer outputs
+build/
+dist/
+python/
+y1_updater.py
+*.exe
+*.spec
+*.msi
+*.nsi
+*.nsh
+
+# Installer outputs
+Y1Helper-*-Setup.exe
+Y1HelperUpdater.exe
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# NSIS
+*.nsi
+*.nsh
+*.exe
+*.msi
+
+# Y1 Helper specific
+Y1HelperUpdater.exe 
