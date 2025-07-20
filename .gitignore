@@ -1,6 +1,7 @@
 # Exclude assets and build directories
 assets/
 build/
+old/
 
 # Launcher files
 launcher.py
