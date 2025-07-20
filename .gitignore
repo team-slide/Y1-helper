@@ -1,0 +1,7 @@
+# Exclude assets and build directories
+assets/
+build/
+
+# Launcher files
+launcher.py
+launcher.exe 
