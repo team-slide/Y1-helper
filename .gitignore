@@ -1,8 +1,12 @@
 # Exclude assets and build directories
 assets/
 build/
-old/
+
+# Exclude old version archives
+.old/
 
 # Launcher files
 launcher.py
-launcher.exe 
+launcher.exe
+branch.txt
+version.txt

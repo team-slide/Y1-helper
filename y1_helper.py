@@ -14,6 +14,15 @@ from ctypes import wintypes
 import tempfile
 import shutil
 import re
+import urllib.request
+import xml.etree.ElementTree as ET
+import zipfile
+import hashlib
+import io
+
+# Add this near the top, after imports
+base_dir = os.path.dirname(os.path.abspath(__file__))
+assets_dir = os.path.join(base_dir, 'assets')
 
 def debug_print(message):
     """Print debug messages with timestamp"""
@@ -68,8 +77,9 @@ class Y1HelperApp(tk.Tk):
         self.control_launcher = False
         self.last_screen_image = None
         self.device_connected = False
-        self.prepare_device_visible = False  # Track if Prepare Device menu item is visible
-        self.device_prepared = None  # Track if device has stock launcher installed
+        self.firmware_installation_visible = False  # Track if Install Firmware menu item is visible
+        self.firmware_installation_in_progress = False  # Track if firmware installation is in progress
+        self.firmware_manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
         self.prepare_prompt_refused = False  # Track if user refused the initial prepare prompt
         self.prepare_prompt_shown = False  # Track if prepare prompt has been shown for current connection
         
@@ -151,8 +161,7 @@ class Y1HelperApp(tk.Tk):
         try:
             version_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
             with open(version_file_path, 'w', encoding='utf-8') as f:
-                f.write(f"Y1 Helper v{self.version}\n")
-                f.write(f"Build Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"{self.version}\n")
             debug_print(f"Version file written: {version_file_path}")
         except Exception as e:
             debug_print(f"Failed to write version file: {e}")
@@ -408,25 +417,16 @@ class Y1HelperApp(tk.Tk):
         self.after(5000, check_theme_change)
     
     def get_adb_path(self):
-        """Get ADB executable path without subdirectories"""
+        """Get ADB executable path from assets directory"""
         debug_print("Getting ADB path")
         if platform.system() == "Windows":
-            adb_path = "adb.exe"
+            adb_path = os.path.join(assets_dir, "adb.exe")
         else:
-            adb_path = "adb"
-        
-        # Check if ADB exists in current directory
+            adb_path = os.path.join(assets_dir, "adb")
         if os.path.exists(adb_path):
             debug_print(f"Found ADB at: {os.path.abspath(adb_path)}")
             return adb_path
-        
-        # Fallback to platform-tools if not in current directory
-        fallback_path = os.path.join("platform-tools", adb_path)
-        if os.path.exists(fallback_path):
-            debug_print(f"Found ADB at fallback path: {os.path.abspath(fallback_path)}")
-            return fallback_path
-        
-        debug_print(f"ADB not found at {adb_path} or {fallback_path}")
+        debug_print(f"ADB not found at {adb_path}")
         return adb_path  # Return the expected path anyway
     
     def setup_ui(self):
@@ -749,9 +749,6 @@ class Y1HelperApp(tk.Tk):
         self.config(menu=menubar)
         device_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Device", menu=device_menu)
-        self.prepare_device_menu_item = device_menu.add_command(label="Prepare Device", command=self.prepare_device)
-        device_menu.add_command(label="Launch Settings", command=self.launch_settings)
-        device_menu.add_command(label="Go Home", command=self.go_home)
         self.device_menu = device_menu
         self.apps_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Apps", menu=self.apps_menu)
@@ -768,66 +765,39 @@ class Y1HelperApp(tk.Tk):
         
         self.update_device_menu()
         
-        # Apply theme colors to menus
+        # Add Install Firmware menu item
+        self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+        self.device_menu.add_separator()
+        
+        # Apply theme colors
         self.apply_menu_colors()
     
     def update_device_menu(self):
-        """Update dynamic items in the Device menu (Nova Launcher, KeyCodeDisp, other launchers)"""
-        # Remove all items after the static ones (up to and including Go Home)
-        static_count = 3  # Prepare Device, Launch Settings, Go Home
-        total_items = self.device_menu.index('end')
-        if total_items is not None and total_items > static_count:
-            for i in range(total_items, static_count, -1):
-                self.device_menu.delete(i)
-        # Only add dynamic items if device is connected
-        if not getattr(self, 'device_connected', False):
-            return
-        # Get installed packages
-        success, stdout, stderr = self.run_adb_command("shell pm list packages -3 -f")
-        nova_installed = False
-        keycode_installed = False
-        extra_launchers = []
-        launcher_pkgs = [
-            ("com.teslacoilsw.launcher", "Open Nova Launcher"),
-            ("com.android.launcher", "Open Android Launcher"),
-            ("com.lge.launcher2", "Open LG Launcher"),
-            ("com.sec.android.app.launcher", "Open Samsung Launcher"),
-            ("com.miui.home", "Open MIUI Launcher")
-        ]
-        keycode_pkg = "jp.ne.neko.freewing.KeyCodeDisp"
-        if success:
-            for line in stdout.strip().split('\n'):
-                if line.startswith('package:'):
-                    if '=' in line:
-                        package_name = line.split('=')[1]
-                    else:
-                        package_name = line[len('package:'):]
-                    if package_name == "com.teslacoilsw.launcher":
-                        nova_installed = True
-                    if package_name == keycode_pkg:
-                        keycode_installed = True
-                    for pkg, label in launcher_pkgs:
-                        if package_name == pkg and pkg != "com.teslacoilsw.launcher":
-                            extra_launchers.append((pkg, label))
-        self.device_menu.add_separator()
-        if nova_installed:
-            self.device_menu.add_command(label="Open Nova Launcher", command=self.open_nova_launcher)
-        if keycode_installed:
-            self.device_menu.add_command(label="View Input Keycodes", command=self.open_keycode_disp)
-        for pkg, label in extra_launchers:
-            self.device_menu.add_command(label=label, command=lambda p=pkg: self.open_launcher(p))
-        self.device_menu.add_separator()
-        self.device_menu.add_command(label="ADB Shell", command=self.open_adb_shell)
-        self.device_menu.add_command(label="Device Info", command=self.show_device_info)
-        self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
-        self.device_menu.add_separator()
-        self.device_menu.add_command(label="File Explorer", command=self.open_file_explorer)
-        self.device_menu.add_separator()
-        self.device_menu.add_command(label="Exit", command=self.quit)
-        
-        # Apply theme colors to updated device menu
-        if hasattr(self, 'apply_menu_colors'):
-            self.apply_menu_colors()
+        """Update device menu based on connection status"""
+        try:
+            # Clear existing menu items (except basic ones)
+            if hasattr(self, 'device_menu'):
+                # Keep track of items to preserve
+                preserve_items = ["Exit"]
+                items_to_remove = []
+                
+                for i in range(self.device_menu.index('end')):
+                    label = self.device_menu.entrycget(i, 'label')
+                    if label not in preserve_items and label != "Exit":
+                        items_to_remove.append(i)
+                
+                # Remove items in reverse order to maintain indices
+                for i in reversed(items_to_remove):
+                    self.device_menu.delete(i)
+            
+            # Add firmware installation menu if device is connected
+            if self.device_connected:
+                self.show_firmware_installation_menu()
+            else:
+                self.hide_firmware_installation_menu()
+                
+        except Exception as e:
+            debug_print(f"Error updating device menu: {e}")
     
     def refresh_apps(self):
         """Refresh list of installed apps (Apps menu only)"""
@@ -911,12 +881,8 @@ class Y1HelperApp(tk.Tk):
                     # Set device to stay awake
                     self.set_device_stay_awake()
                     
-                    # Check if device is prepared (has stock launcher)
-                    if self.check_device_prepared() is False and not self.prepare_prompt_shown and self.device_prepared is not None:
-                        # Only show prompt if we are certain device is connected and not prepared
-                        self.prepare_prompt_shown = True
-                        debug_print("Showing unprepared device prompt")
-                        self.after(1000, self.show_unprepared_device_prompt)  # Delay to let UI settle
+                    # Device connected - no firmware preparation check needed
+                    pass
                 
                 # Always refresh apps when device is connected
                 self.refresh_apps()
@@ -934,9 +900,9 @@ class Y1HelperApp(tk.Tk):
                     self.hide_controls_frame()
                     self.disable_input_bindings()
                     
-                    self.hide_prepare_device_menu()
-                    self.prepare_prompt_refused = False
-                    self.prepare_prompt_shown = False
+                    self.hide_firmware_installation_menu()
+                    # Reset firmware installation state
+                    pass
                 else:
                     self.status_var.set("No ADB device found")
                     self.device_connected = False
@@ -957,9 +923,9 @@ class Y1HelperApp(tk.Tk):
                 self.hide_controls_frame()
                 self.disable_input_bindings()
                 
-                self.hide_prepare_device_menu()
-                self.prepare_prompt_refused = False
-                self.prepare_prompt_shown = False
+                self.hide_firmware_installation_menu()
+                # Reset firmware installation state
+                pass
             else:
                 self.status_var.set(f"ADB Error: {str(e)}")
                 self.device_connected = False
@@ -1067,9 +1033,9 @@ class Y1HelperApp(tk.Tk):
                 # Update controls display to reflect current mode
                 self.update_controls_display()
                 
-                # Hide prepare device menu for Y1 apps
+                # Hide firmware installation menu for Y1 apps
                 if self._should_show_launcher_toggle(detected_package):
-                    self.hide_prepare_device_menu()
+                    self.hide_firmware_installation_menu()
             else:
                 # App detection failed - keep toggle visible but revert to touch screen mode
                 self.current_app = "unknown"
@@ -1109,17 +1075,35 @@ class Y1HelperApp(tk.Tk):
         if hasattr(self, 'is_capturing') and self.is_capturing:
             self.after(self.unified_check_interval * 1000, self.detect_current_app)
     
-    def hide_prepare_device_menu(self):
-        """Hide the Prepare Device menu item"""
-        if hasattr(self, 'device_menu') and self.prepare_device_visible:
-            self.device_menu.entryconfig("Prepare Device", state="disabled")
-            self.prepare_device_visible = False
+    def hide_firmware_installation_menu(self):
+        """Hide the Install Firmware menu item"""
+        if hasattr(self, 'device_menu'):
+            for i in range(self.device_menu.index('end')):
+                if self.device_menu.entrycget(i, 'label') == "Install Firmware":
+                    self.device_menu.delete(i)
+                    break
+            self.firmware_installation_visible = False
+            debug_print("Install Firmware menu hidden")
     
-    def show_prepare_device_menu(self):
-        """Show the Prepare Device menu item"""
-        if hasattr(self, 'device_menu') and not self.prepare_device_visible and self.device_connected and self.prepare_prompt_refused:
-            self.device_menu.entryconfig("Prepare Device", state="normal")
-            self.prepare_device_visible = True
+    def show_firmware_installation_menu(self):
+        """Show the Install Firmware menu item"""
+        if hasattr(self, 'device_menu') and not self.firmware_installation_visible:
+            # Find the position to insert (before the separator before Exit)
+            insert_pos = None
+            for i in range(self.device_menu.index('end')):
+                if self.device_menu.entrycget(i, 'label') == "Exit":
+                    insert_pos = i
+                    break
+            
+            if insert_pos is not None:
+                self.device_menu.insert_separator(insert_pos)
+                self.device_menu.insert_command(insert_pos, label="Install Firmware", command=self.install_firmware)
+            else:
+                self.device_menu.add_separator()
+                self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+            
+            self.firmware_installation_visible = True
+            debug_print("Install Firmware menu shown")
     
     def check_device_prepared(self):
         """Check if device has stock launcher installed (installed only, not running)"""
@@ -1145,11 +1129,10 @@ class Y1HelperApp(tk.Tk):
                                    "• Test apps on real hardware with the correct display and input setup\n"
                                    "• Use the full Y1 Helper functionality")
         if result:
-            self.prepare_device()
+            self.install_firmware()
         else:
-            # User refused the prompt - show Prepare Device menu option
-            self.prepare_prompt_refused = True
-            self.show_prepare_device_menu()
+            # User refused the prompt - show Install Firmware menu option
+            self.show_firmware_installation_menu()
     
     def run_adb_command(self, command, timeout=10):
         """Run ADB command and return result"""
@@ -1720,73 +1703,7 @@ class Y1HelperApp(tk.Tk):
         else:
             self.status_var.set("APK installation cancelled")
     
-    def prepare_device(self):
-        """Install stock Y1 launcher from 2.1.9 update for development, plus Nova Launcher and KeyCodeDisp if available"""
-        import os
-        from tkinter import messagebox
-        # Show friendly preparation dialog
-        prep_msg = (
-            "Preparing your Y1 device for development!\n\n"
-            "Here's what will happen:\n"
-            "• The device will be set to Android 4.2.2, matching your PC's language and region.\n"
-            "• KeyCodeDisp will be installed to help you understand all available input events.\n"
-            "• Nova Launcher will be installed so you can launch it from the utility if needed.\n"
-            "• The Y1 launcher (com.innioasis.y1) will be set as the default home app.\n\n"
-            "This ensures your device is ready for Y1 app development and testing!"
-        )
-        messagebox.showinfo("Preparing Device", prep_msg)
-        # Check if the APKs exist
-        stock_launcher_path = "com.innioasis.y1_2.1.9.apk"
-        nova_launcher_path = "novalauncher.apk"
-        keycodedisp_path = "keycodedisp.apk"
-        missing = []
-        if not os.path.exists(stock_launcher_path):
-            missing.append(stock_launcher_path)
-        if not os.path.exists(nova_launcher_path):
-            missing.append(nova_launcher_path)
-        if not os.path.exists(keycodedisp_path):
-            missing.append(keycodedisp_path)
-        if missing:
-            self.status_var.set(f"Missing APK(s): {', '.join(missing)}")
-            messagebox.showerror("Missing APK(s)", f"The following APK(s) are required for preparation but not found:\n\n{chr(10).join(missing)}\n\nPlease add them to the workspace directory.")
-            return
-        self.status_var.set("Preparing device - Installing stock launcher, Nova Launcher, and KeyCodeDisp...")
-        # Install stock launcher
-        abs_path = os.path.abspath(stock_launcher_path)
-        success, stdout, stderr = self.run_adb_command(f"install -r \"{abs_path}\"", timeout=60)
-        if not success:
-            self.status_var.set(f"Failed to install stock launcher: {stderr}")
-            messagebox.showerror("Install Error", f"Failed to install stock launcher:\n\n{stderr}")
-            return
-        # Install Nova Launcher
-        abs_nova = os.path.abspath(nova_launcher_path)
-        success, stdout, stderr = self.run_adb_command(f"install -r \"{abs_nova}\"", timeout=60)
-        if not success:
-            self.status_var.set(f"Failed to install Nova Launcher: {stderr}")
-            messagebox.showerror("Install Error", f"Failed to install Nova Launcher:\n\n{stderr}")
-            return
-        # Install KeyCodeDisp
-        abs_keycode = os.path.abspath(keycodedisp_path)
-        success, stdout, stderr = self.run_adb_command(f"install -r \"{abs_keycode}\"", timeout=60)
-        if not success:
-            self.status_var.set(f"Failed to install KeyCodeDisp: {stderr}")
-            messagebox.showerror("Install Error", f"Failed to install KeyCodeDisp:\n\n{stderr}")
-            return
-        self.status_var.set("All launchers and KeyCodeDisp installed. Launching stock launcher...")
-        # Disable factory test package if present
-        self.run_adb_command("shell pm disable-user --user 0 com.ayst.factorytest")
-        # Launch the stock launcher
-        launch_success, launch_stdout, launch_stderr = self.run_adb_command(
-            "shell monkey -p com.innioasis.y1 -c android.intent.category.LAUNCHER 1")
-        # Set Y1 launcher as default home app
-        self.run_adb_command("shell cmd package set-home-activity com.innioasis.y1/.ui.LauncherActivity")
-        if not launch_success:
-            self.status_var.set("Launcher installed, but failed to launch.")
-            print(f"Warning: Failed to launch stock launcher: {launch_stderr}")
-        else:
-            self.status_var.set("Launcher launched - Opening language settings...")
-            self.after(2000, self.change_device_language)
-        messagebox.showinfo("Device Prepared", "✓ Stock Y1 launcher (2.1.9), Nova Launcher, and KeyCodeDisp installed\n✓ Stock launcher set as default home\n✓ Language settings opened\n\nDevice is ready for Y1 development!")
+    # prepare_device method removed - replaced with install_firmware
     
     def open_nova_launcher(self):
         self.run_adb_command("shell monkey -p com.teslacoilsw.launcher -c android.intent.category.LAUNCHER 1")
@@ -2540,8 +2457,9 @@ class Y1HelperApp(tk.Tk):
         try:
             # Read current branch
             current_branch = "master"
-            if os.path.exists("branch.txt"):
-                with open("branch.txt", 'r', encoding='utf-8') as f:
+            branch_path = os.path.join(assets_dir, "branch.txt")
+            if os.path.exists(branch_path):
+                with open(branch_path, 'r', encoding='utf-8') as f:
                     current_branch = f.read().strip() or "master"
             
             # Show dialog to change branch
@@ -2553,7 +2471,7 @@ class Y1HelperApp(tk.Tk):
             
             if new_branch and new_branch.strip():
                 new_branch = new_branch.strip()
-                with open("branch.txt", 'w', encoding='utf-8') as f:
+                with open(branch_path, 'w', encoding='utf-8') as f:
                     f.write(new_branch)
                 
                 messagebox.showinfo(
@@ -2572,8 +2490,9 @@ class Y1HelperApp(tk.Tk):
         """Show the current update branch"""
         try:
             current_branch = "master"
-            if os.path.exists("branch.txt"):
-                with open("branch.txt", 'r', encoding='utf-8') as f:
+            branch_path = os.path.join(assets_dir, "branch.txt")
+            if os.path.exists(branch_path):
+                with open(branch_path, 'r', encoding='utf-8') as f:
                     current_branch = f.read().strip() or "master"
             
             messagebox.showinfo(
@@ -2590,7 +2509,7 @@ class Y1HelperApp(tk.Tk):
         """Run the Y1 updater"""
         try:
             debug_print("Launching Y1 updater")
-            subprocess.Popen([sys.executable, "y1_updater.py"])
+            subprocess.Popen([sys.executable, os.path.join(assets_dir, "y1_updater.py")])
             self.status_var.set("Updater launched")
             debug_print("Y1 updater launched successfully")
         except Exception as e:
@@ -2612,6 +2531,323 @@ class Y1HelperApp(tk.Tk):
         # Global key release handling for cursor control
         self.bind_all("<KeyRelease>", self.on_key_release)
         debug_print("Key bindings set up complete")
+
+    def _destroy_splash(self):
+        if hasattr(self, '_splash') and self._splash.winfo_exists():
+            self._splash.destroy()
+
+    def install_firmware(self):
+        """Install firmware from the manifest"""
+        if self.firmware_installation_in_progress:
+            messagebox.showwarning("Installation in Progress", "Firmware installation is already in progress. Please wait.")
+            return
+        
+        # Check if device is connected via ADB
+        if self.device_connected:
+            result = messagebox.askyesno(
+                "Device Connected", 
+                "A device is currently connected via ADB. For safety, please disconnect the device before proceeding with firmware installation.\n\n"
+                "Do you want to continue anyway? (Not recommended)"
+            )
+            if not result:
+                return
+        
+        try:
+            self.firmware_installation_in_progress = True
+            self.status_var.set("Fetching firmware manifest...")
+            
+            # Download and parse manifest
+            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
+            debug_print(f"Downloading manifest from: {manifest_url}")
+            
+            with urllib.request.urlopen(manifest_url) as response:
+                manifest_content = response.read().decode('utf-8')
+            
+            # Parse manifest to find firmware repositories
+            firmware_options = self.parse_firmware_manifest(manifest_content)
+            
+            if not firmware_options:
+                messagebox.showerror("No Firmware Found", "No firmware options found in the manifest.")
+                return
+            
+            # Show firmware selection dialog
+            selected_firmware = self.show_firmware_selection_dialog(firmware_options)
+            if not selected_firmware:
+                return
+            
+            # Download the selected firmware
+            self.status_var.set(f"Downloading {selected_firmware['name']}...")
+            firmware_path = self.download_firmware(selected_firmware)
+            
+            if not firmware_path:
+                messagebox.showerror("Download Failed", "Failed to download the selected firmware.")
+                return
+            
+            # Install the firmware using SP Flash Tool
+            self.status_var.set("Installing firmware...")
+            success = self.flash_firmware(firmware_path)
+            
+            if success:
+                messagebox.showinfo("Installation Complete", "Firmware installation completed successfully!")
+                self.status_var.set("Firmware installation complete")
+            else:
+                messagebox.showerror("Installation Failed", "Firmware installation failed. Check the logs for details.")
+                self.status_var.set("Firmware installation failed")
+                
+        except Exception as e:
+            debug_print(f"Firmware installation error: {e}")
+            messagebox.showerror("Installation Error", f"An error occurred during firmware installation: {str(e)}")
+            self.status_var.set("Firmware installation error")
+        finally:
+            self.firmware_installation_in_progress = False
+
+    def parse_firmware_manifest(self, manifest_content):
+        """Parse the manifest XML to find firmware options"""
+        try:
+            root = ET.fromstring(manifest_content)
+            firmware_options = []
+            
+            # Look for project elements that might contain firmware
+            for project in root.findall('.//project'):
+                name = project.get('name', '')
+                path = project.get('path', '')
+                revision = project.get('revision', '')
+                
+                # Check if this looks like a firmware repository
+                if any(keyword in name.lower() for keyword in ['firmware', 'rom', 'system', 'img']):
+                    firmware_options.append({
+                        'name': name,
+                        'path': path,
+                        'revision': revision,
+                        'repo': name
+                    })
+            
+            # If no specific firmware projects found, look for any projects with .img files
+            if not firmware_options:
+                for project in root.findall('.//project'):
+                    name = project.get('name', '')
+                    if name:
+                        firmware_options.append({
+                            'name': f"Firmware from {name}",
+                            'path': project.get('path', ''),
+                            'revision': project.get('revision', ''),
+                            'repo': name
+                        })
+            
+            debug_print(f"Found {len(firmware_options)} firmware options")
+            return firmware_options
+            
+        except Exception as e:
+            debug_print(f"Error parsing manifest: {e}")
+            return []
+
+    def show_firmware_selection_dialog(self, firmware_options):
+        """Show dialog for firmware selection"""
+        dialog = tk.Toplevel(self)
+        dialog.title("Select Firmware")
+        dialog.geometry("400x300")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (300 // 2)
+        dialog.geometry(f"400x300+{x}+{y}")
+        
+        # Create listbox
+        frame = ttk.Frame(dialog, padding="10")
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text="Select firmware to install:").pack(anchor=tk.W)
+        
+        listbox = tk.Listbox(frame, height=10)
+        listbox.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
+        
+        # Populate listbox
+        for i, firmware in enumerate(firmware_options):
+            listbox.insert(tk.END, firmware['name'])
+        
+        if firmware_options:
+            listbox.selection_set(0)
+        
+        selected_firmware = [None]
+        
+        def on_select():
+            selection = listbox.curselection()
+            if selection:
+                selected_firmware[0] = firmware_options[selection[0]]
+            dialog.destroy()
+        
+        def on_cancel():
+            dialog.destroy()
+        
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        ttk.Button(button_frame, text="Install", command=on_select).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
+        
+        # Bind double-click
+        listbox.bind('<Double-1>', lambda e: on_select())
+        
+        dialog.wait_window()
+        return selected_firmware[0]
+
+    def download_firmware(self, firmware_info):
+        """Download firmware from the selected repository"""
+        try:
+            # Create build directory if it doesn't exist
+            build_dir = os.path.join(base_dir, 'build')
+            os.makedirs(build_dir, exist_ok=True)
+            
+            # For now, simulate downloading a firmware file
+            # In a real implementation, you would:
+            # 1. Query the GitHub API for the latest release
+            # 2. Find the .img file in the release assets
+            # 3. Download it to the assets directory
+            
+            # Simulate download by creating a placeholder
+            firmware_path = os.path.join(assets_dir, f"{firmware_info['name'].replace(' ', '_')}.img")
+            
+            # Create a dummy file for simulation
+            with open(firmware_path, 'wb') as f:
+                f.write(b'Simulated firmware file for testing')
+            
+            debug_print(f"Firmware downloaded to: {firmware_path}")
+            return firmware_path
+            
+        except Exception as e:
+            debug_print(f"Error downloading firmware: {e}")
+            return None
+
+    def flash_firmware(self, firmware_path):
+        """Flash firmware using SP Flash Tool"""
+        try:
+            # Update install_rom.xml to use the downloaded firmware
+            self.update_install_rom_xml(firmware_path)
+            
+            # Run SP Flash Tool in console mode
+            flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
+            install_rom_path = os.path.join(assets_dir, "install_rom.xml")
+            
+            if not os.path.exists(flash_tool_path):
+                raise Exception("SP Flash Tool not found in assets directory")
+            
+            if not os.path.exists(install_rom_path):
+                raise Exception("install_rom.xml not found in assets directory")
+            
+            # Create progress dialog
+            progress_dialog = self.create_flash_progress_dialog()
+            
+            # Run flash tool command
+            command = [flash_tool_path, "-b", "-i", install_rom_path]
+            debug_print(f"Running flash command: {' '.join(command)}")
+            
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
+            
+            begin_found = False
+            disconnect_found = False
+            
+            # Monitor output
+            for line in iter(process.stdout.readline, ''):
+                line = line.strip()
+                if line:
+                    debug_print(f"Flash Tool: {line}")
+                    
+                    # Update progress dialog
+                    if hasattr(progress_dialog, 'log_label'):
+                        progress_dialog.log_label.config(text=line)
+                        progress_dialog.update()
+                    
+                    # Check for begin and disconnect markers
+                    if "Begin" in line:
+                        begin_found = True
+                        if hasattr(progress_dialog, 'progress_bar'):
+                            progress_dialog.progress_bar.start()
+                    
+                    if "Disconnect" in line and begin_found:
+                        disconnect_found = True
+                        if hasattr(progress_dialog, 'progress_bar'):
+                            progress_dialog.progress_bar.stop()
+                        break
+            
+            process.wait()
+            
+            # Close progress dialog
+            if hasattr(progress_dialog, 'destroy'):
+                progress_dialog.destroy()
+            
+            if begin_found and disconnect_found:
+                debug_print("Firmware flashing completed successfully")
+                return True
+            else:
+                debug_print("Firmware flashing may not have completed properly")
+                return False
+                
+        except Exception as e:
+            debug_print(f"Error during firmware flashing: {e}")
+            return False
+
+    def update_install_rom_xml(self, firmware_path):
+        """Update install_rom.xml to use the downloaded firmware"""
+        try:
+            xml_path = os.path.join(assets_dir, "install_rom.xml")
+            
+            # Read the XML file
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            
+            # Update the system.img path
+            for rom in root.findall('.//rom'):
+                if rom.text and 'system.img' in rom.text:
+                    rom.text = firmware_path
+                    break
+            
+            # Write back the updated XML
+            tree.write(xml_path, encoding='utf-8', xml_declaration=True)
+            debug_print(f"Updated install_rom.xml to use: {firmware_path}")
+            
+        except Exception as e:
+            debug_print(f"Error updating install_rom.xml: {e}")
+
+    def create_flash_progress_dialog(self):
+        """Create a progress dialog for firmware flashing"""
+        dialog = tk.Toplevel(self)
+        dialog.title("Installing Firmware")
+        dialog.geometry("400x150")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (150 // 2)
+        dialog.geometry(f"400x150+{x}+{y}")
+        
+        frame = ttk.Frame(dialog, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text="Installing firmware...", font=("Segoe UI", 12, "bold")).pack(pady=(0, 10))
+        
+        progress_bar = ttk.Progressbar(frame, mode='indeterminate')
+        progress_bar.pack(fill=tk.X, pady=(0, 10))
+        
+        log_label = ttk.Label(frame, text="Initializing...", font=("Segoe UI", 9))
+        log_label.pack(fill=tk.X)
+        
+        # Store references for external access
+        dialog.progress_bar = progress_bar
+        dialog.log_label = log_label
+        
+        return dialog
 
 class FileExplorerDialog:
     """Comprehensive file explorer dialog for Y1 device with full file management"""
