@@ -27,8 +27,10 @@ class Y1HelperApp(tk.Tk):
         debug_print("Initializing Y1HelperApp")
         
         # Version information
-        # Version information
         self.version = "0.5.0"
+        
+        # Write version.txt file
+        self.write_version_file()
         
         self.title(f"Y1 Helper v{self.version}")
         self.geometry("452x661")  # Increased by 32px width and 32px height
@@ -143,6 +145,17 @@ class Y1HelperApp(tk.Tk):
         # Start screen capture immediately
         self.start_screen_capture()
         debug_print("Y1HelperApp initialization complete")
+    
+    def write_version_file(self):
+        """Write version information to version.txt file"""
+        try:
+            version_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+            with open(version_file_path, 'w', encoding='utf-8') as f:
+                f.write(f"Y1 Helper v{self.version}\n")
+                f.write(f"Build Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            debug_print(f"Version file written: {version_file_path}")
+        except Exception as e:
+            debug_print(f"Failed to write version file: {e}")
     
     def setup_windows_11_theme(self):
         """Setup Windows 11 compatible theme with light/dark mode detection"""

@@ -3,7 +3,9 @@ build/
 dist/
 python/
 y1_updater.py
-*.exe
+branch.txt
+version.txt
+config.ini
 *.spec
 *.msi
 *.nsi
@@ -41,11 +43,5 @@ desktop.ini
 *.temp
 *.log
 
-# NSIS
-*.nsi
-*.nsh
-*.exe
-*.msi
-
-# Y1 Helper specific
-Y1HelperUpdater.exe 
+# Executables (but allow specific ones needed for updates)
+*.exe 
