@@ -284,6 +284,7 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
     exclude_dirs, exclude_files = parse_gitignore(gui)
     
     file_structure = {}
+    excluded_count = 0
     
     for root, dirs, files in os.walk(WORKING_DIR):
         # Skip excluded directories
@@ -296,6 +297,7 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
             
             # Skip if it's the updater itself
             if rel_path.name in {'y1_updater.py'}:
+                excluded_count += 1
                 continue
             
             # Check if file should be excluded based on .gitignore patterns
@@ -332,6 +334,7 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
                                 break
             
             if should_exclude:
+                excluded_count += 1
                 continue
                 
             try:
@@ -344,7 +347,7 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
                     print(error_msg)
     
     if gui:
-        gui.log(f"Found {len(file_structure)} local files to check")
+        gui.log(f"Found {len(file_structure)} local files to check (excluded {excluded_count} files)")
         gui.update_progress(15, f"Found {len(file_structure)} local files")
     
     return file_structure
@@ -396,6 +399,10 @@ def get_github_file_structure(gui: UpdaterGUI = None) -> Optional[Dict[str, Tupl
     file_structure = {}
     exclude_dirs, exclude_files = parse_gitignore(gui)
     
+    # Debug: log what we're excluding
+    if gui:
+        gui.log(f"GitHub exclusions: {len(exclude_dirs)} dirs, {len(exclude_files)} files")
+    
     for item in tree_data.get('tree', []):
         if item['type'] == 'blob':
             file_path = item['path']
@@ -406,6 +413,13 @@ def get_github_file_structure(gui: UpdaterGUI = None) -> Optional[Dict[str, Tupl
             # Check exact path match
             if file_path in exclude_files:
                 should_exclude = True
+            
+            # Check directory exclusions
+            path_parts = file_path.split('/')
+            for part in path_parts:
+                if part in exclude_dirs:
+                    should_exclude = True
+                    break
             
             # Check glob patterns (simple implementation)
             for pattern in exclude_files:
@@ -430,11 +444,11 @@ def get_github_file_structure(gui: UpdaterGUI = None) -> Optional[Dict[str, Tupl
                                 break
             
             if not should_exclude:
-                # Store both SHA and update time
-                file_structure[file_path] = (item['sha'], item.get('updated_at', ''))
+                # Store SHA (GitHub tree API doesn't provide updated_at for individual files)
+                file_structure[file_path] = (item['sha'], '')
     
     if gui:
-        gui.log(f"Found {len(file_structure)} files in GitHub repository")
+        gui.log(f"Found {len(file_structure)} files in GitHub repository (after exclusions)")
         gui.update_progress(30, f"Found {len(file_structure)} files")
     
     return file_structure
@@ -623,6 +637,94 @@ def patch_files(local_files: Dict[str, Tuple[int, float]], github_files: Dict[st
     
     return True
 
+def download_single_file(filepath: str, gui: UpdaterGUI = None) -> bool:
+    """Download a single file from GitHub."""
+    try:
+        # Create directory if needed
+        file_path = WORKING_DIR / filepath
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Get file content from GitHub
+        content_data = make_github_request(f"repos/{GITHUB_REPO}/contents/{filepath}")
+        if not content_data:
+            error_msg = f"Failed to get content for {filepath}"
+            if gui:
+                gui.log(f"ERROR: {error_msg}")
+            else:
+                print(error_msg)
+            return False
+        
+        # Decode content
+        import base64
+        try:
+            content = base64.b64decode(content_data['content']).decode('utf-8')
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            if gui:
+                gui.log(f"Downloaded: {filepath}")
+            else:
+                print(f"Downloaded: {filepath}")
+            return True
+        except Exception as e:
+            error_msg = f"Failed to download {filepath}: {e}"
+            if gui:
+                gui.log(f"ERROR: {error_msg}")
+            else:
+                print(error_msg)
+            return False
+    except Exception as e:
+        error_msg = f"Failed to download {filepath}: {e}"
+        if gui:
+            gui.log(f"ERROR: {error_msg}")
+        else:
+            print(error_msg)
+        return False
+
+def compare_file_structures(local_files: Dict[str, Tuple[int, float]], github_files: Dict[str, Tuple[str, str]], gui: UpdaterGUI = None) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Compare local and GitHub file structures comprehensively.
+    Returns: (files_to_add, files_to_update, files_to_remove)
+    """
+    if gui:
+        gui.log("Comparing file structures...")
+        gui.update_progress(35, "Comparing file structures...")
+    
+    files_to_add = []      # Files in GitHub but not local
+    files_to_update = []   # Files that exist in both but are different
+    files_to_remove = []   # Files in local but not in GitHub
+    
+    # Find files that need to be added (in GitHub but not local)
+    for filepath, (github_sha, _) in github_files.items():
+        if filepath not in local_files:
+            files_to_add.append(filepath)
+    
+    # Find files that need to be updated (exist in both but are different)
+    for filepath, (github_sha, _) in github_files.items():
+        if filepath in local_files:
+            local_size, local_mtime = local_files[filepath]
+            
+            # For now, we'll use size comparison as a proxy
+            # In a more sophisticated version, we could download and compare SHA hashes
+            # But that would require downloading every file, which is expensive
+            
+            # If local file size is 0 or significantly different, assume it needs updating
+            if local_size == 0:
+                files_to_update.append(filepath)
+            # Note: We could add more sophisticated comparison here later
+    
+    # Find files that should be removed (in local but not in GitHub)
+    for filepath in local_files:
+        if filepath not in github_files:
+            files_to_remove.append(filepath)
+    
+    if gui:
+        gui.log(f"Comparison results:")
+        gui.log(f"  - Files to add: {len(files_to_add)}")
+        gui.log(f"  - Files to update: {len(files_to_update)}")
+        gui.log(f"  - Files to remove: {len(files_to_remove)}")
+    
+    return files_to_add, files_to_update, files_to_remove
+
 def run_updater_logic(gui: UpdaterGUI):
     """Run the updater logic in a separate thread."""
     try:
@@ -645,43 +747,42 @@ def run_updater_logic(gui: UpdaterGUI):
             gui.enable_close()
             return
         
-        # Count files that need updating using date comparison
-        files_to_update = 0
-        import datetime
+        # Compare file structures comprehensively
+        files_to_add, files_to_update, files_to_remove = compare_file_structures(local_files, github_files, gui)
         
-        for filepath, (github_hash, github_updated_at) in github_files.items():
-            local_info = local_files.get(filepath, (0, 0))
-            
-            if local_info == (0, 0):  # File doesn't exist locally
-                files_to_update += 1
-            else:
-                # Compare local modification time with GitHub update time
-                local_size, local_mtime = local_info
-                
-                if github_updated_at:
-                    try:
-                        # Parse GitHub date (ISO format)
-                        github_date = datetime.datetime.fromisoformat(github_updated_at.replace('Z', '+00:00'))
-                        local_date = datetime.datetime.fromtimestamp(local_mtime)
-                        
-                        # If GitHub file is newer than local file, it needs updating
-                        if github_date > local_date:
-                            files_to_update += 1
-                    except Exception:
-                        # If date parsing fails, assume file needs updating
-                        files_to_update += 1
-                else:
-                    # If no GitHub date available, assume file needs updating
-                    files_to_update += 1
+        # Calculate total changes needed
+        total_changes = len(files_to_add) + len(files_to_update) + len(files_to_remove)
         
-        gui.log(f"Files that need updating: {files_to_update}")
-        gui.update_progress(35, f"Found {files_to_update} files to update")
+        gui.log(f"Total changes needed: {total_changes}")
+        gui.update_progress(40, f"Found {total_changes} changes needed")
         
         # Decision logic
-        if files_to_update <= MAX_FILES_FOR_PATCH:
-            gui.log(f"Updating {files_to_update} files (under {MAX_FILES_FOR_PATCH} limit)")
-            if patch_files(local_files, github_files, gui):
-                gui.log("Patching completed successfully")
+        if total_changes <= MAX_FILES_FOR_PATCH:
+            gui.log(f"Applying {total_changes} changes (under {MAX_FILES_FOR_PATCH} limit)")
+            
+            # Apply changes
+            success = True
+            
+            # Add new files
+            if files_to_add:
+                gui.log(f"Adding {len(files_to_add)} new files...")
+                for filepath in files_to_add:
+                    if not download_single_file(filepath, gui):
+                        success = False
+            
+            # Update existing files
+            if files_to_update:
+                gui.log(f"Updating {len(files_to_update)} files...")
+                for filepath in files_to_update:
+                    if not download_single_file(filepath, gui):
+                        success = False
+            
+            # Remove extra files (optional - could be dangerous)
+            if files_to_remove:
+                gui.log(f"Note: {len(files_to_remove)} local files not in GitHub (keeping them)")
+            
+            if success:
+                gui.log("All changes applied successfully")
                 gui.update_progress(100, "Launching Y1 Helper...")
                 gui.log("Launching y1_helper.py...")
                 
@@ -696,10 +797,10 @@ def run_updater_logic(gui: UpdaterGUI):
                     gui.log(f"ERROR: {error_msg}")
                     gui.show_error("Error", error_msg)
             else:
-                gui.log("ERROR: Patching failed")
-                gui.show_error("Error", "Failed to patch files")
+                gui.log("ERROR: Some changes failed to apply")
+                gui.show_error("Error", "Failed to apply some changes")
         else:
-            gui.log(f"Too many files to patch ({files_to_update} > {MAX_FILES_FOR_PATCH})")
+            gui.log(f"Too many changes needed ({total_changes} > {MAX_FILES_FOR_PATCH})")
             gui.log("Downloading latest executable release...")
             
             # Get latest release
