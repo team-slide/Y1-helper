@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple, Set
 # Configuration
 GITHUB_REPO = "team-slide/Y1-helper"
 GITHUB_API_BASE = "https://api.github.com"
-MAX_FILES_FOR_PATCH = 25
+MAX_FILES_FOR_PATCH = 10  # Patch if 10 or fewer files need updating
 WORKING_DIR = Path.cwd()
 
 def get_github_token() -> str:
@@ -283,7 +283,6 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
     exclude_dirs, exclude_files = parse_gitignore(gui)
     
     file_structure = {}
-    file_count = 0
     max_files_to_check = MAX_FILES_FOR_PATCH * 3  # Allow checking 3x the patch limit
     
     for root, dirs, files in os.walk(WORKING_DIR):
@@ -291,15 +290,6 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
         
         for file in files:
-            file_count += 1
-            
-            # Early termination if too many files
-            if file_count > max_files_to_check:
-                if gui:
-                    gui.log(f"Too many files detected ({file_count} > {max_files_to_check})")
-                    gui.log("Skipping detailed analysis - will download executable")
-                return {}
-            
             filepath = Path(root) / file
             rel_path = filepath.relative_to(WORKING_DIR)
             rel_path_str = str(rel_path).replace('\\', '/')  # Normalize to forward slashes
@@ -343,6 +333,13 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
             
             if should_exclude:
                 continue
+            
+            # Only count files after exclusions are applied
+            if len(file_structure) >= max_files_to_check:
+                if gui:
+                    gui.log(f"Too many files after exclusions ({len(file_structure)} >= {max_files_to_check})")
+                    gui.log("Skipping detailed analysis - will download executable")
+                return {}
                 
             try:
                 file_structure[str(rel_path)] = get_file_info(filepath)
