@@ -42,6 +42,7 @@ desktop.ini
 *.tmp
 *.temp
 *.log
+temp/
 
 # Executables (but allow specific ones needed for updates)
 *.exe 

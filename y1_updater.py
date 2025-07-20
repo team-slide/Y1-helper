@@ -22,8 +22,9 @@ from typing import Dict, List, Optional, Tuple, Set
 # Configuration
 GITHUB_REPO = "team-slide/Y1-helper"
 GITHUB_API_BASE = "https://api.github.com"
-MAX_FILES_FOR_PATCH = 10  # Patch if 10 or fewer files need updating
+MAX_FILES_FOR_PATCH = 50  # Increased from 10 to 50 for larger projects
 WORKING_DIR = Path.cwd()
+TEMP_DIR = WORKING_DIR / "temp"  # Add temp directory for updater and helper
 
 def get_github_token() -> str:
     """Get GitHub token from config file or environment variable."""
@@ -242,7 +243,7 @@ def get_file_hash(filepath: Path) -> str:
 
 def parse_gitignore(gui: UpdaterGUI = None) -> Tuple[Set[str], Set[str]]:
     """Parse .gitignore file to get exclude patterns."""
-    exclude_dirs = {'.git', '__pycache__', 'node_modules', '.vscode', '.idea', 'build', 'dist', 'python', 'env', 'venv', 'ENV', 'env.bak', 'venv.bak'}
+    exclude_dirs = {'.git', '__pycache__', 'node_modules', '.vscode', '.idea', 'build', 'dist', 'python', 'env', 'venv', 'ENV', 'env.bak', 'venv.bak', 'temp'}
     exclude_files = {'.gitignore', '.DS_Store', 'Thumbs.db', 'desktop.ini', 'y1_updater.py', 'branch.txt', 'version.txt', 'config.ini', 'Y1HelperUpdater.exe', 'Y1Helper-*-Setup.exe'}
     
     gitignore_path = WORKING_DIR / '.gitignore'
@@ -283,7 +284,6 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
     exclude_dirs, exclude_files = parse_gitignore(gui)
     
     file_structure = {}
-    max_files_to_check = MAX_FILES_FOR_PATCH * 3  # Allow checking 3x the patch limit
     
     for root, dirs, files in os.walk(WORKING_DIR):
         # Skip excluded directories
@@ -333,13 +333,6 @@ def get_local_file_structure(gui: UpdaterGUI = None) -> Dict[str, Tuple[int, flo
             
             if should_exclude:
                 continue
-            
-            # Only count files after exclusions are applied
-            if len(file_structure) >= max_files_to_check:
-                if gui:
-                    gui.log(f"Too many files after exclusions ({len(file_structure)} >= {max_files_to_check})")
-                    gui.log("Skipping detailed analysis - will download executable")
-                return {}
                 
             try:
                 file_structure[str(rel_path)] = get_file_info(filepath)
@@ -644,63 +637,11 @@ def run_updater_logic(gui: UpdaterGUI):
         # Get local file structure
         local_files = get_local_file_structure(gui)
         
-        # If local_files is empty, it means too many files were detected
-        if not local_files:
-            gui.log("Too many files detected in local directory")
-            gui.log("Downloading latest executable release...")
-            
-            # Get latest release
-            release_info = get_latest_release_info()
-            if not release_info:
-                gui.log("ERROR: Failed to get latest release info")
-                gui.show_error("Error", "Failed to get latest release information")
-                gui.enable_close()
-                return
-            
-            gui.log(f"Latest release: {release_info.get('tag_name', 'Unknown')}")
-            
-            if download_and_run_exe(release_info, gui):
-                gui.log("Executable launched successfully")
-                gui.update_progress(100, "Executable launched")
-                gui.show_info("Success", "Latest version downloaded and launched successfully!")
-            else:
-                gui.log("ERROR: Failed to download and launch executable")
-                gui.show_error("Error", "Failed to download and launch executable")
-            
-            gui.enable_close()
-            return
-        
         # Get GitHub file structure
         github_files = get_github_file_structure(gui)
         if not github_files:
             gui.log("ERROR: Failed to get GitHub file structure")
             gui.show_error("Error", "Failed to connect to GitHub repository")
-            gui.enable_close()
-            return
-        
-        # Quick check: if GitHub has too many files, skip to executable download
-        if len(github_files) > MAX_FILES_FOR_PATCH * 2:
-            gui.log(f"GitHub repository has too many files ({len(github_files)} > {MAX_FILES_FOR_PATCH * 2})")
-            gui.log("Skipping to executable download...")
-            
-            # Get latest release
-            release_info = get_latest_release_info()
-            if not release_info:
-                gui.log("ERROR: Failed to get latest release info")
-                gui.show_error("Error", "Failed to get latest release information")
-                gui.enable_close()
-                return
-            
-            gui.log(f"Latest release: {release_info.get('tag_name', 'Unknown')}")
-            
-            if download_and_run_exe(release_info, gui):
-                gui.log("Executable launched successfully")
-                gui.update_progress(100, "Executable launched")
-                gui.show_info("Success", "Latest version downloaded and launched successfully!")
-            else:
-                gui.log("ERROR: Failed to download and launch executable")
-                gui.show_error("Error", "Failed to download and launch executable")
-            
             gui.enable_close()
             return
         
