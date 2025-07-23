@@ -21,6 +21,9 @@ import hashlib
 import io
 import requests
 from tkinter.scrolledtext import ScrolledText
+import inspect
+import builtins
+import datetime
 
 # Add this near the top, after imports
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,9 +31,27 @@ assets_dir = os.path.join(base_dir, 'assets')
 
 def debug_print(message):
     """Print debug messages with timestamp"""
-    import datetime
     timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
     print(f"[DEBUG {timestamp}] {message}")
+
+# Patch debug_print to suppress output if flashing is active and not flashing-related
+if not hasattr(builtins, '_original_debug_print'):
+    builtins._original_debug_print = debug_print
+    def debug_print(message):
+        import inspect
+        frame = inspect.currentframe().f_back
+        self_obj = frame.f_locals.get('self', None)
+        if self_obj and hasattr(self_obj, 'is_flashing_firmware') and getattr(self_obj, 'is_flashing_firmware', False):
+            # Allow only if called from _flash_with_modal or _download_and_flash_selected_firmware
+            stack = inspect.stack()
+            allowed = any(
+                fn.function in ('_flash_with_modal', '_download_and_flash_selected_firmware')
+                for fn in stack
+            )
+            if not allowed:
+                return
+        builtins._original_debug_print(message)
+    globals()['debug_print'] = debug_print
 
 class Y1HelperApp(tk.Tk):
     def __init__(self):
@@ -137,6 +158,9 @@ class Y1HelperApp(tk.Tk):
         # Input mode persistence
         self.manual_mode_override = False  # Track if user manually changed mode
         self.last_manual_mode_change = time.time()
+        
+        # Add a flag to the class
+        self.is_flashing_firmware = False
         
         debug_print("Setting up UI components")
         # Initialize UI
@@ -1254,6 +1278,9 @@ class Y1HelperApp(tk.Tk):
             else:
                 self.status_var.set(f"ADB Error: {str(e)}")
                 self.device_connected = False
+        finally:
+            if getattr(self, 'is_flashing_firmware', False):
+                return
     
     def detect_current_app(self):
         """Detect currently running app and set launcher control accordingly"""
@@ -2984,76 +3011,85 @@ class Y1HelperApp(tk.Tk):
         return dialog, status_label, ok_button
 
     def install_firmware(self, local_file=None):
-        import threading
-        import tkinter as tk
-        firmware_path = os.path.join(assets_dir, "system.img")
+        """Unified firmware flashing: handles both manifest and local file, always uses _download_and_flash_selected_firmware for robust debug and error handling."""
+        debug_print(f"install_firmware called with local_file={local_file}")
         if local_file:
-            dialog = tk.Toplevel(self)
-            dialog.title("Firmware Flash Progress")
-            dialog.geometry("600x180")
-            dialog.transient(self)
-            dialog.grab_set()
-            dialog.resizable(False, False)
-            frame = ttk.Frame(dialog, padding="20")
-            frame.pack(fill=tk.BOTH, expand=True)
-            status_label = ttk.Label(frame, text="", font=("Segoe UI", 11), wraplength=560, justify=tk.CENTER)
-            status_label.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-            ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.DISABLED)
-            ok_button.pack(pady=(10, 5))
-            def do_copy_and_flash():
-                try:
-                    file_size = os.path.getsize(local_file)
-                    copied_size = 0
-                    chunk_count = 0
-                    with open(local_file, 'rb') as src, open(firmware_path, 'wb') as dst:
-                        while True:
-                            chunk = src.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            dst.write(chunk)
-                            copied_size += len(chunk)
-                            chunk_count += 1
-                            if chunk_count % 2 == 0 or copied_size == file_size:
-                                progress = (copied_size / file_size) * 100
-                                dialog.after(0, status_label.config, {"text": f"Copying... {progress:.1f}% ({copied_size / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)"})
-                                time.sleep(0.01)
-                    dialog.after(0, status_label.config, {"text": "Copy complete!"})
-                    # Prompt user to connect device before flashing
-                    dialog.after(0, status_label.config, {"text": "Please connect your powered-off Y1 to continue flashing"})
-                    time.sleep(1.0)
-                    self._flash_with_modal(dialog, status_label, ok_button, firmware_path)
-                except Exception as e:
-                    dialog.after(0, status_label.config, {"text": f"Error: {e}"})
-                    dialog.after(0, ok_button.config, {"state": "normal"})
-            threading.Thread(target=do_copy_and_flash, daemon=True).start()
-            dialog.wait_window()
+            # Treat local file as a firmware_info dict with a 'url' key
+            firmware_info = {'url': local_file}
+            self._download_and_flash_selected_firmware(firmware_info)
         else:
             manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
             debug_print(f"Downloading manifest from: {manifest_url}")
-            with urllib.request.urlopen(manifest_url) as response:
-                manifest_content = response.read().decode('utf-8')
-            firmware_options = self.parse_firmware_manifest(manifest_content)
-            if not firmware_options:
-                messagebox.showerror("No Firmware Found", "No firmware options found in the manifest.")
-                return
-            selected_firmware = self.show_firmware_selection_dialog(firmware_options)
-            if not selected_firmware:
-                return
+            try:
+                with urllib.request.urlopen(manifest_url) as response:
+                    manifest_content = response.read().decode('utf-8')
+                firmware_options = self.parse_firmware_manifest(manifest_content)
+                if not firmware_options:
+                    messagebox.showerror("No Firmware Found", "No firmware options found in the manifest.")
+                    return
+                selected_firmware = self.show_firmware_selection_dialog(firmware_options)
+                if not selected_firmware:
+                    return
+                self._download_and_flash_selected_firmware(selected_firmware)
+            except Exception as e:
+                debug_print(f"Exception while downloading or parsing manifest: {e}")
+                messagebox.showerror("Manifest Error", f"Failed to download or parse manifest: {e}")
+
+    def browse_firmware_file(self):
+        from tkinter import messagebox
+        import tkinter as tk
+        file_path = filedialog.askopenfilename(
+            title="Select Firmware File",
+            filetypes=[("Firmware files", "*.img"), ("All files", "*.")]
+        )
+        if not file_path:
+            return
+        # Custom popup with 'Continue' button
+        root = self if isinstance(self, tk.Tk) else tk.Tk()
+        popup = tk.Toplevel(root)
+        popup.title("Unplug Device")
+        popup.geometry("400x120")
+        popup.transient(root)
+        popup.grab_set()
+        msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+        msg.pack(pady=(20, 10), padx=10)
+        btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+        btn.pack(pady=(0, 15))
+        popup.wait_window()
+        self.install_firmware(local_file=file_path)
+
+    def install_firmware_with_local_file(self, file_path):
+        """Deprecated: Use install_firmware(local_file=...) instead for unified workflow."""
+        debug_print("install_firmware_with_local_file is deprecated. Use install_firmware(local_file=...) instead.")
+        self.install_firmware(local_file=file_path)
+
+    def _download_and_flash_selected_firmware(self, firmware_info):
+        self.is_flashing_firmware = True
+        try:
+            import threading
+            import tkinter as tk
+            import requests
+            firmware_path = os.path.join(assets_dir, "system.img")
             dialog = tk.Toplevel(self)
             dialog.title("Firmware Flash Progress")
-            dialog.geometry("600x180")
+            dialog.geometry("600x200")
             dialog.transient(self)
             dialog.grab_set()
             dialog.resizable(False, False)
             frame = ttk.Frame(dialog, padding="20")
             frame.pack(fill=tk.BOTH, expand=True)
             status_label = ttk.Label(frame, text="", font=("Segoe UI", 11), wraplength=560, justify=tk.CENTER)
-            status_label.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+            status_label.pack(fill=tk.X, pady=(0, 5))
+            warn_label = ttk.Label(frame, text="Please make sure your Y1 is turned off and disconnected.", font=("Segoe UI", 9), foreground="#d9534f")
+            warn_label.pack(fill=tk.X, pady=(0, 10))
             ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.DISABLED)
             ok_button.pack(pady=(10, 5))
+            progress_bar = ttk.Progressbar(frame, mode="indeterminate")
+            progress_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
+            progress_bar.stop()  # Only start after download
             def do_download_and_flash():
                 try:
-                    repo_url = selected_firmware['url']
+                    repo_url = firmware_info['url']
                     if os.path.exists(firmware_path):
                         try:
                             os.remove(firmware_path)
@@ -3088,145 +3124,119 @@ class Y1HelperApp(tk.Tk):
                             chunk_count += 1
                             if chunk_count % 32 == 0 or downloaded == file_size:
                                 percent = (downloaded / file_size) * 100
-                                dialog.after(0, status_label.config, {"text": f"Downloading... {percent:.1f}% ({downloaded / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)"})
-                                time.sleep(0.01)
-                    dialog.after(0, status_label.config, {"text": "Download complete!"})
-                    # Prompt user to connect device before flashing
-                    dialog.after(0, status_label.config, {"text": "Please connect your powered-off Y1 to continue flashing"})
-                    time.sleep(1.0)
-                    self._flash_with_modal(dialog, status_label, ok_button, firmware_path)
+                                dialog.after(0, status_label.config, {"text": f"Please turn off and unplug your device. Downloading... {percent:.1f}% ({downloaded / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)"})
+                                import time; time.sleep(0.01)
+                        dialog.after(0, status_label.config, {"text": "Download complete!"})
+                        dialog.after(0, warn_label.pack_forget)
+                        dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
+                        time.sleep(1.0)
+                        self._flash_with_modal(dialog, status_label, ok_button, firmware_path, progress_bar)
                 except Exception as e:
+                    debug_print(f"Exception in do_download_and_flash: {e}")
                     dialog.after(0, status_label.config, {"text": f"Error: {e}"})
                     dialog.after(0, ok_button.config, {"state": "normal"})
             threading.Thread(target=do_download_and_flash, daemon=True).start()
             dialog.wait_window()
+        finally:
+            self.is_flashing_firmware = False
 
-    def browse_firmware_file(self):
-        """Open a file dialog to browse for a firmware file, then call install_firmware with local_file set."""
-        file_path = filedialog.askopenfilename(
-            title="Select Firmware File",
-            filetypes=[("Firmware files", "*.img"), ("All files", "*.*")]
-        )
-        if not file_path:
-            return
-        self.install_firmware(local_file=file_path)
-
-    def install_firmware_with_local_file(self, file_path):
-        import threading
-        dialog, status_label, ok_button = self.show_firmware_progress_modal()
-        def do_everything():
-            try:
-                status_label_text = lambda msg: dialog.after(0, status_label.config, {"text": msg})
-                ok_enable = lambda: dialog.after(0, ok_button.config, {"state": "normal"})
-                # Step 1: Copy firmware
-                status_label_text(f"Copying {os.path.basename(file_path)} to assets/system.img...")
-                file_size = os.path.getsize(file_path)
-                target_path = os.path.join(assets_dir, "system.img")
-                copied_size = 0
-                with open(file_path, 'rb') as src, open(target_path, 'wb') as dst:
-                    while True:
-                        chunk = src.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        dst.write(chunk)
-                        copied_size += len(chunk)
-                        progress = (copied_size / file_size) * 100
-                        status_label_text(f"Copying... {progress:.1f}% ({copied_size / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)")
-                status_label_text("Copy complete!")
-                # Step 2: Flashing
-                self._flash_with_modal(dialog, status_label, ok_button, target_path)
-            except Exception as e:
-                status_label.config(text=f"Error: {e}")
-                ok_button.config(state="normal")
-        threading.Thread(target=do_everything, daemon=True).start()
-        dialog.wait_window()
-
-    def _flash_with_modal(self, dialog, status_label, ok_button, firmware_path):
+    def _flash_with_modal(self, dialog, status_label, ok_button, firmware_path, progress_bar=None):
         import tkinter as tk
         import subprocess
         import threading
-        from tkinter.scrolledtext import ScrolledText
         try:
+            debug_print("Entered _flash_with_modal")
             self.update_install_rom_xml(firmware_path)
             flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
             install_rom_path = os.path.join(assets_dir, "install_rom.xml")
+            debug_print(f"Checking for flash_tool.exe at: {flash_tool_path}")
             if not os.path.exists(flash_tool_path):
+                debug_print("flash_tool.exe not found!")
                 dialog.after(0, status_label.config, {"text": "SP Flash Tool not found in assets directory"})
                 dialog.after(0, ok_button.pack)
                 dialog.after(0, ok_button.config, {"state": tk.NORMAL})
                 return
+            debug_print(f"Checking for install_rom.xml at: {install_rom_path}")
             if not os.path.exists(install_rom_path):
+                debug_print("install_rom.xml not found!")
                 dialog.after(0, status_label.config, {"text": "install_rom.xml not found in assets directory"})
                 dialog.after(0, ok_button.pack)
                 dialog.after(0, ok_button.config, {"state": tk.NORMAL})
                 return
-            # Resize modal for status + log
-            dialog.geometry("700x400")
-            # Remove all existing labels and create a single status label at the top
-            for widget in dialog.winfo_children():
-                if isinstance(widget, tk.Label):
-                    widget.destroy()
-            status_label = tk.Label(dialog, text="Make sure your Y1 is unplugged and off, then plug it back in and wait 3 mins till you see Flash Completed.", font=("Segoe UI", 11), wraplength=660, justify=tk.LEFT, anchor="nw")
-            status_label.pack(fill=tk.X, pady=(10, 5), padx=10)
-            # Add a ScrolledText box for flash-tool output
-            log_box = ScrolledText(dialog, height=16, width=80, font=("Consolas", 10), state="disabled", wrap="none")
-            log_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+            if progress_bar is None:
+                progress_bar = tk.ttk.Progressbar(dialog, mode="indeterminate")
+                progress_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
+            progress_bar.start(10)
             dialog.after(0, ok_button.pack_forget)
             command = [flash_tool_path, "-b", "-i", "install_rom.xml"]
-            debug_print(f"Running flash command: {' '.join(command)} (cwd=assets)")
-            process = subprocess.Popen(
-                command,
-                cwd=assets_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1
-            )
-            def append_log(line):
-                log_box.config(state="normal")
-                log_box.insert(tk.END, line + "\n")
-                log_box.see(tk.END)
-                log_box.config(state="disabled")
-            def auto_close():
-                if dialog.winfo_exists():
-                    dialog.destroy()
-            flash_done = False
-            all_done_seen = False
-            disconnect_seen = False
-            for line in iter(process.stdout.readline, ''):
-                line = line.rstrip('\r\n')
-                debug_print(f"[FLASH-TOOL RAW] {repr(line)}")
-                if not line:
-                    continue
-                dialog.after(0, append_log, line)
-                # Only update status label at completion or failure
-                if 'All command exec done!' in line:
-                    all_done_seen = True
-                    dialog.after(0, status_label.config, {"text": "Flash Completed! You may now unplug your device and click OK."})
+            debug_print(f"About to run flash command: {' '.join(command)} (cwd=assets)")
+            def run_flash():
+                debug_print("Starting flash_tool.exe subprocess...")
+                flash_done = False
+                all_done_seen = False
+                disconnect_seen = False
+                error_seen = False
+                process = subprocess.Popen(
+                    command,
+                    cwd=assets_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    universal_newlines=True,
+                    bufsize=1
+                )
+                for line in iter(process.stdout.readline, ''):
+                    line = line.rstrip('\r\n')
+                    debug_print(f"[FLASH-TOOL RAW] {repr(line)}")
+                    print(line)
+                    if not line:
+                        continue
+                    # Only update status label at completion or failure
+                    if 'All command exec done!' in line:
+                        all_done_seen = True
+                        dialog.after(0, status_label.config, {"text": "Firmware installation complete! This window will close automatically in 3 seconds."})
+                        dialog.after(0, ok_button.pack)
+                        dialog.after(0, ok_button.config, {"state": tk.NORMAL})
+                        dialog.after(0, progress_bar.stop)
+                        debug_print("[UI] Status label updated: Firmware installation complete! This window will close automatically in 3 seconds.")
+                        threading.Timer(3.0, lambda: dialog.destroy() if dialog.winfo_exists() else None).start()
+                    if all_done_seen and 'Disconnect!' in line:
+                        disconnect_seen = True
+                        flash_done = True
+                    # Improved error handling for BROM/COM failures
+                    if ('Connect BROM failed' in line or 'S_COM_PORT_OPEN_FAIL' in line or 'S_BROM_CMD_STARTCMD_FAIL' in line):
+                        flash_done = True
+                        error_seen = True
+                        dialog.after(0, status_label.config, {"text": "Flashing failed: Could not connect to device.\n\nPlease check your USB cable, drivers, and ensure the device is in the correct mode (powered off, battery charged, correct USB port). Try a different cable or port if needed."})
+                        dialog.after(0, ok_button.pack)
+                        dialog.after(0, ok_button.config, {"state": tk.NORMAL})
+                        dialog.after(0, progress_bar.stop)
+                        debug_print("[UI] Status label updated: Flashing failed due to BROM/COM port error.")
+                    # Only treat as a generic error if 'error' or 'fail' actually appears
+                    if 'Download failed' in line or 'error' in line.lower() or 'fail' in line.lower():
+                        flash_done = True
+                        error_seen = True
+                        dialog.after(0, status_label.config, {"text": "Firmware installation failed. Try again after pressing the reset button with a paperclip."})
+                        dialog.after(0, ok_button.pack)
+                        dialog.after(0, ok_button.config, {"state": tk.NORMAL})
+                        dialog.after(0, progress_bar.stop)
+                        debug_print("[UI] Status label updated: Firmware installation failed. Try again after pressing the reset button with a paperclip.")
+                process.wait()
+                if not flash_done and not all_done_seen:
+                    if error_seen:
+                        dialog.after(0, status_label.config, {"text": "Flashing process failed. Please check the above output for details."})
+                        debug_print("[UI] Status label updated: Flashing process failed. Please check the above output for details.")
+                    else:
+                        dialog.after(0, status_label.config, {"text": "Flashing process finished. Please check the above output for results."})
+                        debug_print("[UI] Status label updated: Flashing process finished. Please check the above output for results.")
                     dialog.after(0, ok_button.pack)
                     dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                    debug_print("[UI] Status label updated: Flash Completed! You may now unplug your device and click OK.")
-                    threading.Timer(45.0, auto_close).start()
-                if all_done_seen and 'Disconnect!' in line:
-                    disconnect_seen = True
-                    flash_done = True
-                if 'Download failed' in line or 'error' in line.lower():
-                    flash_done = True
-                    dialog.after(0, status_label.config, {"text": "Firmware installation failed. Try again after pressing the reset button with a paperclip."})
-                    dialog.after(0, ok_button.pack)
-                    dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                    debug_print("[UI] Status label updated: Firmware installation failed. Try again after pressing the reset button with a paperclip.")
-            process.wait()
-            if not flash_done and not all_done_seen:
-                dialog.after(0, status_label.config, {"text": "Flashing process finished. Please check the above output for results."})
-                dialog.after(0, ok_button.pack)
-                dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                debug_print("[UI] Status label updated: Flashing process finished. Please check the above output for results.")
+                    dialog.after(0, progress_bar.stop)
+            threading.Thread(target=run_flash, daemon=True).start()
         except Exception as e:
+            debug_print(f"Exception in _flash_with_modal: {e}")
             dialog.after(0, status_label.config, {"text": f"Error during firmware flashing: {e}"})
             dialog.after(0, ok_button.pack)
             dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-            debug_print(f"[UI] Status label updated: Error during firmware flashing: {e}")
 
     def update_install_rom_xml(self, firmware_path):
         """Update install_rom.xml to use only filenames for all file references, so flash_tool.exe can find them when run from assets."""
@@ -3319,755 +3329,73 @@ class Y1HelperApp(tk.Tk):
             return []
 
     def show_firmware_selection_dialog(self, firmware_options):
-        """Show dialog for firmware selection"""
+        import tkinter as tk
+        from tkinter import filedialog
         dialog = tk.Toplevel(self)
         dialog.title("Select Firmware")
         dialog.geometry("400x300")
         dialog.transient(self)
         dialog.grab_set()
-        
-        # Center the dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (300 // 2)
-        dialog.geometry(f"400x300+{x}+{y}")
-        
-        # Create listbox
+        dialog.resizable(False, False)
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
-        
-        ttk.Label(frame, text="Select firmware to install:").pack(anchor=tk.W)
-        
-        listbox = tk.Listbox(frame, height=10)
-        listbox.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
-        
-        # Function to strip markdown formatting
-        def strip_markdown(text):
-            """Remove markdown formatting from text"""
-            import re
-            # Remove **bold**, *italic*, `code`, and other markdown
-            text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **bold**
-            text = re.sub(r'\*(.*?)\*', r'\1', text)      # *italic*
-            text = re.sub(r'`(.*?)`', r'\1', text)        # `code`
-            text = re.sub(r'#+\s*', '', text)             # Headers
-            text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # Links
-            return text.strip()
-        
-        # Populate listbox
-        for i, firmware in enumerate(firmware_options):
-            # Strip markdown and clean the name
-            clean_name = strip_markdown(firmware['name'])
-            # Make the first item (latest) bold using star instead of asterisks
-            if i == 0:
-                listbox.insert(tk.END, f"★ {clean_name} (Latest)")
-            else:
-                listbox.insert(tk.END, clean_name)
-        
-        if firmware_options:
-            listbox.selection_set(0)
-        
-        selected_firmware = [None]
-        
-        def on_select():
-            selection = listbox.curselection()
-            if selection:
-                selected_firmware[0] = firmware_options[selection[0]]
+        label = ttk.Label(frame, text="Select a firmware to install:", font=("Segoe UI", 11))
+        label.pack(pady=(0, 10))
+        listbox = tk.Listbox(frame, font=("Segoe UI", 10))
+        listbox.pack(fill=tk.BOTH, expand=True)
+        for i, fw in enumerate(firmware_options):
+            listbox.insert(tk.END, fw.get('name', f"Firmware {i+1}"))
+        selected = [None]
+        def confirm_and_close():
+            idx = listbox.curselection()
+            if not idx:
+                return
+            selected[0] = firmware_options[idx[0]]
             dialog.destroy()
-        
-        def on_cancel():
+        def on_double_click(event):
+            confirm_and_close()
+        def on_enter(event):
+            confirm_and_close()
+        listbox.bind('<Double-Button-1>', on_double_click)
+        listbox.bind('<Return>', on_enter)
+        install_btn = ttk.Button(frame, text="Install", command=confirm_and_close)
+        install_btn.pack(pady=(10, 0))
+        def browse_and_install():
             dialog.destroy()
-        
-        # Buttons
-        button_frame = ttk.Frame(frame)
-        button_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        ttk.Button(button_frame, text="Browse Firmware", command=self.browse_firmware_file).pack(side=tk.LEFT)
-        ttk.Button(button_frame, text="Install", command=on_select).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
-        
-        # Bind double-click
-        listbox.bind('<Double-1>', lambda e: on_select())
-        
-        dialog.wait_window()
-        return selected_firmware[0]
-
-    def download_firmware(self, firmware_info):
-        """Download firmware from GitHub releases with progress"""
-        try:
-            # Create progress dialog
-            progress_dialog = self.create_progress_dialog("Downloading Firmware")
-            progress_dialog.progress_bar.start()
-            
-            def update_progress(message):
-                progress_dialog.status_label.config(text=message)
-                progress_dialog.update()
-                debug_print(f"Download Progress: {message}")
-            
-            update_progress("Connecting to GitHub...")
-            
-            # Get GitHub token from config
-            config_path = self.get_config_path()
-            github_token = None
-            if os.path.exists(config_path):
-                import configparser
-                config = configparser.ConfigParser()
-                config.read(config_path)
-                if 'github' in config and 'token' in config['github']:
-                    github_token = config['github']['token']
-            
-            # Parse the GitHub URL to get repo and latest release
-            repo_url = firmware_info['url']
-            if 'github.com' in repo_url and '/releases/latest' in repo_url:
-                repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
-                
-                update_progress(f"Fetching latest release from {repo_path}...")
-                
-                # Get latest release info
-                api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
-                headers = {}
-                if github_token:
-                    headers['Authorization'] = f'token {github_token}'
-                
-                with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
-                    release_data = json.loads(response.read().decode('utf-8'))
-                
-                # Find IMG asset
-                update_progress("Searching for firmware image...")
-                img_asset = None
-                for asset in release_data.get('assets', []):
-                    if asset['name'].endswith('.img'):
-                        img_asset = asset
-                        break
-                
-                if not img_asset:
-                    progress_dialog.destroy()
-                    raise Exception(f"No IMG file found in latest release for {firmware_info['name']}")
-                
-                # Download IMG file to assets/system.img
-                download_url = img_asset['browser_download_url']
-                download_path = os.path.join(assets_dir, "system.img")
-                
-                update_progress(f"Downloading {firmware_info['name']}...")
-                debug_print(f"Downloading {firmware_info['name']} from: {download_url}")
-                
-                with urllib.request.urlopen(download_url) as response:
-                    # Get file size for progress
-                    file_size = int(response.headers.get('content-length', 0))
-                    downloaded = 0
-                    
-                    with open(download_path, 'wb') as f:
-                        while True:
-                            chunk = response.read(8192)  # 8KB chunks
-                            if not chunk:
-                                break
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            
-                            if file_size > 0:
-                                percent = (downloaded / file_size) * 100
-                                update_progress(f"Downloading {firmware_info['name']}... {percent:.1f}%")
-                            else:
-                                update_progress(f"Downloading {firmware_info['name']}... {downloaded:,} bytes")
-                
-                update_progress("Download complete!")
-                progress_dialog.destroy()
-                
-                debug_print(f"Downloaded {firmware_info['name']} to: {download_path}")
-                return download_path
-            else:
-                progress_dialog.destroy()
-                raise Exception(f"Unsupported repository URL: {repo_url}")
-                
-        except Exception as e:
-            if 'progress_dialog' in locals():
-                progress_dialog.destroy()
-            debug_print(f"Error downloading firmware {firmware_info['name']}: {e}")
-            return None
-            
-            # Simulate download by creating a placeholder
-            firmware_path = os.path.join(assets_dir, f"{firmware_info['name'].replace(' ', '_')}.img")
-            
-            # Create a dummy file for simulation
-            with open(firmware_path, 'wb') as f:
-                f.write(b'Simulated firmware file for testing')
-            
-            debug_print(f"Firmware downloaded to: {firmware_path}")
-            return firmware_path
-            
-        except Exception as e:
-            debug_print(f"Error downloading firmware: {e}")
-            return None
-
-    def flash_firmware_and_wait(self, firmware_path):
-        """Run SP Flash Tool from the assets directory, show a status prompt during 'Search usb', then relay each output line in the status label, and let the user close it when done."""
-        import tkinter as tk
-        try:
-            self.update_install_rom_xml(firmware_path)
-            flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
-            install_rom_path = os.path.join(assets_dir, "install_rom.xml")
-            if not os.path.exists(flash_tool_path):
-                raise Exception("SP Flash Tool not found in assets directory")
-            if not os.path.exists(install_rom_path):
-                raise Exception("install_rom.xml not found in assets directory")
-            dialog = tk.Toplevel(self)
-            dialog.title("Firmware Flash Progress")
-            dialog.geometry("600x180")
-            dialog.transient(self)
-            dialog.grab_set()
-            dialog.resizable(False, False)
-            frame = ttk.Frame(dialog, padding="20")
-            frame.pack(fill=tk.BOTH, expand=True)
-            # Status label (used for both the prompt and all output)
-            status_label = ttk.Label(frame, text="", font=("Segoe UI", 11), wraplength=560, justify=tk.CENTER)
-            status_label.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-            ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.DISABLED)
-            ok_button.pack(pady=(10, 5))
-            command = [flash_tool_path, "-b", "-i", "install_rom.xml"]
-            debug_print(f"Running flash command: {' '.join(command)} (cwd=assets)")
-            process = subprocess.Popen(
-                command,
-                cwd=assets_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1
+            file_path = filedialog.askopenfilename(
+                title="Select Firmware File",
+                filetypes=[("Firmware files", "*.img"), ("All files", "*.")]
             )
-            showing_prompt = False
-            flash_done = False
-            for line in iter(process.stdout.readline, ''):
-                line = line.rstrip('\r\n')
-                if not line:
-                    continue
-                debug_print(f"Flash Tool: {line}")
-                # If we're still in the 'Search usb' phase, show the prompt
-                if (not flash_done and 'Search usb, timeout set as' in line):
-                    dialog.after(0, status_label.config, {"text": "Please plug in your powered-off Y1 via its USB cable to start Firmware Install"})
-                    showing_prompt = True
-                    continue
-                # If we were showing the prompt and now get a new line, switch to showing output
-                if showing_prompt and 'Search usb, timeout set as' not in line:
-                    showing_prompt = False
-                # Show the latest output line in the status label
-                if not showing_prompt:
-                    dialog.after(0, status_label.config, {"text": line})
-                # Check for completion/failure
-                if 'Disconnect' in line:
-                    flash_done = True
-                    dialog.after(0, status_label.config, {"text": "Firmware installation complete!"})
-                    dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                elif 'Download failed' in line:
-                    flash_done = True
-                    dialog.after(0, status_label.config, {"text": "Firmware installation failed. Try again after pressing the reset button with a paperclip."})
-                    dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-            process.wait()
-            # If the process exits without 'Disconnect' or 'Download failed', just enable OK
-            if not flash_done:
-                dialog.after(0, status_label.config, {"text": "Flashing process finished. Please check the above output for results."})
-                dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-            dialog.wait_window()
-            return True, None
-        except Exception as e:
-            error_msg = f"Error during firmware flashing: {e}"
-            debug_print(error_msg)
-            messagebox.showerror("Flashing Error", error_msg)
-            return False, error_msg
-
-    def wait_for_flash_completion(self):
-        """Wait for SP Flash Tool to complete flashing with improved timeout and monitoring"""
-        try:
-            # Create progress dialog
-            progress_dialog = self.create_progress_dialog("Installing Firmware")
-            progress_dialog.progress_bar.start()
-            
-            def update_progress(message):
-                try:
-                    if progress_dialog and hasattr(progress_dialog, 'status_label'):
-                        progress_dialog.status_label.config(text=message)
-                        progress_dialog.update()
-                    debug_print(f"Flash Progress: {message}")
-                except Exception as e:
-                    debug_print(f"Progress update failed: {e}")
-            
-            update_progress("Starting SP Flash Tool...")
-            
-            # Run SP Flash Tool with -i flag
-            flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
-            install_rom_path = os.path.join(assets_dir, "install_rom.xml")
-            
-            if not os.path.exists(flash_tool_path):
-                progress_dialog.destroy()
-                raise Exception("SP Flash Tool not found in assets directory")
-            
-            if not os.path.exists(install_rom_path):
-                progress_dialog.destroy()
-                raise Exception("install_rom.xml not found in assets directory")
-            
-            # Run flash tool command with -i flag
-            command = [flash_tool_path, "-i", install_rom_path]
-            debug_print(f"Running flash command: {' '.join(command)}")
-            
-            update_progress("Waiting for device connection...")
-            
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1
-            )
-            
-            disconnect_found = False
-            begin_found = False
-            device_connected = False
-            last_activity = time.time()
-            timeout_seconds = 300  # 5 minutes timeout
-            
-            # Monitor output for progress messages
-            for line in iter(process.stdout.readline, ''):
-                line = line.strip()
-                current_time = time.time()
-                
-                if line:
-                    debug_print(f"Flash Tool: {line}")
-                    last_activity = current_time
-                    
-                    # Update progress based on flash tool output
-                    if "Begin" in line or "begin" in line:
-                        begin_found = True
-                        device_connected = True
-                        update_progress("Initializing SP Flash Tool...")
-                    elif "Search usb" in line or "search usb" in line:
-                        # Key moment to prompt user to plug in device
-                        update_progress("** PLEASE PLUG IN YOUR DEVICE NOW **")
-                        self.status_var.set("** PLEASE PLUG IN YOUR DEVICE NOW **")
-                    elif "USB port detected" in line:
-                        device_connected = True
-                        update_progress("Device detected via USB...")
-                    elif "BROM connected" in line:
-                        device_connected = True
-                        update_progress("BROM connection established...")
-                    elif "Downloading & Connecting to DA" in line:
-                        device_connected = True
-                        update_progress("Downloading and connecting to DA...")
-                    elif "DA Connected" in line:
-                        device_connected = True
-                        update_progress("DA connection established...")
-                    elif "Formatting Flash" in line:
-                        device_connected = True
-                        update_progress("Formatting device flash memory...")
-                    elif "Format Succeeded" in line:
-                        device_connected = True
-                        update_progress("Flash formatting completed...")
-                    elif "Downloading bootloader" in line:
-                        device_connected = True
-                        update_progress("Downloading bootloader...")
-                    elif "of bootloader has been sent" in line and "%" in line:
-                        # Show bootloader progress
-                        device_connected = True
-                        update_progress(f"Bootloader: {line}")
-                    elif "Downloading images" in line:
-                        device_connected = True
-                        update_progress("Downloading firmware images...")
-                    elif "of image data has been sent" in line and "%" in line:
-                        # Show detailed image download progress
-                        device_connected = True
-                        update_progress(f"Firmware: {line}")
-                    elif "download speed:" in line:
-                        device_connected = True
-                        update_progress(f"Download completed: {line}")
-                    elif "Download Succeeded" in line:
-                        device_connected = True
-                        update_progress("Firmware download completed successfully!")
-                    elif "All command exec done!" in line:
-                        device_connected = True
-                        update_progress("All operations completed...")
-                    elif "Disconnect!" in line:
-                        disconnect_found = True
-                        update_progress("Flashing completed successfully!")
-                        break
-                    elif "error" in line.lower() or "fail" in line.lower():
-                        update_progress(f"Error: {line}")
-                        if "timeout" in line.lower():
-                            update_progress("Connection timeout - please check device connection")
-                    elif "connected" in line.lower() or "detected" in line.lower():
-                        device_connected = True
-                        update_progress("Device detected, starting flash process...")
-                    elif "waiting" in line.lower():
-                        update_progress("Waiting for device to connect...")
-                    elif "%" in line and ("Download" in line or "Write" in line or "Format" in line):
-                        # Show percentage progress for flashing operations
-                        device_connected = True
-                        update_progress(f"Flashing progress: {line}")
-                    else:
-                        # Update with current line for detailed progress (but limit length)
-                        short_line = line[:60] + "..." if len(line) > 60 else line
-                        update_progress(short_line)
-                
-                # Check for timeout
-                if current_time - last_activity > timeout_seconds:
-                    update_progress("Operation timed out - please check device connection")
-                    try:
-                        process.terminate()
-                    except Exception as e:
-                        debug_print(f"Error terminating process: {e}")
-                    break
-            
-            # Wait for process to finish
-            try:
-                process.wait(timeout=30)  # Wait up to 30 seconds for clean shutdown
-            except subprocess.TimeoutExpired:
-                try:
-                    process.kill()  # Force kill if it doesn't shut down cleanly
-                except Exception as e:
-                    debug_print(f"Error killing process: {e}")
-            
-            # Close progress dialog
-            progress_dialog.destroy()
-            
-            if disconnect_found:
-                debug_print("Firmware flashing completed successfully")
-                return True, None
-            elif device_connected and begin_found:
-                debug_print("Firmware flashing may have completed (no disconnect message)")
-                return True, None
-            else:
-                error_msg = "Firmware flashing did not complete properly"
-                debug_print(error_msg)
-                return False, error_msg
-                
-        except Exception as e:
-            if 'progress_dialog' in locals():
-                progress_dialog.destroy()
-            error_msg = f"Error during firmware flashing: {e}"
-            debug_print(error_msg)
-            return False, error_msg
-
-    def show_properties(self):
-        """Show properties of selected item"""
-        selection = self.tree.selection()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select an item to view properties.")
-            return
-            
-        if len(selection) > 1:
-            messagebox.showwarning("Multiple Selection", "Please select only one item to view properties.")
-            return
-            
-        item = self.tree.item(selection[0])
-        name = item['text'].split(' ', 1)[1]
-        full_path = os.path.join(self.current_path, name).replace('\\', '/')
-        
-        def get_properties():
-            self.progress_var.set("Getting properties...")
-            self.progress_bar.start()
-            
-            try:
-                # Get detailed file info
-                success, stdout, stderr = self.run_adb_command(f"shell ls -la '{full_path}'")
-                if success:
-                    lines = stdout.strip().split('\n')
-                    if lines:
-                        parts = lines[0].split()
-                        if len(parts) >= 9:
-                            permissions = parts[0]
-                            owner = parts[2]
-                            group = parts[3]
-                            size = parts[4]
-                            date = ' '.join(parts[5:8])
-                            
-                            # Get additional info
-                            success2, stdout2, stderr2 = self.run_adb_command(f"shell stat '{full_path}'")
-                            stat_info = stdout2 if success2 else ""
-                            
-                            # Show properties dialog
-                            self.show_properties_dialog(name, full_path, permissions, owner, group, size, date, stat_info)
-                            
-            except Exception as e:
-                self.progress_var.set(f"Error getting properties: {e}")
-            finally:
-                self.progress_bar.stop()
-                
-        threading.Thread(target=get_properties, daemon=True).start()
-        
-    def show_properties_dialog(self, name, path, permissions, owner, group, size, date, stat_info):
-        """Show properties dialog with file information"""
-        dialog = tk.Toplevel(self.dialog)
-        dialog.title(f"Properties - {name}")
-        dialog.geometry("500x400")
-        dialog.transient(self.dialog)
-        dialog.grab_set()
-        
-        # Create text widget with properties
-        text_widget = tk.Text(dialog, wrap=tk.WORD, padx=10, pady=10)
-        text_widget.pack(fill=tk.BOTH, expand=True)
-        
-        properties_text = f"""Properties for: {name}
-
-Path: {path}
-Permissions: {permissions}
-Owner: {owner}:{group}
-Size: {size}
-Modified: {date}
-
-Detailed Information:
-{stat_info}
-
-Permissions Breakdown:
-{self.parse_permissions(permissions)}
-"""
-        
-        text_widget.insert(tk.END, properties_text)
-        text_widget.config(state=tk.DISABLED)
-        
-        # Close button
-        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=10)
-        
-    def parse_permissions(self, permissions):
-        """Parse and explain file permissions"""
-        if len(permissions) != 10:
-            return "Invalid permissions format"
-            
-        perms = permissions[1:]  # Remove file type
-        owner = perms[:3]
-        group = perms[3:6]
-        other = perms[6:9]
-        
-        def explain_perms(perms):
-            result = []
-            if perms[0] == 'r': result.append("read")
-            if perms[1] == 'w': result.append("write")
-            if perms[2] == 'x': result.append("execute")
-            return ', '.join(result) if result else "none"
-            
-        return f"""Owner: {explain_perms(owner)}
-Group: {explain_perms(group)}
-Others: {explain_perms(other)}"""
-
-    def show_firmware_flash_modal(self, title="Firmware Flash Progress"):
-        import tkinter as tk
-        from tkinter.scrolledtext import ScrolledText
-        dialog = tk.Toplevel(self)
-        dialog.title(title)
-        dialog.geometry("700x400")
-        dialog.transient(self)
-        dialog.grab_set()
-        dialog.resizable(False, False)
-        frame = ttk.Frame(dialog, padding="20")
-        frame.pack(fill=tk.BOTH, expand=True)
-        status_label = ttk.Label(frame, text="", font=("Segoe UI", 11), wraplength=660, justify=tk.LEFT, anchor="nw")
-        status_label.pack(fill=tk.X, pady=(10, 5), padx=10)
-        log_box = ScrolledText(frame, height=16, width=80, font=("Consolas", 10), state="disabled", wrap="none")
-        log_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-        ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.NORMAL)
-        # Do NOT pack ok_button here; only pack it when flashing is done or failed
-        return dialog, status_label, log_box, ok_button
-
-    def _flash_with_unified_modal(self, dialog, status_label, log_box, ok_button, firmware_path):
-        import subprocess
-        import threading
-        try:
-            self.update_install_rom_xml(firmware_path)
-            flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
-            install_rom_path = os.path.join(assets_dir, "install_rom.xml")
-            if not os.path.exists(flash_tool_path):
-                dialog.after(0, status_label.config, {"text": "SP Flash Tool not found in assets directory"})
-                dialog.after(0, ok_button.pack)
-                dialog.after(0, ok_button.config, {"state": "normal"})
+            if not file_path:
                 return
-            if not os.path.exists(install_rom_path):
-                dialog.after(0, status_label.config, {"text": "install_rom.xml not found in assets directory"})
-                dialog.after(0, ok_button.pack)
-                dialog.after(0, ok_button.config, {"state": "normal"})
-                return
-            def append_log(line):
-                log_box.config(state="normal")
-                log_box.insert(tk.END, line + "\n")
-                log_box.see(tk.END)
-                log_box.config(state="disabled")
-            dialog.after(0, status_label.config, {"text": "Make sure your Y1 is unplugged and off, then plug it back in and wait 3 mins till you see Flash Completed."})
-            command = [flash_tool_path, "-b", "-i", "install_rom.xml"]
-            debug_print(f"Running flash command: {' '.join(command)} (cwd=assets)")
-            def run_flash():
-                flash_done = False
-                all_done_seen = False
-                disconnect_seen = False
-                try:
-                    import sys
-                    creationflags = 0
-                    if sys.platform.startswith('win'):
-                        import subprocess as sp
-                        creationflags = sp.CREATE_NEW_CONSOLE
-                    process = subprocess.Popen(
-                        command,
-                        cwd=assets_dir,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        universal_newlines=True,
-                        bufsize=1,
-                        creationflags=creationflags
-                    )
-                    for line in iter(process.stdout.readline, ''):
-                        line = line.rstrip('\r\n')
-                        debug_print(f"[FLASH-TOOL RAW] {repr(line)}")
-                        if not line:
-                            continue
-                        dialog.after(0, append_log, line)
-                        # Show prompt for USB search
-                        if 'Search usb, timeout set as' in line:
-                            dialog.after(0, status_label.config, {"text": "Please plug in your powered-off Y1 via its USB cable to start Firmware Install"})
-                        # Show completion prompt
-                        if 'All command exec done!' in line:
-                            all_done_seen = True
-                            dialog.after(0, status_label.config, {"text": "Flash Completed! You may now unplug your device and click OK."})
-                            dialog.after(0, ok_button.pack)
-                            dialog.after(0, ok_button.config, {"state": "normal"})
-                        if all_done_seen and 'Disconnect!' in line:
-                            disconnect_seen = True
-                            flash_done = True
-                        if 'Download failed' in line or 'error' in line.lower():
-                            flash_done = True
-                            dialog.after(0, status_label.config, {"text": "Firmware installation failed. Try again after pressing the reset button with a paperclip."})
-                            dialog.after(0, ok_button.pack)
-                            dialog.after(0, ok_button.config, {"state": "normal"})
-                    process.wait()
-                    if not flash_done and not all_done_seen:
-                        dialog.after(0, status_label.config, {"text": "Flashing process finished. Please check the above output for results."})
-                        dialog.after(0, ok_button.pack)
-                        dialog.after(0, ok_button.config, {"state": "normal"})
-                except Exception as e:
-                    dialog.after(0, status_label.config, {"text": f"Error during firmware flashing: {e}"})
-                    dialog.after(0, ok_button.pack)
-                    dialog.after(0, ok_button.config, {"state": "normal"})
-            try:
-                threading.Thread(target=run_flash, daemon=True).start()
-            except Exception as e:
-                dialog.after(0, status_label.config, {"text": f"Error starting flash thread: {e}"})
-                dialog.after(0, ok_button.pack)
-                dialog.after(0, ok_button.config, {"state": "normal"})
-        except Exception as e:
-            dialog.after(0, status_label.config, {"text": f"Error in flash modal setup: {e}"})
-            dialog.after(0, ok_button.pack)
-            dialog.after(0, ok_button.config, {"state": "normal"})
-
-    def install_firmware(self, local_file=None):
-        import threading
-        firmware_path = os.path.join(assets_dir, "system.img")
-        if local_file:
-            dialog, status_label, log_box, ok_button = self.show_firmware_flash_modal()
-            def do_copy_and_flash():
-                try:
-                    file_size = os.path.getsize(local_file)
-                    copied_size = 0
-                    chunk_count = 0
-                    with open(local_file, 'rb') as src, open(firmware_path, 'wb') as dst:
-                        while True:
-                            chunk = src.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            dst.write(chunk)
-                            copied_size += len(chunk)
-                            chunk_count += 1
-                            if chunk_count % 2 == 0 or copied_size == file_size:
-                                progress = (copied_size / file_size) * 100
-                                dialog.after(0, status_label.config, {"text": f"Copying... {progress:.1f}% ({copied_size / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)"})
-                                import time; time.sleep(0.01)
-                    dialog.after(0, status_label.config, {"text": "Copy complete!"})
-                    self._flash_with_unified_modal(dialog, status_label, log_box, ok_button, firmware_path)
-                except Exception as e:
-                    dialog.after(0, status_label.config, {"text": f"Error: {e}"})
-                    dialog.after(0, ok_button.config, {"state": "normal"})
-            threading.Thread(target=do_copy_and_flash, daemon=True).start()
-            dialog.wait_window()
-        else:
-            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
-            debug_print(f"Downloading manifest from: {manifest_url}")
-            import urllib.request
-            with urllib.request.urlopen(manifest_url) as response:
-                manifest_content = response.read().decode('utf-8')
-            firmware_options = self.parse_firmware_manifest(manifest_content)
-            if not firmware_options:
-                from tkinter import messagebox
-                messagebox.showerror("No Firmware Found", "No firmware options found in the manifest.")
-                return
-            selected_firmware = self.show_firmware_selection_dialog(firmware_options)
-            if not selected_firmware:
-                return
-            dialog, status_label, log_box, ok_button = self.show_firmware_flash_modal()
-            def do_download_and_flash():
-                try:
-                    import requests
-                    repo_url = selected_firmware['url']
-                    if os.path.exists(firmware_path):
-                        try:
-                            os.remove(firmware_path)
-                        except Exception as e:
-                            debug_print(f"Failed to delete old system.img: {e}")
-                    if 'github.com' in repo_url and '/releases/latest' in repo_url:
-                        repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
-                        api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
-                        r = requests.get(api_url)
-                        release_data = r.json()
-                        img_asset = None
-                        for asset in release_data.get('assets', []):
-                            if asset['name'].endswith('.img'):
-                                img_asset = asset
-                                break
-                        if not img_asset:
-                            raise Exception("No .img asset found in latest release")
-                        download_url = img_asset['browser_download_url']
-                    else:
-                        download_url = repo_url
-                    with requests.get(download_url, stream=True) as response:
-                        response.raise_for_status()
-                        file_size = int(response.headers.get('content-length', 0))
-                        downloaded = 0
-                        chunk_count = 0
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if not chunk:
-                                break
-                            with open(firmware_path, 'ab') as f:
-                                f.write(chunk)
-                            downloaded += len(chunk)
-                            chunk_count += 1
-                            if chunk_count % 32 == 0 or downloaded == file_size:
-                                percent = (downloaded / file_size) * 100
-                                dialog.after(0, status_label.config, {"text": f"Downloading... {percent:.1f}% ({downloaded / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)"})
-                                import time; time.sleep(0.01)
-                    dialog.after(0, status_label.config, {"text": "Download complete!"})
-                    self._flash_with_unified_modal(dialog, status_label, log_box, ok_button, firmware_path)
-                except Exception as e:
-                    dialog.after(0, status_label.config, {"text": f"Error: {e}"})
-                    dialog.after(0, ok_button.config, {"state": "normal"})
-            threading.Thread(target=do_download_and_flash, daemon=True).start()
-            dialog.wait_window()
-
-    def install_firmware_with_local_file(self, file_path):
-        import threading
-        dialog, status_label, log_box, ok_button = self.show_firmware_flash_modal()
-        def do_everything():
-            try:
-                status_label_text = lambda msg: dialog.after(0, status_label.config, {"text": msg})
-                # Step 1: Copy firmware
-                status_label_text(f"Copying {os.path.basename(file_path)} to assets/system.img...")
-                file_size = os.path.getsize(file_path)
-                target_path = os.path.join(assets_dir, "system.img")
-                copied_size = 0
-                with open(file_path, 'rb') as src, open(target_path, 'wb') as dst:
-                    while True:
-                        chunk = src.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        dst.write(chunk)
-                        copied_size += len(chunk)
-                        progress = (copied_size / file_size) * 100
-                        status_label_text(f"Copying... {progress:.1f}% ({copied_size / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)")
-                status_label_text("Copy complete!")
-                self._flash_with_unified_modal(dialog, status_label, log_box, ok_button, target_path)
-            except Exception as e:
-                status_label.config(text=f"Error: {e}")
-                ok_button.config(state="normal")
-        threading.Thread(target=do_everything, daemon=True).start()
+            root = self if isinstance(self, tk.Tk) else tk.Tk()
+            popup = tk.Toplevel(root)
+            popup.title("Unplug Device")
+            popup.geometry("400x120")
+            popup.transient(root)
+            popup.grab_set()
+            msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+            msg.pack(pady=(20, 10), padx=10)
+            btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+            btn.pack(pady=(0, 15))
+            popup.wait_window()
+            self.install_firmware(local_file=file_path)
+        browse_btn = ttk.Button(frame, text="Browse Firmware (.img)", command=browse_and_install)
+        browse_btn.pack(pady=(5, 0))
         dialog.wait_window()
+        if selected[0] is not None:
+            root = self if isinstance(self, tk.Tk) else tk.Tk()
+            popup = tk.Toplevel(root)
+            popup.title("Unplug Device")
+            popup.geometry("400x120")
+            popup.transient(root)
+            popup.grab_set()
+            msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+            msg.pack(pady=(20, 10), padx=10)
+            btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+            btn.pack(pady=(0, 15))
+            popup.wait_window()
+            self._download_and_flash_selected_firmware(selected[0])
 
 class FileExplorerDialog:
     """Comprehensive file explorer dialog for Y1 device with full file management"""
