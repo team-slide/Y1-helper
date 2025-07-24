@@ -29,6 +29,8 @@ import datetime
 base_dir = os.path.dirname(os.path.abspath(__file__))
 assets_dir = os.path.join(base_dir, 'assets')
 
+# This comment proves the patcher worked for Ryan
+
 def debug_print(message):
     """Print debug messages with timestamp"""
     timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
