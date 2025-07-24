@@ -1,1 +1,0 @@
-This will confirm whether the patcher sees new files
