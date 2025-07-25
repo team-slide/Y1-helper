@@ -3131,20 +3131,44 @@ class Y1HelperApp(tk.Tk):
                             if name.endswith('.img') or name.endswith('.bin'):
                                 download_url = asset['browser_download_url']
                                 dest_path = os.path.join(firmware_dir, name)
+                                dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
                                 with requests.get(download_url, stream=True) as response:
                                     response.raise_for_status()
+                                    file_size = int(response.headers.get('content-length', 0))
+                                    downloaded = 0
+                                    progress_bar.config(mode='determinate', maximum=file_size)
                                     with open(dest_path, 'wb') as f:
-                                        shutil.copyfileobj(response.raw, f)
+                                        for chunk in response.iter_content(chunk_size=8192):
+                                            if not chunk:
+                                                break
+                                            f.write(chunk)
+                                            downloaded += len(chunk)
+                                            percent = (downloaded / file_size) * 100 if file_size else 0
+                                            dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                            dialog.after(0, progress_bar.step, (len(chunk),))
+                                    dialog.after(0, progress_bar['value'] = 0)
                                 downloaded_files[name] = dest_path
                     else:
                         # Direct URL to a single file (legacy/local)
                         name = os.path.basename(repo_url)
                         if name.endswith('.img') or name.endswith('.bin'):
                             dest_path = os.path.join(firmware_dir, name)
+                            dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
                             with requests.get(repo_url, stream=True) as response:
                                 response.raise_for_status()
+                                file_size = int(response.headers.get('content-length', 0))
+                                downloaded = 0
+                                progress_bar.config(mode='determinate', maximum=file_size)
                                 with open(dest_path, 'wb') as f:
-                                    shutil.copyfileobj(response.raw, f)
+                                    for chunk in response.iter_content(chunk_size=8192):
+                                        if not chunk:
+                                            break
+                                        f.write(chunk)
+                                        downloaded += len(chunk)
+                                        percent = (downloaded / file_size) * 100 if file_size else 0
+                                        dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                        dialog.after(0, progress_bar.step, (len(chunk),))
+                                dialog.after(0, progress_bar['value'] = 0)
                             downloaded_files[name] = dest_path
                     # Check for system.img
                     if "system.img" not in downloaded_files:
