@@ -77,6 +77,16 @@ class Y1HelperApp(tk.Tk):
                 debug_print("Cleaned up existing system.img from previous session")
             except Exception as e:
                 debug_print(f"Failed to clean up system.img: {e}")
+        # Clear assets/rom on launch
+        rom_dir = os.path.join(assets_dir, "rom")
+        if os.path.exists(rom_dir):
+            for f in os.listdir(rom_dir):
+                try:
+                    os.remove(os.path.join(rom_dir, f))
+                except Exception as e:
+                    debug_print(f"Failed to remove {f} from rom/: {e}")
+        else:
+            os.makedirs(rom_dir, exist_ok=True)
         
         self.title(f"Y1 Helper v{self.version}")
         self.geometry("452x661")  # Increased by 32px width and 32px height
@@ -1134,7 +1144,7 @@ class Y1HelperApp(tk.Tk):
         self.device_menu.add_command(label="File Explorer", command=self.open_file_explorer)
         self.device_menu.add_command(label="Take Screenshot", command=self.take_screenshot)
         self.device_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
-        self.device_menu.add_command(label="Change Language", command=self.change_device_language)
+        self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
         
@@ -3067,11 +3077,27 @@ class Y1HelperApp(tk.Tk):
 
     def _download_and_flash_selected_firmware(self, firmware_info):
         self.is_flashing_firmware = True
+        REQUIRED_FILES = [
+            "preloader_g368_nyx.bin",
+            "MBR",
+            "EBR1",
+            "EBR2",
+            "lk.bin",
+            "boot.img",
+            "recovery.img",
+            "secro.img",
+            "logo.bin",
+            "system.img",
+            "cache.img",
+            "userdata.img"
+        ]
         try:
             import threading
             import tkinter as tk
             import requests
-            firmware_path = os.path.join(assets_dir, "system.img")
+            import shutil
+            firmware_dir = os.path.join(assets_dir, "rom")
+            os.makedirs(firmware_dir, exist_ok=True)
             dialog = tk.Toplevel(self)
             dialog.title("Firmware Flash Progress")
             dialog.geometry("600x200")
@@ -3092,47 +3118,51 @@ class Y1HelperApp(tk.Tk):
             def do_download_and_flash():
                 try:
                     repo_url = firmware_info['url']
-                    if os.path.exists(firmware_path):
-                        try:
-                            os.remove(firmware_path)
-                        except Exception as e:
-                            debug_print(f"Failed to delete old system.img: {e}")
+                    # Download all .img and .bin assets from the release
+                    downloaded_files = {}
                     if 'github.com' in repo_url and '/releases/latest' in repo_url:
                         repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
                         api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
                         r = requests.get(api_url)
                         release_data = r.json()
-                        img_asset = None
-                        for asset in release_data.get('assets', []):
-                            if asset['name'].endswith('.img'):
-                                img_asset = asset
-                                break
-                        if not img_asset:
-                            raise Exception("No .img asset found in latest release")
-                        download_url = img_asset['browser_download_url']
+                        assets = release_data.get('assets', [])
+                        for asset in assets:
+                            name = asset['name']
+                            if name.endswith('.img') or name.endswith('.bin'):
+                                download_url = asset['browser_download_url']
+                                dest_path = os.path.join(firmware_dir, name)
+                                with requests.get(download_url, stream=True) as response:
+                                    response.raise_for_status()
+                                    with open(dest_path, 'wb') as f:
+                                        shutil.copyfileobj(response.raw, f)
+                                downloaded_files[name] = dest_path
                     else:
-                        download_url = repo_url
-                    with requests.get(download_url, stream=True) as response:
-                        response.raise_for_status()
-                        file_size = int(response.headers.get('content-length', 0))
-                        downloaded = 0
-                        chunk_count = 0
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if not chunk:
-                                break
-                            with open(firmware_path, 'ab') as f:
-                                f.write(chunk)
-                            downloaded += len(chunk)
-                            chunk_count += 1
-                            if chunk_count % 32 == 0 or downloaded == file_size:
-                                percent = (downloaded / file_size) * 100
-                                dialog.after(0, status_label.config, {"text": f"Please turn off and unplug your device. Downloading... {percent:.1f}% ({downloaded / (1024*1024):.1f}MB / {file_size / (1024*1024):.1f}MB)"})
-                                import time; time.sleep(0.01)
-                        dialog.after(0, status_label.config, {"text": "Download complete!"})
-                        dialog.after(0, warn_label.pack_forget)
-                        dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
-                        time.sleep(1.0)
-                        self._flash_with_modal(dialog, status_label, ok_button, firmware_path, progress_bar)
+                        # Direct URL to a single file (legacy/local)
+                        name = os.path.basename(repo_url)
+                        if name.endswith('.img') or name.endswith('.bin'):
+                            dest_path = os.path.join(firmware_dir, name)
+                            with requests.get(repo_url, stream=True) as response:
+                                response.raise_for_status()
+                                with open(dest_path, 'wb') as f:
+                                    shutil.copyfileobj(response.raw, f)
+                            downloaded_files[name] = dest_path
+                    # Check for system.img
+                    if "system.img" not in downloaded_files:
+                        dialog.after(0, status_label.config, {"text": "Error: system.img not found in release. Aborting."})
+                        dialog.after(0, ok_button.config, {"state": "normal"})
+                        return
+                    # Copy missing required files from assets
+                    for req_file in REQUIRED_FILES:
+                        dest_path = os.path.join(firmware_dir, req_file)
+                        if not os.path.exists(dest_path):
+                            src_path = os.path.join(assets_dir, req_file)
+                            if os.path.exists(src_path):
+                                shutil.copy2(src_path, dest_path)
+                    dialog.after(0, status_label.config, {"text": "All firmware files prepared. Starting flash..."})
+                    dialog.after(0, warn_label.pack_forget)
+                    dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
+                    time.sleep(1.0)
+                    self._flash_with_modal(dialog, status_label, ok_button, os.path.join(firmware_dir, "system.img"), progress_bar)
                 except Exception as e:
                     debug_print(f"Exception in do_download_and_flash: {e}")
                     dialog.after(0, status_label.config, {"text": f"Error: {e}"})
