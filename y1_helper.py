@@ -64,7 +64,7 @@ class Y1HelperApp(tk.Tk):
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         
         # Version information
-        self.version = "0.5.0"
+        self.version = "0.5.1"
         
         # Write version.txt file
         self.write_version_file()
