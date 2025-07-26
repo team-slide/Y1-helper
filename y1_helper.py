@@ -1332,6 +1332,9 @@ class Y1HelperApp(tk.Tk):
                     # Set device to stay awake
                     self.set_device_stay_awake()
                     
+                    # Sync device time with host system
+                    self.sync_device_time()
+                    
                     # Device connected - no firmware preparation check needed
                     pass
                 
@@ -2004,6 +2007,42 @@ class Y1HelperApp(tk.Tk):
                 debug_print(f"Failed to set stay awake: {stderr}")
         except Exception as e:
             debug_print(f"Error setting stay awake: {e}")
+    
+    def sync_device_time(self):
+        """Sync device time with host system time using root access"""
+        if not self.device_connected:
+            return
+            
+        try:
+            import time
+            import datetime
+            
+            # Get current system time in seconds since epoch
+            current_time = int(time.time())
+            
+            # Try to set the system time using root access
+            success, stdout, stderr = self.run_adb_command(f"shell su -c 'date -s @{current_time}'")
+            
+            if success:
+                # Also set the timezone if possible
+                timezone_cmd = "shell su -c 'setprop persist.sys.timezone $(getprop persist.sys.timezone)'"
+                self.run_adb_command(timezone_cmd)  # Don't check success, this is optional
+                
+                debug_print(f"Device time synced successfully: {datetime.datetime.fromtimestamp(current_time)}")
+                self.status_var.set("Device connected - Time synced")
+            else:
+                # Fallback: try without root access (may work on some devices)
+                success2, stdout2, stderr2 = self.run_adb_command(f"shell date -s @{current_time}")
+                if success2:
+                    debug_print(f"Device time synced (non-root): {datetime.datetime.fromtimestamp(current_time)}")
+                    self.status_var.set("Device connected - Time synced")
+                else:
+                    debug_print(f"Failed to sync device time: {stderr}")
+                    self.status_var.set("Device connected - Time sync not available on this ROM")
+                    
+        except Exception as e:
+            debug_print(f"Exception syncing device time: {e}")
+            self.status_var.set("Device connected - Time sync failed")
     
     def is_screen_blank(self, img):
         """Detect if the screen is blank/black (mostly dark with low variance)"""
