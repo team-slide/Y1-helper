@@ -88,6 +88,18 @@ class Y1HelperApp(tk.Tk):
         else:
             os.makedirs(rom_dir, exist_ok=True)
         
+        # At launch: copy new.xml to assets/install_rom.xml if it exists, then delete new.xml
+        new_xml_path = os.path.join(self.base_dir, 'new.xml')
+        install_rom_path = os.path.join(assets_dir, 'install_rom.xml')
+        if os.path.exists(new_xml_path):
+            try:
+                shutil.copy2(new_xml_path, install_rom_path)
+                debug_print('Copied new.xml to assets/install_rom.xml')
+                os.remove(new_xml_path)
+                debug_print('Deleted new.xml from project directory')
+            except Exception as e:
+                debug_print(f'Failed to copy/delete new.xml: {e}')
+        
         self.title(f"Y1 Helper v{self.version}")
         self.geometry("452x661")  # Increased by 32px width and 32px height
         self.resizable(False, False)
@@ -2007,76 +2019,53 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error setting stay awake: {e}")
     
     def sync_device_time(self):
-        """Sync device time with host system time using root access"""
+        """Sync device time with host system time using toolbox date format"""
         if not self.device_connected:
             messagebox.showerror("Device Not Connected", "Please connect your device first.")
             return
-            
         try:
-            import time
             import datetime
-            
-            # Get current system time in seconds since epoch
-            current_time = int(time.time())
-            current_time_str = datetime.datetime.fromtimestamp(current_time).strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Try to set the system time using root access
-            success, stdout, stderr = self.run_adb_command(f"shell su -c 'date -s @{current_time}'")
-            
-            if success:
-                # Also set the timezone if possible
-                timezone_cmd = "shell su -c 'setprop persist.sys.timezone $(getprop persist.sys.timezone)'"
-                self.run_adb_command(timezone_cmd)  # Don't check success, this is optional
-                
+            # Get current system time in toolbox format: YYYYMMDD.HHmmss
+            now = datetime.datetime.now()
+            toolbox_time = now.strftime('%Y%m%d.%H%M%S')
+            current_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Check if toolbox is available
+            check_toolbox, out, err = self.run_adb_command('shell toolbox date')
+            if not check_toolbox or 'not found' in out or 'not found' in err:
+                messagebox.showerror("Toolbox Not Found", "The 'toolbox' binary is not available on this device. Time sync cannot proceed.")
+                self.status_var.set("Toolbox not found on device")
+                return
+
+            # Set the system time using toolbox
+            set_cmd = f'shell su 0 toolbox date -s {toolbox_time}'
+            success, stdout, stderr = self.run_adb_command(set_cmd)
+
+            if success and (str(now.year) in stdout or str(now.year) in stderr):
                 debug_print(f"Device time synced successfully: {current_time_str}")
                 
-                # Reboot the device to apply time changes
-                reboot_success, reboot_stdout, reboot_stderr = self.run_adb_command("reboot")
+                # Check if org.rockbox is running and restart it
+                rockbox_check, rockbox_out, rockbox_err = self.run_adb_command('shell dumpsys activity activities | grep org.rockbox')
+                if rockbox_check and 'org.rockbox' in rockbox_out:
+                    debug_print("Rockbox is running, restarting it...")
+                    # Force stop org.rockbox
+                    self.run_adb_command('shell am force-stop org.rockbox')
+                    # Wait a moment
+                    time.sleep(1)
+                    # Start org.rockbox again
+                    self.run_adb_command('shell am start -n org.rockbox/.RockboxActivity')
+                    debug_print("Rockbox restarted")
                 
-                if reboot_success:
-                    messagebox.showinfo("Time Sync Complete", 
-                        f"Device time has been successfully set to:\n{current_time_str}\n\n"
-                        "The device will now reboot to apply the changes.\n"
-                        "Please wait for it to reconnect.")
-                else:
-                    messagebox.showwarning("Time Sync Complete", 
-                        f"Device time has been successfully set to:\n{current_time_str}\n\n"
-                        "However, the automatic reboot failed.\n"
-                        "You may need to manually reboot the device for changes to take effect.")
+                # Send home command to return to launcher
+                self.run_adb_command('shell input keyevent 3')  # KEYCODE_HOME
+                debug_print("Sent home command")
                 
-                self.status_var.set("Device time synced - Rebooting...")
-                
+                messagebox.showinfo("Time Sync Complete", f"Device time has been successfully set to:\n{current_time_str}\n\nRockbox has been restarted if it was running.")
+                self.status_var.set("Device time synced successfully")
             else:
-                # Fallback: try without root access (may work on some devices)
-                success2, stdout2, stderr2 = self.run_adb_command(f"shell date -s @{current_time}")
-                if success2:
-                    debug_print(f"Device time synced (non-root): {current_time_str}")
-                    
-                    # Reboot the device to apply time changes
-                    reboot_success, reboot_stdout, reboot_stderr = self.run_adb_command("reboot")
-                    
-                    if reboot_success:
-                        messagebox.showinfo("Time Sync Complete", 
-                            f"Device time has been successfully set to:\n{current_time_str}\n\n"
-                            "The device will now reboot to apply the changes.\n"
-                            "Please wait for it to reconnect.")
-                    else:
-                        messagebox.showwarning("Time Sync Complete", 
-                            f"Device time has been successfully set to:\n{current_time_str}\n\n"
-                            "However, the automatic reboot failed.\n"
-                            "You may need to manually reboot the device for changes to take effect.")
-                    
-                    self.status_var.set("Device time synced - Rebooting...")
-                    
-                else:
-                    debug_print(f"Failed to sync device time: {stderr}")
-                    messagebox.showwarning("Time Sync Failed", 
-                        "Unable to set the device time.\n\n"
-                        "This feature requires root access and custom firmware.\n"
-                        "Stock ROMs typically don't allow time modification via ADB.\n\n"
-                        "If you're running custom firmware, ensure root access is enabled.")
-                    self.status_var.set("Time sync not available on this ROM")
-                    
+                debug_print(f"Failed to sync device time: {stderr or stdout}")
+                messagebox.showwarning("Time Sync Failed", f"Unable to set the device time.\n\nADB output:\n{stderr or stdout}\n\nThis feature requires root access and toolbox support.")
+                self.status_var.set("Time sync failed")
         except Exception as e:
             debug_print(f"Exception syncing device time: {e}")
             messagebox.showerror("Time Sync Error", f"An error occurred while syncing device time:\n{str(e)}")
