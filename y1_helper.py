@@ -1159,6 +1159,7 @@ class Y1HelperApp(tk.Tk):
         self.device_menu.add_command(label="Take Screenshot", command=self.take_screenshot)
         self.device_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
         self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
+        self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
         
@@ -1331,9 +1332,6 @@ class Y1HelperApp(tk.Tk):
                     
                     # Set device to stay awake
                     self.set_device_stay_awake()
-                    
-                    # Sync device time with host system
-                    self.sync_device_time()
                     
                     # Device connected - no firmware preparation check needed
                     pass
@@ -2011,6 +2009,7 @@ class Y1HelperApp(tk.Tk):
     def sync_device_time(self):
         """Sync device time with host system time using root access"""
         if not self.device_connected:
+            messagebox.showerror("Device Not Connected", "Please connect your device first.")
             return
             
         try:
@@ -2019,6 +2018,7 @@ class Y1HelperApp(tk.Tk):
             
             # Get current system time in seconds since epoch
             current_time = int(time.time())
+            current_time_str = datetime.datetime.fromtimestamp(current_time).strftime("%Y-%m-%d %H:%M:%S")
             
             # Try to set the system time using root access
             success, stdout, stderr = self.run_adb_command(f"shell su -c 'date -s @{current_time}'")
@@ -2028,21 +2028,59 @@ class Y1HelperApp(tk.Tk):
                 timezone_cmd = "shell su -c 'setprop persist.sys.timezone $(getprop persist.sys.timezone)'"
                 self.run_adb_command(timezone_cmd)  # Don't check success, this is optional
                 
-                debug_print(f"Device time synced successfully: {datetime.datetime.fromtimestamp(current_time)}")
-                self.status_var.set("Device connected - Time synced")
+                debug_print(f"Device time synced successfully: {current_time_str}")
+                
+                # Reboot the device to apply time changes
+                reboot_success, reboot_stdout, reboot_stderr = self.run_adb_command("reboot")
+                
+                if reboot_success:
+                    messagebox.showinfo("Time Sync Complete", 
+                        f"Device time has been successfully set to:\n{current_time_str}\n\n"
+                        "The device will now reboot to apply the changes.\n"
+                        "Please wait for it to reconnect.")
+                else:
+                    messagebox.showwarning("Time Sync Complete", 
+                        f"Device time has been successfully set to:\n{current_time_str}\n\n"
+                        "However, the automatic reboot failed.\n"
+                        "You may need to manually reboot the device for changes to take effect.")
+                
+                self.status_var.set("Device time synced - Rebooting...")
+                
             else:
                 # Fallback: try without root access (may work on some devices)
                 success2, stdout2, stderr2 = self.run_adb_command(f"shell date -s @{current_time}")
                 if success2:
-                    debug_print(f"Device time synced (non-root): {datetime.datetime.fromtimestamp(current_time)}")
-                    self.status_var.set("Device connected - Time synced")
+                    debug_print(f"Device time synced (non-root): {current_time_str}")
+                    
+                    # Reboot the device to apply time changes
+                    reboot_success, reboot_stdout, reboot_stderr = self.run_adb_command("reboot")
+                    
+                    if reboot_success:
+                        messagebox.showinfo("Time Sync Complete", 
+                            f"Device time has been successfully set to:\n{current_time_str}\n\n"
+                            "The device will now reboot to apply the changes.\n"
+                            "Please wait for it to reconnect.")
+                    else:
+                        messagebox.showwarning("Time Sync Complete", 
+                            f"Device time has been successfully set to:\n{current_time_str}\n\n"
+                            "However, the automatic reboot failed.\n"
+                            "You may need to manually reboot the device for changes to take effect.")
+                    
+                    self.status_var.set("Device time synced - Rebooting...")
+                    
                 else:
                     debug_print(f"Failed to sync device time: {stderr}")
-                    self.status_var.set("Device connected - Time sync not available on this ROM")
+                    messagebox.showwarning("Time Sync Failed", 
+                        "Unable to set the device time.\n\n"
+                        "This feature requires root access and custom firmware.\n"
+                        "Stock ROMs typically don't allow time modification via ADB.\n\n"
+                        "If you're running custom firmware, ensure root access is enabled.")
+                    self.status_var.set("Time sync not available on this ROM")
                     
         except Exception as e:
             debug_print(f"Exception syncing device time: {e}")
-            self.status_var.set("Device connected - Time sync failed")
+            messagebox.showerror("Time Sync Error", f"An error occurred while syncing device time:\n{str(e)}")
+            self.status_var.set("Time sync failed")
     
     def is_screen_blank(self, img):
         """Detect if the screen is blank/black (mostly dark with low variance)"""
