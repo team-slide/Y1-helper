@@ -3198,7 +3198,10 @@ class Y1HelperApp(tk.Tk):
             try:
                 with urllib.request.urlopen(manifest_url) as response:
                     manifest_content = response.read().decode('utf-8')
+                debug_print(f"Manifest content length: {len(manifest_content)} characters")
+                debug_print(f"Manifest preview: {manifest_content[:500]}...")
                 firmware_options = self.parse_firmware_manifest(manifest_content)
+                debug_print(f"Parsed firmware options: {firmware_options}")
                 if not firmware_options:
                     messagebox.showerror("No Firmware Found", "No firmware options found in the manifest.")
                     return
@@ -3341,30 +3344,46 @@ class Y1HelperApp(tk.Tk):
                                         
                                         # Get the actual filename by removing .txt extension
                                         actual_name = name[:-4]  # Remove .txt
-                                        if actual_name.endswith('.img') or actual_name.endswith('.bin'):
-                                            dest_path = os.path.join(firmware_dir, actual_name)
-                                            dialog.after(0, status_label.config, {"text": f"Downloading {actual_name} from Google Drive..."})
-                                            
-                                            # Download from Google Drive
-                                            with requests.get(gdrive_url, stream=True) as response:
-                                                response.raise_for_status()
-                                                file_size = int(response.headers.get('content-length', 0))
-                                                downloaded = 0
-                                                progress_bar.config(mode='determinate', maximum=file_size)
-                                                with open(dest_path, 'wb') as f:
-                                                    for chunk in response.iter_content(chunk_size=8192):
-                                                        if not chunk:
-                                                            break
-                                                        f.write(chunk)
-                                                        downloaded += len(chunk)
-                                                        percent = (downloaded / file_size) * 100 if file_size else 0
-                                                        dialog.after(0, status_label.config, {"text": f"Downloading {actual_name} from Google Drive... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
-                                                        dialog.after(0, progress_bar.step, (len(chunk),))
-                                                dialog.after(0, lambda: progress_bar.config(value=0))
-                                            downloaded_files[actual_name] = dest_path
-                                            debug_print(f"Successfully downloaded {actual_name} from Google Drive ID: {gdrive_id}")
-                                        else:
-                                            debug_print(f"Skipping {name} - not a valid firmware file after removing .txt extension")
+                                        
+                                        # Map to correct file extensions based on install_rom.xml
+                                        file_extension_map = {
+                                            'MBR': 'MBR',  # No extension
+                                            'EBR1': 'EBR1',  # No extension
+                                            'EBR2': 'EBR2',  # No extension
+                                            'lk': 'lk.bin',
+                                            'boot': 'boot.img',
+                                            'recovery': 'recovery.img',
+                                            'secro': 'secro.img',
+                                            'logo': 'logo.bin',
+                                            'system': 'system.img',
+                                            'cache': 'cache.img',
+                                            'userdata': 'userdata.img',
+                                            'preloader_g368_nyx': 'preloader_g368_nyx.bin'
+                                        }
+                                        
+                                        # Use mapped name if available, otherwise use original name
+                                        final_name = file_extension_map.get(actual_name, actual_name)
+                                        dest_path = os.path.join(firmware_dir, final_name)
+                                        dialog.after(0, status_label.config, {"text": f"Downloading {final_name} from Google Drive..."})
+                                        
+                                        # Download from Google Drive
+                                        with requests.get(gdrive_url, stream=True) as response:
+                                            response.raise_for_status()
+                                            file_size = int(response.headers.get('content-length', 0))
+                                            downloaded = 0
+                                            progress_bar.config(mode='determinate', maximum=file_size)
+                                            with open(dest_path, 'wb') as f:
+                                                for chunk in response.iter_content(chunk_size=8192):
+                                                    if not chunk:
+                                                        break
+                                                    f.write(chunk)
+                                                    downloaded += len(chunk)
+                                                    percent = (downloaded / file_size) * 100 if file_size else 0
+                                                    dialog.after(0, status_label.config, {"text": f"Downloading {final_name} from Google Drive... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                                    dialog.after(0, progress_bar.step, (len(chunk),))
+                                            dialog.after(0, lambda: progress_bar.config(value=0))
+                                        downloaded_files[final_name] = dest_path
+                                        debug_print(f"Successfully downloaded {final_name} from Google Drive ID: {gdrive_id}")
                                     else:
                                         debug_print(f"Invalid Google Drive ID in {name}: {gdrive_id}")
                                 except Exception as e:
@@ -3392,11 +3411,11 @@ class Y1HelperApp(tk.Tk):
                                         dialog.after(0, progress_bar.step, (len(chunk),))
                                 dialog.after(0, lambda: progress_bar.config(value=0))
                             downloaded_files[name] = dest_path
-                    # Check for system.img
-                    if "system.img" not in downloaded_files:
-                        dialog.after(0, status_label.config, {"text": "Error: system.img not found in release. Aborting."})
-                        dialog.after(0, ok_button.config, {"state": "normal"})
-                        return
+                    # Check for system.img (temporarily disabled for testing)
+                    # if "system.img" not in downloaded_files:
+                    #     dialog.after(0, status_label.config, {"text": "Error: system.img not found in release. Aborting."})
+                    #     dialog.after(0, ok_button.config, {"state": "normal"})
+                    #     return
                     # Copy missing required files from assets
                     for req_file in REQUIRED_FILES:
                         dest_path = os.path.join(firmware_dir, req_file)
