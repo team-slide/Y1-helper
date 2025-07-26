@@ -93,12 +93,27 @@ class Y1HelperApp(tk.Tk):
         install_rom_path = os.path.join(assets_dir, 'install_rom.xml')
         if os.path.exists(new_xml_path):
             try:
+                # Force copy to overwrite existing file
                 shutil.copy2(new_xml_path, install_rom_path)
                 debug_print('Copied new.xml to assets/install_rom.xml')
+                # Remove new.xml from project directory
                 os.remove(new_xml_path)
                 debug_print('Deleted new.xml from project directory')
             except Exception as e:
                 debug_print(f'Failed to copy/delete new.xml: {e}')
+                # Try to remove new.xml even if copy failed
+                try:
+                    if os.path.exists(new_xml_path):
+                        os.remove(new_xml_path)
+                        debug_print('Deleted new.xml from project directory after copy failure')
+                except Exception as e2:
+                    debug_print(f'Failed to delete new.xml after copy failure: {e2}')
+        
+        # Verify the copy operation worked
+        if os.path.exists(new_xml_path):
+            debug_print('WARNING: new.xml still exists after copy attempt - will retry on next launch')
+        elif os.path.exists(install_rom_path):
+            debug_print('SUCCESS: install_rom.xml is ready for firmware flashing')
         
         self.title(f"Y1 Helper v{self.version}")
         self.geometry("452x661")  # Increased by 32px width and 32px height
@@ -3268,11 +3283,26 @@ class Y1HelperApp(tk.Tk):
                     repo_url = firmware_info['url']
                     # Download all .img and .bin assets from the release
                     downloaded_files = {}
-                    if 'github.com' in repo_url and '/releases/latest' in repo_url:
-                        repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
-                        api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
+                    if 'github.com' in repo_url and ('/releases/latest' in repo_url or '/releases/' in repo_url):
+                        # Handle both /releases/latest and /releases/ URLs
+                        if '/releases/latest' in repo_url:
+                            repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
+                            api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
+                        else:
+                            # Handle /releases/ URLs - get the first release
+                            repo_path = repo_url.replace('https://github.com/', '').split('/releases')[0]
+                            api_url = f"https://api.github.com/repos/{repo_path}/releases"
                         r = requests.get(api_url)
                         release_data = r.json()
+                        
+                        # Handle case where we get a list of releases (for /releases/ URLs)
+                        if isinstance(release_data, list):
+                            if release_data:
+                                release_data = release_data[0]  # Get the first release
+                                debug_print(f"Using first release: {release_data.get('tag_name', 'unknown')}")
+                            else:
+                                raise Exception(f"No releases found for {repo_path}")
+                        
                         assets = release_data.get('assets', [])
                         for asset in assets:
                             name = asset['name']
@@ -3296,6 +3326,50 @@ class Y1HelperApp(tk.Tk):
                                             dialog.after(0, progress_bar.step, (len(chunk),))
                                     dialog.after(0, lambda: progress_bar.config(value=0))
                                 downloaded_files[name] = dest_path
+                            elif name.endswith('.txt'):
+                                # Handle Google Drive links in .txt files
+                                try:
+                                    # Download the .txt file to get the Google Drive ID
+                                    txt_response = requests.get(asset['browser_download_url'])
+                                    txt_response.raise_for_status()
+                                    gdrive_id = txt_response.text.strip()
+                                    
+                                    # Validate it looks like a Google Drive ID
+                                    if len(gdrive_id) > 10 and gdrive_id.isalnum():
+                                        # Construct the Google Drive direct download URL
+                                        gdrive_url = f"https://drive.google.com/uc?export=download&id={gdrive_id}"
+                                        
+                                        # Get the actual filename by removing .txt extension
+                                        actual_name = name[:-4]  # Remove .txt
+                                        if actual_name.endswith('.img') or actual_name.endswith('.bin'):
+                                            dest_path = os.path.join(firmware_dir, actual_name)
+                                            dialog.after(0, status_label.config, {"text": f"Downloading {actual_name} from Google Drive..."})
+                                            
+                                            # Download from Google Drive
+                                            with requests.get(gdrive_url, stream=True) as response:
+                                                response.raise_for_status()
+                                                file_size = int(response.headers.get('content-length', 0))
+                                                downloaded = 0
+                                                progress_bar.config(mode='determinate', maximum=file_size)
+                                                with open(dest_path, 'wb') as f:
+                                                    for chunk in response.iter_content(chunk_size=8192):
+                                                        if not chunk:
+                                                            break
+                                                        f.write(chunk)
+                                                        downloaded += len(chunk)
+                                                        percent = (downloaded / file_size) * 100 if file_size else 0
+                                                        dialog.after(0, status_label.config, {"text": f"Downloading {actual_name} from Google Drive... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                                        dialog.after(0, progress_bar.step, (len(chunk),))
+                                                dialog.after(0, lambda: progress_bar.config(value=0))
+                                            downloaded_files[actual_name] = dest_path
+                                            debug_print(f"Successfully downloaded {actual_name} from Google Drive ID: {gdrive_id}")
+                                        else:
+                                            debug_print(f"Skipping {name} - not a valid firmware file after removing .txt extension")
+                                    else:
+                                        debug_print(f"Invalid Google Drive ID in {name}: {gdrive_id}")
+                                except Exception as e:
+                                    debug_print(f"Error processing Google Drive link in {name}: {e}")
+                                    continue
                     else:
                         # Direct URL to a single file (legacy/local)
                         name = os.path.basename(repo_url)
@@ -3350,7 +3424,8 @@ class Y1HelperApp(tk.Tk):
         import threading
         try:
             debug_print("Entered _flash_with_modal")
-            self.update_install_rom_xml(firmware_path)
+            # Copy firmware files to rom directory (does not edit XML content)
+            self.copy_firmware_files_to_rom_directory(firmware_path)
             flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
             install_rom_path = os.path.join(assets_dir, "install_rom.xml")
             debug_print(f"Checking for flash_tool.exe at: {flash_tool_path}")
@@ -3442,8 +3517,10 @@ class Y1HelperApp(tk.Tk):
             dialog.after(0, ok_button.pack)
             dialog.after(0, ok_button.config, {"state": tk.NORMAL})
 
-    def update_install_rom_xml(self, firmware_path):
-        """Copy all required firmware files to assets/rom directory with priority rules. y1_helper does NOT edit XML contents."""
+    def copy_firmware_files_to_rom_directory(self, firmware_path):
+        """Copy all required firmware files to assets/rom directory with priority rules. 
+        This function does NOT edit XML contents - it only copies files to ensure they exist in rom/ directory.
+        The XML file (install_rom.xml) must already contain the correct 'rom/' paths - developers handle XML editing."""
         try:
             # Create rom directory if it doesn't exist
             rom_dir = os.path.join(assets_dir, "rom")
