@@ -3443,32 +3443,59 @@ class Y1HelperApp(tk.Tk):
             dialog.after(0, ok_button.config, {"state": tk.NORMAL})
 
     def update_install_rom_xml(self, firmware_path):
-        """Update install_rom.xml to use only filenames for all file references, so flash_tool.exe can find them when run from assets."""
+        """Copy all required firmware files to assets/rom directory with priority rules. y1_helper does NOT edit XML contents."""
         try:
-            xml_path = os.path.join(assets_dir, "install_rom.xml")
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
-            # Update download-agent and scatter to filename only
-            general = root.find('.//general')
-            if general is not None:
-                da = general.find('download-agent')
-                if da is not None and da.text:
-                    da.text = os.path.basename(da.text)
-                scatter = general.find('scatter')
-                if scatter is not None and scatter.text:
-                    scatter.text = os.path.basename(scatter.text)
-            # Update all ROM paths to filename only
-            for rom in root.findall('.//rom'):
-                if rom.text:
-                    rom.text = os.path.basename(rom.text)
-            # Update system.img path if needed
-            for rom in root.findall('.//rom'):
-                if 'system.img' in rom.text:
-                    rom.text = os.path.basename(firmware_path)
-            tree.write(xml_path, encoding='utf-8', xml_declaration=True)
-            debug_print(f"Updated install_rom.xml to use filenames only for all file references.")
+            # Create rom directory if it doesn't exist
+            rom_dir = os.path.join(assets_dir, "rom")
+            os.makedirs(rom_dir, exist_ok=True)
+            
+            # List of all required firmware files
+            required_files = [
+                "MTK_AllInOne_DA.bin",
+                "MT6572_Android_scatter.txt", 
+                "preloader_g368_nyx.bin",
+                "MBR",
+                "EBR1",
+                "lk.bin",
+                "boot.img",
+                "recovery.img",
+                "secro.img",
+                "logo.bin",
+                "system.img",
+                "cache.img",
+                "userdata.img"
+            ]
+            
+            # Copy each required file with priority rules
+            for filename in required_files:
+                dest_path = os.path.join(rom_dir, filename)
+                
+                # Priority 1: Check if file exists in rom directory (already copied)
+                if os.path.exists(dest_path):
+                    debug_print(f"{filename} already exists in rom directory")
+                    continue
+                
+                # Priority 2: Check if file exists in assets directory (fallback)
+                assets_source = os.path.join(assets_dir, filename)
+                if os.path.exists(assets_source):
+                    shutil.copy2(assets_source, dest_path)
+                    debug_print(f"Copied {filename} from assets to rom directory")
+                    continue
+                
+                # Priority 3: Special handling for system.img from firmware_path
+                if filename == "system.img" and firmware_path:
+                    if os.path.exists(firmware_path):
+                        shutil.copy2(firmware_path, dest_path)
+                        debug_print(f"Copied system.img from firmware_path to rom directory")
+                        continue
+                
+                # File not found in any location
+                debug_print(f"Warning: {filename} not found in assets or firmware_path")
+            
+            debug_print("Completed copying all required firmware files to rom directory")
+            
         except Exception as e:
-            debug_print(f"Error updating install_rom.xml: {e}")
+            debug_print(f"Error copying firmware files to rom directory: {e}")
 
     def create_progress_dialog(self, title="Progress"):
         """Create a progress dialog with status and progress bar"""
