@@ -560,86 +560,100 @@ class Y1HelperApp(tk.Tk):
             
             # Parse the GitHub URL to get repo and latest release
             repo_url = app_info['url']
-            if 'github.com' in repo_url and '/releases/latest' in repo_url:
-                repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
-                debug_print(f"Parsed repo path: {repo_path}")
-                
-                update_progress(f"Fetching latest release from {repo_path}...")
-                
-                # Try to get the latest release using the /latest endpoint
-                api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
-                headers = {}
-                if github_token:
-                    headers['Authorization'] = f'token {github_token}'
-                
-                try:
-                    with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
-                        release_data = json.loads(response.read().decode('utf-8'))
-                        debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
-                except urllib.error.HTTPError as e:
-                    if e.code == 404:
-                        # Latest endpoint failed, try getting first release from all releases
-                        debug_print(f"Latest endpoint failed (404), trying first release...")
-                        api_url = f"https://api.github.com/repos/{repo_path}/releases"
+            release_data = None
+            repo_path = None
+            headers = {}
+            if github_token:
+                headers['Authorization'] = f'token {github_token}'
+
+            if 'github.com' in repo_url:
+                if '/releases/latest' in repo_url:
+                    repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
+                    debug_print(f"Parsed repo path: {repo_path}")
+                    update_progress(f"Fetching latest release from {repo_path}...")
+                    api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
+                    try:
+                        with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
+                            release_data = json.loads(response.read().decode('utf-8'))
+                            debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            debug_print(f"Latest endpoint failed (404), trying first release...")
+                            api_url = f"https://api.github.com/repos/{repo_path}/releases"
+                            with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
+                                releases = json.loads(response.read().decode('utf-8'))
+                                if releases:
+                                    release_data = releases[0]
+                                    debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                                else:
+                                    raise Exception(f"No releases found for {repo_path}")
+                        else:
+                            raise Exception(f"GitHub API error: {e.code} - {e.reason}")
+                elif '/releases/' in repo_url or repo_url.rstrip('/').endswith('/releases'):
+                    # Handle /releases/ or /releases
+                    repo_path = repo_url.replace('https://github.com/', '').split('/releases')[0]
+                    debug_print(f"Parsed repo path: {repo_path}")
+                    update_progress(f"Fetching latest release from {repo_path}...")
+                    api_url = f"https://api.github.com/repos/{repo_path}/releases"
+                    try:
                         with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
                             releases = json.loads(response.read().decode('utf-8'))
                             if releases:
-                                release_data = releases[0]  # Get first (most recent) release
+                                release_data = releases[0]
                                 debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
                             else:
                                 raise Exception(f"No releases found for {repo_path}")
-                    else:
+                    except urllib.error.HTTPError as e:
                         raise Exception(f"GitHub API error: {e.code} - {e.reason}")
+                else:
+                    raise Exception("Unsupported GitHub releases URL format. Please use a /releases or /releases/latest link.")
+            
+            # Find APK asset
+            update_progress("Searching for APK file...")
+            apk_asset = None
+            available_assets = []
+            for asset in release_data.get('assets', []):
+                available_assets.append(asset['name'])
+                if asset['name'].endswith('.apk'):
+                    apk_asset = asset
+                    break
+            
+            debug_print(f"Available assets: {available_assets}")
+            
+            if not apk_asset:
+                progress_dialog.destroy()
+                raise Exception(f"No APK found in latest release for {app_info['name']}. Available assets: {available_assets}")
+            
+            # Download APK
+            download_url = apk_asset['browser_download_url']
+            download_path = os.path.join(tempfile.gettempdir(), f"{app_info['name'].replace(' ', '_')}.apk")
+            
+            update_progress(f"Downloading {app_info['name']}...")
+            debug_print(f"Downloading {app_info['name']} from: {download_url}")
+            
+            with urllib.request.urlopen(download_url) as response:
+                # Get file size for progress
+                file_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
                 
-                # Find APK asset
-                update_progress("Searching for APK file...")
-                apk_asset = None
-                available_assets = []
-                for asset in release_data.get('assets', []):
-                    available_assets.append(asset['name'])
-                    if asset['name'].endswith('.apk'):
-                        apk_asset = asset
-                        break
-                
-                debug_print(f"Available assets: {available_assets}")
-                
-                if not apk_asset:
-                    progress_dialog.destroy()
-                    raise Exception(f"No APK found in latest release for {app_info['name']}. Available assets: {available_assets}")
-                
-                # Download APK
-                download_url = apk_asset['browser_download_url']
-                download_path = os.path.join(tempfile.gettempdir(), f"{app_info['name'].replace(' ', '_')}.apk")
-                
-                update_progress(f"Downloading {app_info['name']}...")
-                debug_print(f"Downloading {app_info['name']} from: {download_url}")
-                
-                with urllib.request.urlopen(download_url) as response:
-                    # Get file size for progress
-                    file_size = int(response.headers.get('content-length', 0))
-                    downloaded = 0
-                    
-                    with open(download_path, 'wb') as f:
-                        while True:
-                            chunk = response.read(8192)  # 8KB chunks
-                            if not chunk:
-                                break
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            
-                            if file_size > 0:
-                                percent = (downloaded / file_size) * 100
-                                update_progress(f"Downloading {app_info['name']}... {percent:.1f}%")
-                            else:
-                                update_progress(f"Downloading {app_info['name']}... {downloaded:,} bytes")
-                
-                update_progress("Download complete!")
-                
-                debug_print(f"Downloaded {app_info['name']} to: {download_path}")
-                return download_path
-            else:
-                raise Exception(f"Unsupported repository URL: {repo_url}")
-                
+                with open(download_path, 'wb') as f:
+                    while True:
+                        chunk = response.read(8192)  # 8KB chunks
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        if file_size > 0:
+                            percent = (downloaded / file_size) * 100
+                            update_progress(f"Downloading {app_info['name']}... {percent:.1f}%")
+                        else:
+                            update_progress(f"Downloading {app_info['name']}... {downloaded:,} bytes")
+            
+            update_progress("Download complete!")
+            
+            debug_print(f"Downloaded {app_info['name']} to: {download_path}")
+            return download_path
         except Exception as e:
             debug_print(f"Error downloading app {app_info['name']}: {e}")
             return None
@@ -1174,42 +1188,55 @@ class Y1HelperApp(tk.Tk):
         self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
         self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
         self.apps_menu.add_separator()
-        success, stdout, stderr = self.run_adb_command(
+        
+        # Get user-installed apps
+        success_user, stdout_user, stderr_user = self.run_adb_command(
             "shell pm list packages -3 -f")
-        apps = []
-        launcher_pkgs = [
-            "com.teslacoilsw.launcher",
-            "com.android.launcher",
-            "com.lge.launcher2",
-            "com.sec.android.app.launcher",
-            "com.miui.home",
-            "com.innioasis.y1",
-            "com.ayst.factorytest",
-            "jp.ne.neko.freewing.KeyCodeDisp"
-        ]
-        if success:
-            debug_print(f"Found {len(stdout.strip().split('\n'))} package lines")
-            for line in stdout.strip().split('\n'):
+        user_apps = []
+        
+        # Get system apps
+        success_system, stdout_system, stderr_system = self.run_adb_command(
+            "shell pm list packages -s -f")
+        system_apps = []
+        
+        # Parse user apps
+        if success_user:
+            debug_print(f"Found {len(stdout_user.strip().split('\n'))} user package lines")
+            for line in stdout_user.strip().split('\n'):
                 if line.startswith('package:'):
                     if '=' in line:
                         package_name = line.split('=')[1]
                     else:
                         package_name = line[len('package:'):]
-                    if package_name in launcher_pkgs:
-                        debug_print(f"Skipping launcher package: {package_name}")
-                        continue
-                    apps.append(package_name)
-        apps = [a for a in apps if a and a.strip()]
-        debug_print(f"Found {len(apps)} user apps")
-        if not apps:
-            self.apps_menu.add_command(label="No user apps installed", state="disabled")
-            debug_print("No user apps found")
-        else:
-            for app in sorted(apps):
-                app_menu = Menu(self.apps_menu, tearoff=0)
+                    if package_name and package_name.strip():
+                        user_apps.append(package_name)
+        
+        # Parse system apps
+        if success_system:
+            debug_print(f"Found {len(stdout_system.strip().split('\n'))} system package lines")
+            for line in stdout_system.strip().split('\n'):
+                if line.startswith('package:'):
+                    if '=' in line:
+                        package_name = line.split('=')[1]
+                    else:
+                        package_name = line[len('package:'):]
+                    if package_name and package_name.strip():
+                        system_apps.append(package_name)
+        
+        # Remove duplicates (system apps might also appear in user apps list)
+        user_apps = list(set(user_apps))
+        system_apps = list(set(system_apps))
+        
+        debug_print(f"Found {len(user_apps)} user apps and {len(system_apps)} system apps")
+        
+        # Add User Apps submenu
+        if user_apps:
+            user_apps_menu = Menu(self.apps_menu, tearoff=0)
+            for app in sorted(user_apps):
+                app_menu = Menu(user_apps_menu, tearoff=0)
                 app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
                 app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a))
-                self.apps_menu.add_cascade(label=app, menu=app_menu)
+                user_apps_menu.add_cascade(label=app, menu=app_menu)
                 
                 # Apply theme colors to new app menu
                 if hasattr(self, 'menu_bg'):
@@ -1222,7 +1249,62 @@ class Y1HelperApp(tk.Tk):
                         relief='flat',
                         bd=0
                     )
-            debug_print(f"Added {len(apps)} apps to menu")
+            
+            # Apply theme colors to user apps submenu
+            if hasattr(self, 'menu_bg'):
+                user_apps_menu.configure(
+                    bg=self.menu_bg,
+                    fg=self.menu_fg,
+                    activebackground=self.menu_select_bg,
+                    activeforeground=self.menu_select_fg,
+                    selectcolor=self.menu_bg,
+                    relief='flat',
+                    bd=0
+                )
+            
+            self.apps_menu.add_cascade(label=f"User Apps ({len(user_apps)})", menu=user_apps_menu)
+        else:
+            self.apps_menu.add_command(label="No user apps installed", state="disabled")
+        
+        # Add System Apps submenu
+        if system_apps:
+            system_apps_menu = Menu(self.apps_menu, tearoff=0)
+            for app in sorted(system_apps):
+                app_menu = Menu(system_apps_menu, tearoff=0)
+                app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
+                # Don't allow uninstall for system apps
+                app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a), state="disabled")
+                system_apps_menu.add_cascade(label=app, menu=app_menu)
+                
+                # Apply theme colors to new app menu
+                if hasattr(self, 'menu_bg'):
+                    app_menu.configure(
+                        bg=self.menu_bg,
+                        fg=self.menu_fg,
+                        activebackground=self.menu_select_bg,
+                        activeforeground=self.menu_select_fg,
+                        selectcolor=self.menu_bg,
+                        relief='flat',
+                        bd=0
+                    )
+            
+            # Apply theme colors to system apps submenu
+            if hasattr(self, 'menu_bg'):
+                system_apps_menu.configure(
+                    bg=self.menu_bg,
+                    fg=self.menu_fg,
+                    activebackground=self.menu_select_bg,
+                    activeforeground=self.menu_select_fg,
+                    selectcolor=self.menu_bg,
+                    relief='flat',
+                    bd=0
+                )
+            
+            self.apps_menu.add_cascade(label=f"System Apps ({len(system_apps)})", menu=system_apps_menu)
+        else:
+            self.apps_menu.add_command(label="No system apps found", state="disabled")
+        
+        debug_print(f"Added {len(user_apps)} user apps and {len(system_apps)} system apps to menu")
     
     def unified_device_check(self):
         """Unified method to check device connection and refresh app list"""
@@ -2105,7 +2187,7 @@ class Y1HelperApp(tk.Tk):
                     debug_print(f"Error destroying progress dialog: {e}")
             
             if not app_options:
-                messagebox.showerror("No Apps Found", "No app options found in the manifest.")
+                messagebox.showerror("No Apps Found", "There are currently no apps available on Slidia Installer. This will change in the future, come back soon!")
                 return
             
             # Show app selection dialog
@@ -3146,7 +3228,7 @@ class Y1HelperApp(tk.Tk):
                                             percent = (downloaded / file_size) * 100 if file_size else 0
                                             dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
                                             dialog.after(0, progress_bar.step, (len(chunk),))
-                                    dialog.after(0, progress_bar['value'] = 0)
+                                    dialog.after(0, lambda: progress_bar.config(value=0))
                                 downloaded_files[name] = dest_path
                     else:
                         # Direct URL to a single file (legacy/local)
@@ -3168,7 +3250,7 @@ class Y1HelperApp(tk.Tk):
                                         percent = (downloaded / file_size) * 100 if file_size else 0
                                         dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
                                         dialog.after(0, progress_bar.step, (len(chunk),))
-                                dialog.after(0, progress_bar['value'] = 0)
+                                dialog.after(0, lambda: progress_bar.config(value=0))
                             downloaded_files[name] = dest_path
                     # Check for system.img
                     if "system.img" not in downloaded_files:
