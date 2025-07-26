@@ -93,27 +93,12 @@ class Y1HelperApp(tk.Tk):
         install_rom_path = os.path.join(assets_dir, 'install_rom.xml')
         if os.path.exists(new_xml_path):
             try:
-                # Force copy to overwrite existing file
                 shutil.copy2(new_xml_path, install_rom_path)
                 debug_print('Copied new.xml to assets/install_rom.xml')
-                # Remove new.xml from project directory
                 os.remove(new_xml_path)
                 debug_print('Deleted new.xml from project directory')
             except Exception as e:
                 debug_print(f'Failed to copy/delete new.xml: {e}')
-                # Try to remove new.xml even if copy failed
-                try:
-                    if os.path.exists(new_xml_path):
-                        os.remove(new_xml_path)
-                        debug_print('Deleted new.xml from project directory after copy failure')
-                except Exception as e2:
-                    debug_print(f'Failed to delete new.xml after copy failure: {e2}')
-        
-        # Verify the copy operation worked
-        if os.path.exists(new_xml_path):
-            debug_print('WARNING: new.xml still exists after copy attempt - will retry on next launch')
-        elif os.path.exists(install_rom_path):
-            debug_print('SUCCESS: install_rom.xml is ready for firmware flashing')
         
         self.title(f"Y1 Helper v{self.version}")
         self.geometry("452x661")  # Increased by 32px width and 32px height
@@ -3198,10 +3183,7 @@ class Y1HelperApp(tk.Tk):
             try:
                 with urllib.request.urlopen(manifest_url) as response:
                     manifest_content = response.read().decode('utf-8')
-                debug_print(f"Manifest content length: {len(manifest_content)} characters")
-                debug_print(f"Manifest preview: {manifest_content[:500]}...")
                 firmware_options = self.parse_firmware_manifest(manifest_content)
-                debug_print(f"Parsed firmware options: {firmware_options}")
                 if not firmware_options:
                     messagebox.showerror("No Firmware Found", "No firmware options found in the manifest.")
                     return
@@ -3255,7 +3237,9 @@ class Y1HelperApp(tk.Tk):
             "logo.bin",
             "system.img",
             "cache.img",
-            "userdata.img"
+            "userdata.img",
+            "MTK_AllInOne_DA.bin",
+            "MT6572_Android_scatter.txt"
         ]
         try:
             import threading
@@ -3286,109 +3270,105 @@ class Y1HelperApp(tk.Tk):
                     repo_url = firmware_info['url']
                     # Download all .img and .bin assets from the release
                     downloaded_files = {}
-                    if 'github.com' in repo_url and ('/releases/latest' in repo_url or '/releases/' in repo_url):
-                        # Handle both /releases/latest and /releases/ URLs
+                    if 'github.com' in repo_url and ('/releases/latest' in repo_url or '/releases/' in repo_url or repo_url.rstrip('/').endswith('/releases')):
                         if '/releases/latest' in repo_url:
                             repo_path = repo_url.replace('https://github.com/', '').replace('/releases/latest', '')
                             api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
-                        else:
-                            # Handle /releases/ URLs - get the first release
-                            repo_path = repo_url.replace('https://github.com/', '').split('/releases')[0]
-                            api_url = f"https://api.github.com/repos/{repo_path}/releases"
+                        elif '/releases/' in repo_url or repo_url.rstrip('/').endswith('/releases'):
+                            # Handle /releases/ or /releases
+                            repo_path = repo_url.replace('https://github.com/', '').replace('/releases/', '').replace('/releases', '')
+                            api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
                         r = requests.get(api_url)
                         release_data = r.json()
-                        
-                        # Handle case where we get a list of releases (for /releases/ URLs)
-                        if isinstance(release_data, list):
-                            if release_data:
-                                release_data = release_data[0]  # Get the first release
-                                debug_print(f"Using first release: {release_data.get('tag_name', 'unknown')}")
-                            else:
-                                raise Exception(f"No releases found for {repo_path}")
-                        
                         assets = release_data.get('assets', [])
+                        
+                        # Check if rom.zip is available
+                        rom_zip_asset = None
                         for asset in assets:
-                            name = asset['name']
-                            if name.endswith('.img') or name.endswith('.bin'):
-                                download_url = asset['browser_download_url']
-                                dest_path = os.path.join(firmware_dir, name)
-                                dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
-                                with requests.get(download_url, stream=True) as response:
-                                    response.raise_for_status()
-                                    file_size = int(response.headers.get('content-length', 0))
-                                    downloaded = 0
-                                    progress_bar.config(mode='determinate', maximum=file_size)
-                                    with open(dest_path, 'wb') as f:
-                                        for chunk in response.iter_content(chunk_size=8192):
-                                            if not chunk:
-                                                break
-                                            f.write(chunk)
-                                            downloaded += len(chunk)
-                                            percent = (downloaded / file_size) * 100 if file_size else 0
-                                            dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
-                                            dialog.after(0, progress_bar.step, (len(chunk),))
-                                    dialog.after(0, lambda: progress_bar.config(value=0))
-                                downloaded_files[name] = dest_path
-                            elif name.endswith('.txt'):
-                                # Handle Google Drive links in .txt files
-                                try:
-                                    # Download the .txt file to get the Google Drive ID
-                                    txt_response = requests.get(asset['browser_download_url'])
-                                    txt_response.raise_for_status()
-                                    gdrive_id = txt_response.text.strip()
-                                    
-                                    # Validate it looks like a Google Drive ID
-                                    if len(gdrive_id) > 10 and gdrive_id.isalnum():
-                                        # Construct the Google Drive direct download URL
-                                        gdrive_url = f"https://drive.google.com/uc?export=download&id={gdrive_id}"
-                                        
-                                        # Get the actual filename by removing .txt extension
-                                        actual_name = name[:-4]  # Remove .txt
-                                        
-                                        # Map to correct file extensions based on install_rom.xml
-                                        file_extension_map = {
-                                            'MBR': 'MBR',  # No extension
-                                            'EBR1': 'EBR1',  # No extension
-                                            'EBR2': 'EBR2',  # No extension
-                                            'lk': 'lk.bin',
-                                            'boot': 'boot.img',
-                                            'recovery': 'recovery.img',
-                                            'secro': 'secro.img',
-                                            'logo': 'logo.bin',
-                                            'system': 'system.img',
-                                            'cache': 'cache.img',
-                                            'userdata': 'userdata.img',
-                                            'preloader_g368_nyx': 'preloader_g368_nyx.bin'
-                                        }
-                                        
-                                        # Use mapped name if available, otherwise use original name
-                                        final_name = file_extension_map.get(actual_name, actual_name)
-                                        dest_path = os.path.join(firmware_dir, final_name)
-                                        dialog.after(0, status_label.config, {"text": f"Downloading {final_name} from Google Drive..."})
-                                        
-                                        # Download from Google Drive
-                                        with requests.get(gdrive_url, stream=True) as response:
-                                            response.raise_for_status()
-                                            file_size = int(response.headers.get('content-length', 0))
-                                            downloaded = 0
-                                            progress_bar.config(mode='determinate', maximum=file_size)
-                                            with open(dest_path, 'wb') as f:
-                                                for chunk in response.iter_content(chunk_size=8192):
-                                                    if not chunk:
-                                                        break
-                                                    f.write(chunk)
-                                                    downloaded += len(chunk)
-                                                    percent = (downloaded / file_size) * 100 if file_size else 0
-                                                    dialog.after(0, status_label.config, {"text": f"Downloading {final_name} from Google Drive... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
-                                                    dialog.after(0, progress_bar.step, (len(chunk),))
-                                            dialog.after(0, lambda: progress_bar.config(value=0))
-                                        downloaded_files[final_name] = dest_path
-                                        debug_print(f"Successfully downloaded {final_name} from Google Drive ID: {gdrive_id}")
-                                    else:
-                                        debug_print(f"Invalid Google Drive ID in {name}: {gdrive_id}")
-                                except Exception as e:
-                                    debug_print(f"Error processing Google Drive link in {name}: {e}")
-                                    continue
+                            if asset['name'] == 'rom.zip':
+                                rom_zip_asset = asset
+                                break
+                        
+                        if rom_zip_asset:
+                            # Download only rom.zip
+                            download_url = rom_zip_asset['browser_download_url']
+                            zip_path = os.path.join(firmware_dir, 'rom.zip')
+                            dialog.after(0, status_label.config, {"text": "Downloading rom.zip..."})
+                            
+                            with requests.get(download_url, stream=True) as response:
+                                response.raise_for_status()
+                                file_size = int(response.headers.get('content-length', 0))
+                                downloaded = 0
+                                progress_bar.config(mode='determinate', maximum=file_size)
+                                with open(zip_path, 'wb') as f:
+                                    for chunk in response.iter_content(chunk_size=8192):
+                                        if not chunk:
+                                            break
+                                        f.write(chunk)
+                                        downloaded += len(chunk)
+                                        percent = (downloaded / file_size) * 100 if file_size else 0
+                                        dialog.after(0, status_label.config, {"text": f"Downloading rom.zip... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                        dialog.after(0, progress_bar.step, (len(chunk),))
+                                dialog.after(0, lambda: progress_bar.config(value=0))
+                            
+                            # Extract rom.zip
+                            dialog.after(0, status_label.config, {"text": "Extracting rom.zip..."})
+                            progress_bar.config(mode='indeterminate')
+                            progress_bar.start()
+                            
+                            try:
+                                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                                    zip_ref.extractall(firmware_dir)
+                                
+                                # Get list of extracted files
+                                extracted_files = []
+                                for root, dirs, files in os.walk(firmware_dir):
+                                    for file in files:
+                                        if file != 'rom.zip':  # Exclude the zip file itself
+                                            extracted_files.append(file)
+                                            # Add to downloaded_files with correct path
+                                            if file.endswith('.img') or file.endswith('.bin'):
+                                                downloaded_files[file] = os.path.join(root, file)
+                                                debug_print(f"Found firmware file: {file} at {os.path.join(root, file)}")
+                                
+                                debug_print(f"Total extracted files: {len(extracted_files)}")
+                                debug_print(f"Firmware files found: {list(downloaded_files.keys())}")
+                                
+                                # Clean up the zip file
+                                os.remove(zip_path)
+                                dialog.after(0, status_label.config, {"text": f"Extracted {len(extracted_files)} files from rom.zip"})
+                                
+                            except Exception as e:
+                                dialog.after(0, status_label.config, {"text": f"Error extracting rom.zip: {e}"})
+                                dialog.after(0, ok_button.config, {"state": "normal"})
+                                return
+                            
+                            progress_bar.stop()
+                            
+                        else:
+                            # Fall back to downloading individual files
+                            for asset in assets:
+                                name = asset['name']
+                                if name.endswith('.img') or name.endswith('.bin'):
+                                    download_url = asset['browser_download_url']
+                                    dest_path = os.path.join(firmware_dir, name)
+                                    dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
+                                    with requests.get(download_url, stream=True) as response:
+                                        response.raise_for_status()
+                                        file_size = int(response.headers.get('content-length', 0))
+                                        downloaded = 0
+                                        progress_bar.config(mode='determinate', maximum=file_size)
+                                        with open(dest_path, 'wb') as f:
+                                            for chunk in response.iter_content(chunk_size=8192):
+                                                if not chunk:
+                                                    break
+                                                f.write(chunk)
+                                                downloaded += len(chunk)
+                                                percent = (downloaded / file_size) * 100 if file_size else 0
+                                                dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                                dialog.after(0, progress_bar.step, (len(chunk),))
+                                        dialog.after(0, lambda: progress_bar.config(value=0))
+                                    downloaded_files[name] = dest_path
                     else:
                         # Direct URL to a single file (legacy/local)
                         name = os.path.basename(repo_url)
@@ -3411,11 +3391,15 @@ class Y1HelperApp(tk.Tk):
                                         dialog.after(0, progress_bar.step, (len(chunk),))
                                 dialog.after(0, lambda: progress_bar.config(value=0))
                             downloaded_files[name] = dest_path
-                    # Check for system.img (temporarily disabled for testing)
-                    # if "system.img" not in downloaded_files:
-                    #     dialog.after(0, status_label.config, {"text": "Error: system.img not found in release. Aborting."})
-                    #     dialog.after(0, ok_button.config, {"state": "normal"})
-                    #     return
+                    # Check for system.img
+                    debug_print(f"Checking for system.img in downloaded_files: {list(downloaded_files.keys())}")
+                    if "system.img" not in downloaded_files:
+                        debug_print("system.img not found in downloaded_files!")
+                        dialog.after(0, status_label.config, {"text": "Error: system.img not found in release. Aborting."})
+                        dialog.after(0, ok_button.config, {"state": "normal"})
+                        return
+                    else:
+                        debug_print(f"system.img found at: {downloaded_files['system.img']}")
                     # Copy missing required files from assets
                     for req_file in REQUIRED_FILES:
                         dest_path = os.path.join(firmware_dir, req_file)
@@ -3427,6 +3411,7 @@ class Y1HelperApp(tk.Tk):
                     dialog.after(0, warn_label.pack_forget)
                     dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
                     time.sleep(1.0)
+                    debug_print(f"Starting flash with system.img at: {os.path.join(firmware_dir, 'system.img')}")
                     self._flash_with_modal(dialog, status_label, ok_button, os.path.join(firmware_dir, "system.img"), progress_bar)
                 except Exception as e:
                     debug_print(f"Exception in do_download_and_flash: {e}")
@@ -3443,8 +3428,6 @@ class Y1HelperApp(tk.Tk):
         import threading
         try:
             debug_print("Entered _flash_with_modal")
-            # Copy firmware files to rom directory (does not edit XML content)
-            self.copy_firmware_files_to_rom_directory(firmware_path)
             flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
             install_rom_path = os.path.join(assets_dir, "install_rom.xml")
             debug_print(f"Checking for flash_tool.exe at: {flash_tool_path}")
@@ -3462,9 +3445,11 @@ class Y1HelperApp(tk.Tk):
                 dialog.after(0, ok_button.config, {"state": tk.NORMAL})
                 return
             if progress_bar is None:
-                progress_bar = tk.ttk.Progressbar(dialog, mode="indeterminate")
+                progress_bar = tk.ttk.Progressbar(dialog, mode="determinate", maximum=100)
                 progress_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
-            progress_bar.start(10)
+            else:
+                progress_bar.config(mode="determinate", maximum=100)
+            progress_bar.config(value=0)
             dialog.after(0, ok_button.pack_forget)
             command = [flash_tool_path, "-b", "-i", "install_rom.xml"]
             debug_print(f"About to run flash command: {' '.join(command)} (cwd=assets)")
@@ -3474,6 +3459,33 @@ class Y1HelperApp(tk.Tk):
                 all_done_seen = False
                 disconnect_seen = False
                 error_seen = False
+                
+                # Progress timer variables
+                start_time = time.time()
+                progress_timer = None
+                progress_duration = 240  # 4 minutes in seconds
+                
+                def update_progress():
+                    nonlocal progress_timer
+                    if flash_done or all_done_seen or error_seen:
+                        return
+                    
+                    elapsed = time.time() - start_time
+                    if elapsed >= progress_duration:
+                        # Progress complete, stop timer
+                        dialog.after(0, progress_bar.config, {"value": 100})
+                        return
+                    
+                    # Calculate progress percentage
+                    progress_percent = min(int((elapsed / progress_duration) * 100), 99)
+                    dialog.after(0, progress_bar.config, {"value": progress_percent})
+                    
+                    # Schedule next update in 1 second
+                    progress_timer = threading.Timer(1.0, update_progress)
+                    progress_timer.start()
+                
+                # Start progress timer
+                update_progress()
                 process = subprocess.Popen(
                     command,
                     cwd=assets_dir,
@@ -3491,10 +3503,13 @@ class Y1HelperApp(tk.Tk):
                     # Only update status label at completion or failure
                     if 'All command exec done!' in line:
                         all_done_seen = True
+                        # Cancel progress timer and set to 100%
+                        if progress_timer:
+                            progress_timer.cancel()
+                        dialog.after(0, progress_bar.config, {"value": 100})
                         dialog.after(0, status_label.config, {"text": "Firmware installation complete! This window will close automatically in 3 seconds."})
                         dialog.after(0, ok_button.pack)
                         dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                        dialog.after(0, progress_bar.stop)
                         debug_print("[UI] Status label updated: Firmware installation complete! This window will close automatically in 3 seconds.")
                         threading.Timer(3.0, lambda: dialog.destroy() if dialog.winfo_exists() else None).start()
                     if all_done_seen and 'Disconnect!' in line:
@@ -3504,22 +3519,29 @@ class Y1HelperApp(tk.Tk):
                     if ('Connect BROM failed' in line or 'S_COM_PORT_OPEN_FAIL' in line or 'S_BROM_CMD_STARTCMD_FAIL' in line):
                         flash_done = True
                         error_seen = True
+                        # Cancel progress timer
+                        if progress_timer:
+                            progress_timer.cancel()
                         dialog.after(0, status_label.config, {"text": "Flashing failed: Could not connect to device.\n\nPlease check your USB cable, drivers, and ensure the device is in the correct mode (powered off, battery charged, correct USB port). Try a different cable or port if needed."})
                         dialog.after(0, ok_button.pack)
                         dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                        dialog.after(0, progress_bar.stop)
                         debug_print("[UI] Status label updated: Flashing failed due to BROM/COM port error.")
                     # Only treat as a generic error if 'error' or 'fail' actually appears
                     if 'Download failed' in line or 'error' in line.lower() or 'fail' in line.lower():
                         flash_done = True
                         error_seen = True
+                        # Cancel progress timer
+                        if progress_timer:
+                            progress_timer.cancel()
                         dialog.after(0, status_label.config, {"text": "Firmware installation failed. Try again after pressing the reset button with a paperclip."})
                         dialog.after(0, ok_button.pack)
                         dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                        dialog.after(0, progress_bar.stop)
                         debug_print("[UI] Status label updated: Firmware installation failed. Try again after pressing the reset button with a paperclip.")
                 process.wait()
                 if not flash_done and not all_done_seen:
+                    # Cancel progress timer
+                    if progress_timer:
+                        progress_timer.cancel()
                     if error_seen:
                         dialog.after(0, status_label.config, {"text": "Flashing process failed. Please check the above output for details."})
                         debug_print("[UI] Status label updated: Flashing process failed. Please check the above output for details.")
@@ -3528,7 +3550,6 @@ class Y1HelperApp(tk.Tk):
                         debug_print("[UI] Status label updated: Flashing process finished. Please check the above output for results.")
                     dialog.after(0, ok_button.pack)
                     dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                    dialog.after(0, progress_bar.stop)
             threading.Thread(target=run_flash, daemon=True).start()
         except Exception as e:
             debug_print(f"Exception in _flash_with_modal: {e}")
@@ -3536,62 +3557,7 @@ class Y1HelperApp(tk.Tk):
             dialog.after(0, ok_button.pack)
             dialog.after(0, ok_button.config, {"state": tk.NORMAL})
 
-    def copy_firmware_files_to_rom_directory(self, firmware_path):
-        """Copy all required firmware files to assets/rom directory with priority rules. 
-        This function does NOT edit XML contents - it only copies files to ensure they exist in rom/ directory.
-        The XML file (install_rom.xml) must already contain the correct 'rom/' paths - developers handle XML editing."""
-        try:
-            # Create rom directory if it doesn't exist
-            rom_dir = os.path.join(assets_dir, "rom")
-            os.makedirs(rom_dir, exist_ok=True)
-            
-            # List of all required firmware files
-            required_files = [
-                "MTK_AllInOne_DA.bin",
-                "MT6572_Android_scatter.txt", 
-                "preloader_g368_nyx.bin",
-                "MBR",
-                "EBR1",
-                "lk.bin",
-                "boot.img",
-                "recovery.img",
-                "secro.img",
-                "logo.bin",
-                "system.img",
-                "cache.img",
-                "userdata.img"
-            ]
-            
-            # Copy each required file with priority rules
-            for filename in required_files:
-                dest_path = os.path.join(rom_dir, filename)
-                
-                # Priority 1: Check if file exists in rom directory (already copied)
-                if os.path.exists(dest_path):
-                    debug_print(f"{filename} already exists in rom directory")
-                    continue
-                
-                # Priority 2: Check if file exists in assets directory (fallback)
-                assets_source = os.path.join(assets_dir, filename)
-                if os.path.exists(assets_source):
-                    shutil.copy2(assets_source, dest_path)
-                    debug_print(f"Copied {filename} from assets to rom directory")
-                    continue
-                
-                # Priority 3: Special handling for system.img from firmware_path
-                if filename == "system.img" and firmware_path:
-                    if os.path.exists(firmware_path):
-                        shutil.copy2(firmware_path, dest_path)
-                        debug_print(f"Copied system.img from firmware_path to rom directory")
-                        continue
-                
-                # File not found in any location
-                debug_print(f"Warning: {filename} not found in assets or firmware_path")
-            
-            debug_print("Completed copying all required firmware files to rom directory")
-            
-        except Exception as e:
-            debug_print(f"Error copying firmware files to rom directory: {e}")
+
 
     def create_progress_dialog(self, title="Progress"):
         """Create a progress dialog with status and progress bar"""
