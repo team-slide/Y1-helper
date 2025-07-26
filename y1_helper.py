@@ -146,7 +146,8 @@ class Y1HelperApp(tk.Tk):
         # Essential UI variables
         self.status_var = tk.StringVar(value="Ready")
         self.scroll_wheel_mode_var = tk.BooleanVar()  # Renamed from launcher_var
-        self.disable_dpad_swap_var = tk.BooleanVar()  # New variable for D-pad swap control
+        self.disable_dpad_swap_var = tk.BooleanVar()  # Variable for D-pad swap control (now "Invert Scroll Direction")
+        self.y1_launcher_detected = False  # Track if com.innioasis.y1 is detected
         self.rgb_profile_var = tk.StringVar(value="BGRA8888")
         
         # Add input pacing: minimum delay between input events (in seconds)
@@ -923,10 +924,10 @@ class Y1HelperApp(tk.Tk):
         )
         self.menu_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         
-        # Disable D-pad swap checkbox with modern styling
+        # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
             mode_frame,
-            text="Disable D-pad Swap",
+            text="Invert Scroll Direction",
             variable=self.disable_dpad_swap_var,
             command=self.update_controls_display,
             style="TCheckbutton"
@@ -949,8 +950,8 @@ class Y1HelperApp(tk.Tk):
         ))
         
         self._add_tooltip(self.disable_swap_checkbox, (
-            "When checked, disables the D-pad swap in Scroll Wheel Mode. "
-            "Use this for half-optimised Y1 apps that still need work and expect normal D-pad behavior."
+            "When checked, inverts the scroll direction in Scroll Wheel Mode. "
+            "Use this for apps that expect the opposite scroll behavior."
         ))
         
         # Status bar at bottom with modern styling
@@ -1071,22 +1072,23 @@ class Y1HelperApp(tk.Tk):
         
         if self.scroll_wheel_mode_var.get():
             # Scroll Wheel Mode controls - compact version
-            if self.disable_dpad_swap_var.get():
-                # Disable D-pad swap mode - show normal D-pad controls
+            if self.disable_dpad_swap_var.get() or self.y1_launcher_detected:
+                # Inverted scroll direction - show inverted mapping
                 controls_text = (
-                    "Scroll Wheel Mode (D-pad Swap Disabled):\n"
-                    "Touch: Left Click | Back: Right Click\n"
-                    "D-pad: W/A/S/D or Arrow Keys\n"
-                    "Enter: Wheel Click, Enter, E\n"
-                    "Toggle: Alt"
-                )
-            else:
-                # Normal scroll wheel mode - show scroll wheel mapping
-                controls_text = (
-                    "Scroll Wheel Mode:\n"
+                    "Scroll Wheel Mode (Inverted):\n"
                     "Touch: Left Click | Back: Right Click\n"
                     "Scroll: W/S or Up/Down Arrows sends DPAD_LEFT/DPAD_RIGHT\n"
                     "D-pad: A/D or Left/Right Arrows sends DPAD_UP/DPAD_DOWN\n"
+                    "Enter: Wheel Click, Enter, E sends ENTER\n"
+                    "Toggle: Alt"
+                )
+            else:
+                # Normal scroll direction - show normal mapping
+                controls_text = (
+                    "Scroll Wheel Mode:\n"
+                    "Touch: Left Click | Back: Right Click\n"
+                    "Scroll: W/S or Up/Down Arrows sends DPAD_UP/DPAD_DOWN\n"
+                    "D-pad: A/D or Left/Right Arrows sends DPAD_LEFT/DPAD_RIGHT\n"
                     "Enter: Wheel Click, Enter, E sends ENTER\n"
                     "Toggle: Alt"
                 )
@@ -1101,7 +1103,7 @@ class Y1HelperApp(tk.Tk):
             )
         
         self.controls_label.config(text=controls_text)
-        debug_print("Controls display updated")
+        debug_print(f"Controls display updated - Y1 launcher detected: {self.y1_launcher_detected}, Invert checkbox: {self.disable_dpad_swap_var.get()}")
     
     def toggle_scroll_wheel_mode(self):
         """Toggle between Scroll Wheel Mode and Touch Screen Mode"""
@@ -1443,6 +1445,13 @@ class Y1HelperApp(tk.Tk):
                 
                 # Always show the input mode button for any app
                 self.input_mode_btn.pack(side=tk.LEFT, anchor="w")
+                
+                # Check if Y1 launcher is detected for scroll direction inversion
+                self.y1_launcher_detected = (detected_package == "com.innioasis.y1")
+                debug_print(f"Y1 launcher detected: {self.y1_launcher_detected}")
+                
+                # Update controls display to reflect new Y1 launcher detection
+                self.update_controls_display()
                 
                 # Check if this is a Y1 app or Rockbox - auto-enable scroll wheel mode
                 if self._should_auto_enable_scroll_wheel(detected_package):
@@ -2493,26 +2502,29 @@ class Y1HelperApp(tk.Tk):
         # Show scroll cursor if in scroll wheel mode
         if self.scroll_wheel_mode_var.get():
             self.show_scroll_cursor()
-        # Y1 scroll wheel mapping: counterclockwise = Dpad Left (up), clockwise = Dpad Right (down)
+        # Scroll wheel mapping in scroll wheel mode
         if self.control_launcher and self.scroll_wheel_mode_var.get():
-            if self.disable_dpad_swap_var.get():
-                # D-pad swap disabled - normal behavior
-                if direction > 0:
-                    keycode = 19  # KEYCODE_DPAD_UP
-                    dir_str = "up"
-                else:
-                    keycode = 20  # KEYCODE_DPAD_DOWN
-                    dir_str = "down"
-                debug_print(f"Scroll wheel mode (swap disabled): sending D-pad {dir_str}")
-            else:
-                # D-pad swap enabled - Y1 scroll wheel behavior
+            # Check if direction should be inverted (Y1 launcher detected OR checkbox enabled)
+            should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
+            
+            if should_invert:
+                # Inverted direction - Y1 scroll wheel behavior
                 if direction > 0:
                     keycode = 21  # KEYCODE_DPAD_LEFT
                     dir_str = "left"
                 else:
                     keycode = 22  # KEYCODE_DPAD_RIGHT
                     dir_str = "right"
-                debug_print(f"Scroll wheel mode (swap enabled): sending D-pad {dir_str}")
+                debug_print(f"Scroll wheel mode (inverted): sending D-pad {dir_str}")
+            else:
+                # Normal direction - standard behavior
+                if direction > 0:
+                    keycode = 19  # KEYCODE_DPAD_UP
+                    dir_str = "up"
+                else:
+                    keycode = 20  # KEYCODE_DPAD_DOWN
+                    dir_str = "down"
+                debug_print(f"Scroll wheel mode (normal): sending D-pad {dir_str}")
         else:
             if direction > 0:
                 keycode = 19  # KEYCODE_DPAD_UP
@@ -2585,18 +2597,29 @@ class Y1HelperApp(tk.Tk):
             direction = direction_map[keycode]
             debug_print(f"D-pad key detected: {key} -> {direction}")
             if self.control_launcher and self.scroll_wheel_mode_var.get():
-                if not self.disable_dpad_swap_var.get():
-                    # D-pad swap enabled - Y1 scroll wheel behavior
-                    if keycode == 19:
-                        keycode = 21
+                # Check if direction should be inverted (Y1 launcher detected OR checkbox enabled)
+                should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
+                
+                if should_invert:
+                    # Inverted direction - Y1 scroll wheel behavior
+                    if keycode == 19:  # UP
+                        keycode = 21  # LEFT
                         direction = 'left'
-                        debug_print("Scroll wheel mode: remapping up -> left")
-                    elif keycode == 20:
-                        keycode = 22
+                        debug_print("Scroll wheel mode: remapping up -> left (inverted)")
+                    elif keycode == 20:  # DOWN
+                        keycode = 22  # RIGHT
                         direction = 'right'
-                        debug_print("Scroll wheel mode: remapping down -> right")
+                        debug_print("Scroll wheel mode: remapping down -> right (inverted)")
+                    elif keycode == 21:  # LEFT
+                        keycode = 19  # UP
+                        direction = 'up'
+                        debug_print("Scroll wheel mode: remapping left -> up (inverted)")
+                    elif keycode == 22:  # RIGHT
+                        keycode = 20  # DOWN
+                        direction = 'down'
+                        debug_print("Scroll wheel mode: remapping right -> down (inverted)")
                 else:
-                    debug_print("Scroll wheel mode: D-pad swap disabled, using normal mapping")
+                    debug_print("Scroll wheel mode: using normal mapping")
                 
                 # Show scroll cursor for keyboard navigation in scroll wheel mode
                 if key in ['w', 'up', 's', 'down', 'a', 'left', 'd', 'right']:
