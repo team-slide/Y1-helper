@@ -912,6 +912,24 @@ class Y1HelperApp(tk.Tk):
         )
         self.input_mode_btn.pack(side=tk.LEFT, anchor="w")
         
+        # Set Time button with modern styling
+        self.set_time_btn = ttk.Button(
+            mode_frame,
+            text="🕐 Set Time",
+            command=self.sync_device_time,
+            style="TButton"
+        )
+        self.set_time_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        
+        # Install Firmware button with modern styling
+        self.install_firmware_btn = ttk.Button(
+            mode_frame,
+            text="⚡ Install Firmware",
+            command=self.install_firmware,
+            style="TButton"
+        )
+        self.install_firmware_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
             mode_frame,
@@ -954,24 +972,6 @@ class Y1HelperApp(tk.Tk):
             style="TButton"
         )
         self.menu_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
-        
-        # Set Time button with modern styling
-        self.set_time_btn = ttk.Button(
-            mode_frame,
-            text="🕐 Set Time",
-            command=self.sync_device_time,
-            style="TButton"
-        )
-        self.set_time_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
-        
-        # Install Firmware button with modern styling
-        self.install_firmware_btn = ttk.Button(
-            mode_frame,
-            text="⚡ Install Firmware",
-            command=self.install_firmware,
-            style="TButton"
-        )
-        self.install_firmware_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
