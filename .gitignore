@@ -4,7 +4,7 @@ build/
 
 # Exclude old version archives
 .old/
-
+__pycache__/
 # Launcher files
 launcher.py
 launcher.exe
