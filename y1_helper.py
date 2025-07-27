@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.6"
+        self.version = "0.5.7"
         
         # Write version.txt file
         self.write_version_file()
@@ -132,7 +132,7 @@ class Y1HelperApp(tk.Tk):
                 debug_print(f'Failed to copy/delete new.xml: {e}')
         
         self.title(f"Y1 Helper v{self.version}")
-        self.geometry("452x661")  # Increased by 32px width and 32px height
+        self.geometry("520x720")  # Increased width and height for better button spacing
         self.resizable(False, False)
         
         # Ensure window gets focus and appears in front
@@ -143,9 +143,9 @@ class Y1HelperApp(tk.Tk):
         
         # Center window on screen
         self.update_idletasks()  # Update window info
-        x = (self.winfo_screenwidth() // 2) - (452 // 2)
-        y = (self.winfo_screenheight() // 2) - (661 // 2)
-        self.geometry(f"452x661+{x}+{y}")
+        x = (self.winfo_screenwidth() // 2) - (520 // 2)
+        y = (self.winfo_screenheight() // 2) - (720 // 2)
+        self.geometry(f"520x720+{x}+{y}")
         
         # Detect Windows 11 theme
         self.setup_windows_11_theme()
@@ -877,11 +877,11 @@ class Y1HelperApp(tk.Tk):
     def setup_ui(self):
         # Main frame with modern styling
         main_frame = ttk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Screen viewer frame with modern styling
-        screen_frame = ttk.LabelFrame(main_frame, text="Mouse Input Panel (480x360)", padding=5)
-        screen_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+        screen_frame = ttk.LabelFrame(main_frame, text="Mouse Input Panel (480x360)", padding=8)
+        screen_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
         
         # Create canvas for screen display (scaled down to 75%) with modern styling
         self.screen_canvas = tk.Canvas(screen_frame, width=self.display_width, height=self.display_height, 
@@ -891,8 +891,8 @@ class Y1HelperApp(tk.Tk):
         self.screen_canvas.config(width=self.display_width, height=self.display_height)
         
         # Create controls display frame with modern styling
-        self.controls_frame = ttk.LabelFrame(screen_frame, text="Controls", padding=3)
-        self.controls_frame.pack(fill=tk.X, pady=(5, 0))
+        self.controls_frame = ttk.LabelFrame(screen_frame, text="Controls", padding=6)
+        self.controls_frame.pack(fill=tk.X, pady=(8, 0))
         
         # Controls display label with compact font
         self.controls_label = ttk.Label(self.controls_frame, text="", justify=tk.LEFT, 
@@ -901,15 +901,15 @@ class Y1HelperApp(tk.Tk):
         
         # Mode selection frame with reduced padding - now taller with two rows
         mode_frame = ttk.Frame(self.controls_frame)
-        mode_frame.pack(fill=tk.X, pady=(3, 0))
+        mode_frame.pack(fill=tk.X, pady=(6, 0))
         
         # First row - Main controls (now with multiple rows)
         main_controls_frame = ttk.Frame(mode_frame)
-        main_controls_frame.pack(fill=tk.X, pady=(0, 5))
+        main_controls_frame.pack(fill=tk.X, pady=(0, 8))
         
         # Row 1 - Primary controls
         row1_frame = ttk.Frame(main_controls_frame)
-        row1_frame.pack(fill=tk.X, pady=(0, 3))
+        row1_frame.pack(fill=tk.X, pady=(0, 6))
         
         # Input Mode toggle button with modern styling
         self.input_mode_btn = ttk.Button(
@@ -927,7 +927,7 @@ class Y1HelperApp(tk.Tk):
             command=self.sync_device_time,
             style="TButton"
         )
-        self.set_time_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.set_time_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         # Install Firmware button with modern styling
         self.install_firmware_btn = ttk.Button(
@@ -936,7 +936,7 @@ class Y1HelperApp(tk.Tk):
             command=self.install_firmware,
             style="TButton"
         )
-        self.install_firmware_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.install_firmware_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
@@ -945,11 +945,11 @@ class Y1HelperApp(tk.Tk):
             command=self.take_screenshot,
             style="TButton"
         )
-        self.screenshot_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.screenshot_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         # Row 2 - Navigation controls
         row2_frame = ttk.Frame(main_controls_frame)
-        row2_frame.pack(fill=tk.X, pady=(3, 0))
+        row2_frame.pack(fill=tk.X, pady=(6, 0))
         
         # Navigation buttons
         self.home_btn = ttk.Button(
@@ -966,7 +966,7 @@ class Y1HelperApp(tk.Tk):
             command=self.send_back_key,
             style="TButton"
         )
-        self.back_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.back_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         # Additional navigation buttons
         self.recent_btn = ttk.Button(
@@ -975,7 +975,7 @@ class Y1HelperApp(tk.Tk):
             command=self.show_recent_apps,
             style="TButton"
         )
-        self.recent_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.recent_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         self.menu_btn = ttk.Button(
             row2_frame,
@@ -983,7 +983,7 @@ class Y1HelperApp(tk.Tk):
             command=self.nav_center,
             style="TButton"
         )
-        self.menu_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.menu_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
@@ -993,12 +993,12 @@ class Y1HelperApp(tk.Tk):
             command=self.update_controls_display,
             style="TCheckbutton"
         )
-        self.disable_swap_checkbox.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.disable_swap_checkbox.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         self.disable_swap_checkbox.pack_forget()  # Hidden by default
         
         # Second row - D-pad controls
         dpad_frame = ttk.Frame(mode_frame)
-        dpad_frame.pack(fill=tk.X, pady=(5, 0))
+        dpad_frame.pack(fill=tk.X, pady=(8, 0))
         
         # D-pad label
         dpad_label = ttk.Label(dpad_frame, text="D-pad Controls:", font=("Segoe UI", 9, "bold"))
@@ -1116,7 +1116,7 @@ class Y1HelperApp(tk.Tk):
         
         # Status bar at bottom with modern styling
         status_frame = ttk.Frame(main_frame)
-        status_frame.pack(fill=tk.X, pady=(10, 0))
+        status_frame.pack(fill=tk.X, pady=(12, 0))
         
         # Modern status label with flat styling
         status_label = ttk.Label(status_frame, textvariable=self.status_var, 
