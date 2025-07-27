@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.3"
+        self.version = "0.5.4"
         
         # Write version.txt file
         self.write_version_file()
@@ -955,6 +955,24 @@ class Y1HelperApp(tk.Tk):
         )
         self.menu_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         
+        # Set Time button with modern styling
+        self.set_time_btn = ttk.Button(
+            mode_frame,
+            text="🕐 Set Time",
+            command=self.sync_device_time,
+            style="TButton"
+        )
+        self.set_time_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        
+        # Install Firmware button with modern styling
+        self.install_firmware_btn = ttk.Button(
+            mode_frame,
+            text="⚡ Install Firmware",
+            command=self.install_firmware,
+            style="TButton"
+        )
+        self.install_firmware_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
             mode_frame,
@@ -983,6 +1001,16 @@ class Y1HelperApp(tk.Tk):
         self._add_tooltip(self.disable_swap_checkbox, (
             "When checked, inverts the scroll direction in Scroll Wheel Mode. "
             "Use this for apps that expect the opposite scroll behavior."
+        ))
+        
+        self._add_tooltip(self.set_time_btn, (
+            "Set Time: Synchronize the device's time with your computer's current time. "
+            "This ensures the device has the correct date and time for proper operation."
+        ))
+        
+        self._add_tooltip(self.install_firmware_btn, (
+            "Install Firmware: Download and install the latest firmware for your Y1 device. "
+            "This updates the device's operating system to the newest version with bug fixes and improvements."
         ))
         
         # Status bar at bottom with modern styling
