@@ -4802,4 +4802,3 @@ if __name__ == "__main__":
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
     debug_print("Entering main loop")
     app.mainloop()
-    debug_print("Application exited")
