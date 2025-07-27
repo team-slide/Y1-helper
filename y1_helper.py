@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.2"
+        self.version = "0.5.3"
         
         # Write version.txt file
         self.write_version_file()
@@ -1390,7 +1390,7 @@ class Y1HelperApp(tk.Tk):
                 if self.device_connected:
                     # Device just disconnected
                     self.device_connected = False
-                    self.status_var.set("Device disconnected - Please reconnect")
+                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
                     debug_print("Device disconnected")
                     
                     # Hide controls frame and disable input bindings when device disconnects
@@ -1409,7 +1409,7 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Unified device check failed: {e}")
             if self.device_connected:
                 self.device_connected = False
-                self.status_var.set("Device disconnected - Please reconnect")
+                self.status_var.set("First time? Install a Firmware from the Device Menu.")
                 debug_print("Device disconnected due to error")
                 
                 # Hide controls frame and disable input bindings when device disconnects due to error
@@ -1675,7 +1675,7 @@ class Y1HelperApp(tk.Tk):
                         debug_print("Device disconnected, showing ready placeholder")
                         self.show_ready_placeholder()
                         placeholder_shown = True
-                        self.status_var.set("Device disconnected - Please reconnect")
+                        self.status_var.set("First time? Install a Firmware from the Device Menu.")
                         # Disable input bindings when device is disconnected
                         self.disable_input_bindings()
                     time.sleep(2)  # Check less frequently when disconnected
@@ -1720,7 +1720,7 @@ class Y1HelperApp(tk.Tk):
                             debug_print("Device appears disconnected, showing ready placeholder")
                             self.show_ready_placeholder()
                             placeholder_shown = True
-                            self.status_var.set("Device disconnected - Please reconnect")
+                            self.status_var.set("First time? Install a Firmware from the Device Menu.")
                         time.sleep(1)
                 else:
                     # Sleep longer when not refreshing to reduce CPU usage
@@ -1732,7 +1732,7 @@ class Y1HelperApp(tk.Tk):
                     self.device_connected = False
                     self.show_ready_placeholder()
                     placeholder_shown = True
-                    self.status_var.set("Device disconnected - Please reconnect")
+                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
                 time.sleep(1)
     
     def process_framebuffer(self, fb_path):
