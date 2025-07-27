@@ -243,12 +243,8 @@ class Y1HelperApp(tk.Tk):
         if not hasattr(self, 'device_connected') or not self.device_connected:
             debug_print("No device connected, showing ready placeholder")
             self.show_ready_placeholder()
-            # Hide controls frame and disable input bindings when no device is connected
-            self.hide_controls_frame()
-            self.disable_input_bindings()
         else:
-            # Device is connected, show controls
-            self.show_controls_frame()
+            # Device is connected, enable input bindings
             self.enable_input_bindings()
         
         # Set device to stay awake while charging
@@ -1288,7 +1284,35 @@ class Y1HelperApp(tk.Tk):
         # Flag to track if input should be disabled (when showing ready.png)
         self.input_disabled = True
         
-
+        # Mouse wheel bindings for Linux
+        self.screen_canvas.bind("<Button-4>", self.on_mouse_wheel)        # Linux scroll up
+        self.screen_canvas.bind("<Button-5>", self.on_mouse_wheel)        # Linux scroll down
+        # Mouse wheel release bindings for cursor control
+        self.screen_canvas.bind("<ButtonRelease-4>", self.on_mouse_wheel_release)  # Linux scroll up release
+        self.screen_canvas.bind("<ButtonRelease-5>", self.on_mouse_wheel_release)  # Linux scroll down release
+        
+        # Initialize controls display
+        self.update_controls_display()
+        
+        # Navigation buttons (no virtual nav bar)
+        self.nav_bar_height = 0  # No virtual nav bar
+        
+        # Context menu with modern styling
+        self.context_menu = Menu(self, tearoff=0, 
+                                bg=self.menu_bg if hasattr(self, 'menu_bg') else "#ffffff",
+                                fg=self.menu_fg if hasattr(self, 'menu_fg') else "#000000",
+                                activebackground=self.menu_select_bg if hasattr(self, 'menu_select_bg') else "#0078d4",
+                                activeforeground=self.menu_select_fg if hasattr(self, 'menu_select_fg') else "#ffffff",
+                                relief="flat", bd=0)
+        self.context_menu.add_command(label="Go Home", command=self.go_home)
+        self.context_menu.add_command(label="Open Settings", command=self.launch_settings)
+        self.context_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
+        
+        # Apply theme colors to context menu
+        if hasattr(self, 'apply_menu_colors'):
+            self.apply_menu_colors()
+        
+        # Controls are always visible regardless of device connection
     
     def hide_controls_frame(self):
         """Hide the controls frame when no device is connected"""
