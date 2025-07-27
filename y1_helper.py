@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.6.0"
+        self.version = "0.6.1"
         
         # Write version.txt file
         self.write_version_file()
@@ -260,6 +260,11 @@ class Y1HelperApp(tk.Tk):
         
         # Start screen capture immediately
         self.start_screen_capture()
+        
+        # Initialize config download and background updates
+        self.download_and_unpack_config()
+        self.update_config_background()
+        
         debug_print("Y1HelperApp initialization complete")
     
     def write_version_file(self):
@@ -584,6 +589,113 @@ class Y1HelperApp(tk.Tk):
         # Return root path as default (will be created if needed)
         return root_config
     
+    def download_and_unpack_config(self):
+        """Download config.zip from GitHub and unpack config.ini to root directory"""
+        try:
+            config_url = "https://github.com/team-slide/Y1-helper/raw/refs/heads/master/config.zip"
+            config_zip_path = os.path.join(self.base_dir, "config.zip")
+            config_ini_path = os.path.join(self.base_dir, "config.ini")
+            
+            debug_print("Downloading config.zip...")
+            
+            # Download config.zip
+            urllib.request.urlretrieve(config_url, config_zip_path)
+            
+            # Extract config.ini from the zip
+            with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
+                zip_ref.extract("config.ini", self.base_dir)
+            
+            # Clean up the zip file
+            os.remove(config_zip_path)
+            
+            debug_print("Config.ini extracted successfully")
+            
+        except Exception as e:
+            debug_print(f"Failed to download/unpack config.zip: {e}")
+            # Continue without config.ini if download fails
+    
+    def get_random_api_key(self):
+        """Get a random API key from config.ini for rate limit prevention"""
+        try:
+            config_path = self.get_config_path()
+            if not os.path.exists(config_path):
+                return None
+            
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            
+            # Get all API keys from the config
+            api_keys = []
+            if 'api_keys' in config:
+                for key, value in config['api_keys'].items():
+                    if value.strip():  # Only add non-empty keys
+                        api_keys.append(value.strip())
+            
+            # If no API keys found, try legacy github.token
+            if not api_keys and 'github' in config and 'token' in config['github']:
+                token = config['github']['token'].strip()
+                if token:
+                    api_keys.append(token)
+            
+            if api_keys:
+                # Return a random key
+                import random
+                return random.choice(api_keys)
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error getting API key: {e}")
+            return None
+    
+    def add_api_key_to_config(self, new_key):
+        """Add a new API key to config.ini"""
+        try:
+            config_path = self.get_config_path()
+            
+            import configparser
+            config = configparser.ConfigParser()
+            
+            # Read existing config if it exists
+            if os.path.exists(config_path):
+                config.read(config_path)
+            
+            # Ensure api_keys section exists
+            if 'api_keys' not in config:
+                config['api_keys'] = {}
+            
+            # Find next available key number
+            key_number = 1
+            while f'key_{key_number}' in config['api_keys']:
+                key_number += 1
+            
+            # Add the new key
+            config['api_keys'][f'key_{key_number}'] = new_key
+            
+            # Write back to file
+            with open(config_path, 'w', encoding='utf-8') as f:
+                config.write(f)
+            
+            debug_print(f"Added new API key (key_{key_number}) to config.ini")
+            
+        except Exception as e:
+            debug_print(f"Error adding API key to config: {e}")
+    
+    def update_config_background(self):
+        """Update config.ini in background every 5 minutes"""
+        try:
+            # Download and unpack config
+            self.download_and_unpack_config()
+            
+            # Schedule next update in 5 minutes
+            self.after(300000, self.update_config_background)  # 300000ms = 5 minutes
+            
+        except Exception as e:
+            debug_print(f"Background config update failed: {e}")
+            # Schedule retry in 1 minute on failure
+            self.after(60000, self.update_config_background)  # 60000ms = 1 minute
+    
     def download_app(self, app_info):
         """Download app from GitHub releases with progress"""
         progress_dialog = None
@@ -603,23 +715,16 @@ class Y1HelperApp(tk.Tk):
             
             update_progress("Connecting to GitHub...")
             
-            # Get GitHub token from config
-            config_path = self.get_config_path()
-            github_token = None
-            if os.path.exists(config_path):
-                import configparser
-                config = configparser.ConfigParser()
-                config.read(config_path)
-                if 'github' in config and 'token' in config['github']:
-                    github_token = config['github']['token']
+            # Get random API key from config for rate limit prevention
+            api_key = self.get_random_api_key()
             
             # Parse the GitHub URL to get repo and latest release
             repo_url = app_info['url']
             release_data = None
             repo_path = None
             headers = {}
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
+            if api_key:
+                headers['Authorization'] = f'token {api_key}'
 
             if 'github.com' in repo_url:
                 if '/releases/latest' in repo_url:
@@ -3115,6 +3220,50 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error opening file explorer: {e}")
             messagebox.showerror("Error", f"Failed to open file explorer: {e}")
+    
+    def restart_device(self):
+        """Restart the connected device"""
+        debug_print("Restarting device")
+        try:
+            success, stdout, stderr = self.run_adb_command("reboot")
+            if success:
+                self.status_var.set("Device restarting...")
+                debug_print("Device restart command sent successfully")
+            else:
+                self.status_var.set(f"Failed to restart device: {stderr}")
+                debug_print(f"Device restart failed: {stderr}")
+                messagebox.showerror("Error", f"Failed to restart device: {stderr}")
+        except Exception as e:
+            debug_print(f"Error restarting device: {e}")
+            messagebox.showerror("Error", f"Failed to restart device: {e}")
+    
+    def restart_rockbox(self):
+        """Restart Rockbox application"""
+        debug_print("Restarting Rockbox")
+        try:
+            # Force stop Rockbox
+            success, stdout, stderr = self.run_adb_command("shell am force-stop org.rockbox")
+            if not success:
+                self.status_var.set(f"Failed to stop Rockbox: {stderr}")
+                debug_print(f"Failed to stop Rockbox: {stderr}")
+                messagebox.showerror("Error", f"Failed to stop Rockbox: {stderr}")
+                return
+            
+            # Wait a moment for the app to fully stop
+            time.sleep(1)
+            
+            # Launch Rockbox
+            success, stdout, stderr = self.run_adb_command("shell monkey -p org.rockbox -c android.intent.category.LAUNCHER 1")
+            if success:
+                self.status_var.set("Rockbox restarted")
+                debug_print("Rockbox restarted successfully")
+            else:
+                self.status_var.set(f"Failed to restart Rockbox: {stderr}")
+                debug_print(f"Failed to restart Rockbox: {stderr}")
+                messagebox.showerror("Error", f"Failed to restart Rockbox: {stderr}")
+        except Exception as e:
+            debug_print(f"Error restarting Rockbox: {e}")
+            messagebox.showerror("Error", f"Failed to restart Rockbox: {e}")
     
     def cleanup(self):
         """Clean up resources before closing"""
