@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.9"
+        self.version = "0.6.0"
         
         # Write version.txt file
         self.write_version_file()
@@ -220,6 +220,7 @@ class Y1HelperApp(tk.Tk):
         self.last_device_validation = 0
         self.consecutive_framebuffer_failures = 0  # Track consecutive framebuffer pull failures
         self.max_framebuffer_failures = 3  # Max framebuffer failures before showing ready placeholder
+        self.input_command_in_progress = False  # Flag to track input commands
         
         # Input mode persistence
         self.manual_mode_override = False  # Track if user manually changed mode
@@ -1346,6 +1347,8 @@ class Y1HelperApp(tk.Tk):
         self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+        self.device_menu.add_separator()
+        self.device_menu.add_command(label="Restart Device", command=self.restart_device)
         
         self.apps_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Apps", menu=self.apps_menu)
@@ -1421,6 +1424,12 @@ class Y1HelperApp(tk.Tk):
                 app_menu = Menu(user_apps_menu, tearoff=0)
                 app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
                 app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a))
+                
+                # Add restart option for Rockbox
+                if app == "org.rockbox":
+                    app_menu.add_separator()
+                    app_menu.add_command(label="Restart Rockbox", command=self.restart_rockbox)
+                
                 user_apps_menu.add_cascade(label=app, menu=app_menu)
                 
                 # Apply theme colors to new app menu
@@ -1890,6 +1899,11 @@ class Y1HelperApp(tk.Tk):
                 )
                 
                 if should_refresh:
+                    # Skip framebuffer pull if input command is in progress to avoid interference
+                    if self.input_command_in_progress:
+                        time.sleep(0.1)
+                        continue
+                        
                     success, stdout, stderr = self.run_adb_command(f"pull /dev/graphics/fb0 \"{fb_temp_path}\"")
                     if success:
                         if os.path.exists(fb_temp_path):
@@ -2758,8 +2772,15 @@ class Y1HelperApp(tk.Tk):
                 dir_str = "down"
             debug_print(f"Touch screen mode: sending D-pad {dir_str}")
         
+        # Set input command flag to prevent false disconnection detection
+        self.input_command_in_progress = True
+        
         # Send input immediately (framebuffer refresh is now non-blocking)
         success, stdout, stderr = self.run_adb_command(f"shell input keyevent {keycode}")
+        
+        # Clear input command flag
+        self.input_command_in_progress = False
+        
         if success:
             self.status_var.set(f"D-pad {dir_str} pressed")
             debug_print(f"D-pad {dir_str} sent successfully")
@@ -2768,6 +2789,8 @@ class Y1HelperApp(tk.Tk):
         else:
             self.status_var.set(f"D-pad {dir_str} failed: {stderr}")
             debug_print(f"D-pad {dir_str} failed: {stderr}")
+            # Don't trigger device disconnection for input command failures
+            # as they can be temporary and don't indicate device disconnection
     
     def on_mouse_wheel_click(self, event):
         if self.input_disabled:
@@ -2787,8 +2810,15 @@ class Y1HelperApp(tk.Tk):
             action = "d-pad center"
             debug_print("Touch screen mode: sending D-pad center")
         
+        # Set input command flag to prevent false disconnection detection
+        self.input_command_in_progress = True
+        
         # Send input immediately (framebuffer refresh is now non-blocking)
         success, stdout, stderr = self.run_adb_command(f"shell input keyevent {keycode}")
+        
+        # Clear input command flag
+        self.input_command_in_progress = False
+        
         if success:
             self.status_var.set(f"Mouse wheel click: {action} pressed")
             debug_print(f"Mouse wheel click ({action}) sent successfully")
@@ -2797,6 +2827,8 @@ class Y1HelperApp(tk.Tk):
         else:
             self.status_var.set(f"Mouse wheel click failed: {stderr}")
             debug_print(f"Mouse wheel click failed: {stderr}")
+            # Don't trigger device disconnection for input command failures
+            # as they can be temporary and don't indicate device disconnection
     
     def on_key_press(self, event):
         if self.input_disabled:
@@ -2880,8 +2912,15 @@ class Y1HelperApp(tk.Tk):
             return
         debug_print(f"Sending keycode {keycode} ({direction})")
         
+        # Set input command flag to prevent false disconnection detection
+        self.input_command_in_progress = True
+        
         # Send input immediately (framebuffer refresh is now non-blocking)
         success, stdout, stderr = self.run_adb_command(f"shell input keyevent {keycode}")
+        
+        # Clear input command flag
+        self.input_command_in_progress = False
+        
         if success:
             self.status_var.set(f"Key {direction} pressed")
             debug_print(f"Key {direction} sent successfully")
@@ -2891,6 +2930,8 @@ class Y1HelperApp(tk.Tk):
         else:
             self.status_var.set(f"Key {direction} failed: {stderr}")
             debug_print(f"Key {direction} failed: {stderr}")
+            # Don't trigger device disconnection for input command failures
+            # as they can be temporary and don't indicate device disconnection
     
     def on_key_release(self, event):
         """Handle key release to hide scroll cursor immediately"""
