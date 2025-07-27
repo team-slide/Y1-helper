@@ -316,8 +316,116 @@ class Y1Launcher:
             print(f"Error getting GitHub files: {e}")
             return []
     
+    def check_releases_for_exe_requirement(self):
+        """Check all releases after current version to see if any require exe update"""
+        try:
+            # Get current version first
+            current_version = self.get_current_version()
+            current_parts = self.parse_version(current_version)
+            print(f"Current version: {current_version} ({current_parts})")
+            
+            # Fetch releases with pagination support (up to 1000 releases)
+            all_releases = []
+            page = 1
+            max_pages = 10  # Limit to 1000 releases (10 pages * 100 per page)
+            
+            while page <= max_pages:
+                api_url = f"https://api.github.com/repos/{self.github_repo}/releases?per_page=100&page={page}"
+                print(f"Fetching releases page {page}...")
+                
+                with urllib.request.urlopen(api_url) as response:
+                    releases_data = json.loads(response.read().decode('utf-8'))
+                
+                if not releases_data:  # No more releases
+                    break
+                    
+                all_releases.extend(releases_data)
+                print(f"Fetched {len(releases_data)} releases from page {page}")
+                
+                # Check if we got less than 100 releases (last page)
+                if len(releases_data) < 100:
+                    break
+                    
+                page += 1
+            
+            print(f"Total releases fetched: {len(all_releases)}")
+            
+            # Find the first exe-only release that's newer than current version
+            for release in all_releases:
+                release_tag = release.get('tag_name', 'unknown')
+                release_version = self.get_version_from_release_tag(release_tag)
+                release_parts = self.parse_version(release_version)
+                
+                print(f"Checking release: {release_tag} ({release_version})")
+                
+                # Skip if this release is older than or equal to current version
+                if release_parts <= current_parts:
+                    print(f"Skipping {release_tag} - older than or equal to current version")
+                    continue
+                
+                # Check if this release requires exe update
+                assets = release.get('assets', [])
+                exe_assets = [asset for asset in assets if asset['name'].endswith('.exe')]
+                py_assets = [asset for asset in assets if asset['name'].endswith('.py')]
+                
+                print(f"  Assets: {len(assets)} total, {len(exe_assets)} exe, {len(py_assets)} py")
+                
+                # Check if this is an exe-only release (only exe files, no py files)
+                if len(exe_assets) > 0 and len(py_assets) == 0:
+                    # This release requires exe update
+                    exe_asset = exe_assets[0]  # Take the first exe
+                    
+                    print(f"Found exe-only release: {release_tag} ({release_version})")
+                    print(f"Current: {current_version} -> Target: {release_version}")
+                    
+                    # Check if version jump is reasonable
+                    is_compatible = self.is_version_compatible(current_version, release_version)
+                    print(f"Version compatibility: {is_compatible}")
+                    
+                    if is_compatible:
+                        return {
+                            'type': 'exe_required',
+                            'asset': exe_asset,
+                            'release_tag': release_tag,
+                            'release_name': release.get('name', ''),
+                            'release_body': release.get('body', ''),
+                            'release_version': release_version,
+                            'current_version': current_version,
+                            'reason': f"Release {release_tag} requires exe update"
+                        }
+                    else:
+                        # Version jump too large - return info for logging
+                        return {
+                            'type': 'exe_required_incompatible',
+                            'asset': exe_asset,
+                            'release_tag': release_tag,
+                            'release_version': release_version,
+                            'current_version': current_version,
+                            'reason': f"Release {release_tag} requires exe but version jump too large: {current_version} -> {release_version}"
+                        }
+                elif len(exe_assets) > 0 and len(py_assets) > 0:
+                    # This is a mixed release - can be patched normally
+                    print(f"Mixed release {release_tag} - can be patched normally")
+                    continue
+                else:
+                    # No exe files in this release - can be patched normally
+                    print(f"No exe in release {release_tag} - can be patched normally")
+                    continue
+            
+            # No exe-only releases found that require update
+            print("No exe-only releases found that require update")
+            return {
+                'type': 'no_exe_required',
+                'current_version': current_version,
+                'reason': "All releases after current version can be patched normally"
+            }
+                
+        except Exception as e:
+            print(f"Error checking releases for exe requirement: {e}")
+            return None
+    
     def check_latest_release_for_exe(self):
-        """Check the latest release for exe-only updates with version compatibility"""
+        """Check the latest release for exe-only updates with version compatibility (legacy method)"""
         try:
             # Get current version first
             current_version = self.get_current_version()
@@ -633,15 +741,16 @@ class Y1Launcher:
             self.update_progress(0, 100, f"Checking for updates from branch: {self.github_branch}")
             self.parse_gitignore()
             
-            # First, check for exe-only releases
-            self.update_progress(10, 100, "Checking latest release for exe updates...")
-            release_info = self.check_latest_release_for_exe()
+            # First, check for exe-only releases that require update
+            self.update_progress(10, 100, "Checking all releases for exe requirements...")
+            release_info = self.check_releases_for_exe_requirement()
             
-            if release_info and release_info['type'] == 'exe_only':
-                # This is an exe-only release, handle it directly
-                self.update_progress(20, 100, f"Detected exe-only release: {release_info['release_tag']}")
+            if release_info and release_info['type'] == 'exe_required':
+                # An exe-only release is required for update
+                self.update_progress(20, 100, f"Exe update required: {release_info['release_tag']}")
                 self.update_progress(25, 100, f"Release: {release_info['release_name'] or release_info['release_tag']}")
                 self.update_progress(30, 100, f"Version: {release_info['current_version']} -> {release_info['release_version']}")
+                self.update_progress(35, 100, f"Reason: {release_info['reason']}")
                 
                 # Archive current version before running exe
                 archive_dir = self.archive_current_version()
@@ -655,13 +764,20 @@ class Y1Launcher:
                     return "exit"
                 else:
                     return False
-            elif release_info and release_info['type'] == 'exe_only_incompatible':
-                # Exe-only release found but version is incompatible
-                self.update_progress(20, 100, f"Found exe-only release but version incompatible")
+            elif release_info and release_info['type'] == 'exe_required_incompatible':
+                # Exe-only release required but version is incompatible
+                self.update_progress(20, 100, f"Exe update required but version incompatible")
                 self.update_progress(25, 100, f"Current: {release_info['current_version']} -> Release: {release_info['release_version']}")
                 self.update_progress(30, 100, f"Reason: {release_info['reason']}")
                 self.update_progress(35, 100, "Proceeding with normal patch updates...")
                 print(f"Version incompatible for exe update: {release_info['reason']}")
+            elif release_info and release_info['type'] == 'no_exe_required':
+                # No exe-only releases required - can patch normally
+                self.update_progress(20, 100, f"No exe updates required")
+                self.update_progress(25, 100, f"Current: {release_info['current_version']}")
+                self.update_progress(30, 100, f"Reason: {release_info['reason']}")
+                self.update_progress(35, 100, "Proceeding with normal patch updates...")
+                print(f"No exe updates required: {release_info['reason']}")
             
             # If not an exe-only release, proceed with normal repository file checking
             archive_dir = self.archive_current_version()
