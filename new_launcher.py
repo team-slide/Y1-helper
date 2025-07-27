@@ -605,7 +605,7 @@ class Y1Launcher:
             # Run the exe file as a detached process
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_SHOW  # Show the exe window
+            startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
             process = subprocess.Popen(
                 [local_exe_path],
@@ -666,7 +666,7 @@ class Y1Launcher:
             # Run the exe file as a detached process
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_SHOW  # Show the exe window
+            startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
             process = subprocess.Popen(
                 [local_exe_path],
@@ -857,7 +857,7 @@ class Y1Launcher:
             # Launch y1_helper.py as a detached process
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_SHOW
+            startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
             process = subprocess.Popen(
                 [python_path, y1_helper_path], 
