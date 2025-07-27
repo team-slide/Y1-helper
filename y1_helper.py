@@ -29,6 +29,81 @@ import datetime
 base_dir = os.path.dirname(os.path.abspath(__file__))
 assets_dir = os.path.join(base_dir, 'assets')
 
+# Internationalization system
+class I18nManager:
+    def __init__(self):
+        self.strings = {}
+        self.current_language = "en"
+        self.fallback_language = "en"
+        self.load_language("en")  # Always load English as fallback
+    
+    def load_language(self, language_code):
+        """Load language strings from XML file"""
+        try:
+            lang_file = os.path.join(base_dir, 'languages', f'{language_code}.xml')
+            if os.path.exists(lang_file):
+                tree = ET.parse(lang_file)
+                root = tree.getroot()
+                
+                # Clear existing strings for this language
+                if language_code not in self.strings:
+                    self.strings[language_code] = {}
+                
+                # Load strings from XML
+                for string_elem in root.findall('string'):
+                    name = string_elem.get('name')
+                    value = string_elem.text or ""
+                    self.strings[language_code][name] = value
+                
+                debug_print(f"Loaded language: {language_code}")
+                return True
+            else:
+                debug_print(f"Language file not found: {lang_file}")
+                return False
+        except Exception as e:
+            debug_print(f"Error loading language {language_code}: {e}")
+            return False
+    
+    def set_language(self, language_code):
+        """Set the current language"""
+        if language_code != self.current_language:
+            if self.load_language(language_code):
+                self.current_language = language_code
+                return True
+        return False
+    
+    def get_string(self, key, default=None):
+        """Get a localized string with fallback to English"""
+        if default is None:
+            default = key  # Use key as default if no default provided
+        
+        # Try current language first
+        if (self.current_language in self.strings and 
+            key in self.strings[self.current_language]):
+            return self.strings[self.current_language][key]
+        
+        # Fallback to English
+        if (self.fallback_language in self.strings and 
+            key in self.strings[self.fallback_language]):
+            return self.strings[self.fallback_language][key]
+        
+        # Return default if nothing found
+        return default
+    
+    def get_available_languages(self):
+        """Get list of available language files"""
+        languages = []
+        lang_dir = os.path.join(base_dir, 'languages')
+        if os.path.exists(lang_dir):
+            for file in os.listdir(lang_dir):
+                if file.endswith('.xml'):
+                    lang_code = file[:-4]  # Remove .xml extension
+                    languages.append(lang_code)
+        return sorted(languages)
+
+# Global i18n instance
+i18n = I18nManager()
+
 # This comment proves the patcher worked for Ryan
 
 def check_and_update_launcher():
@@ -131,7 +206,7 @@ class Y1HelperApp(tk.Tk):
             except Exception as e:
                 debug_print(f'Failed to copy/delete new.xml: {e}')
         
-        self.title(f"Y1 Helper v{self.version}")
+        self.title(f"{i18n.get_string('app_title', 'Y1 Helper')} v{self.version}")
         self.geometry("452x661")  # Increased by 32px width and 32px height
         self.resizable(False, False)
         
@@ -1193,34 +1268,55 @@ class Y1HelperApp(tk.Tk):
     def setup_menu(self):
         menubar = Menu(self)
         self.config(menu=menubar)
+        
+        # File menu
+        file_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label=i18n.get_string("menu_file", "File"), menu=file_menu)
+        file_menu.add_command(label=i18n.get_string("menu_screenshot", "Take Screenshot"), command=self.take_screenshot)
+        file_menu.add_separator()
+        file_menu.add_command(label=i18n.get_string("menu_exit", "Exit"), command=self.on_closing)
+        
+        # Device menu
         device_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Device", menu=device_menu)
+        menubar.add_cascade(label=i18n.get_string("menu_device", "Device"), menu=device_menu)
         self.device_menu = device_menu
         
         # Add standard device menu items
-        self.device_menu.add_command(label="Device Info", command=self.show_device_info)
-        self.device_menu.add_command(label="ADB Shell", command=self.open_adb_shell)
-        self.device_menu.add_command(label="File Explorer", command=self.open_file_explorer)
-        self.device_menu.add_command(label="Take Screenshot", command=self.take_screenshot)
-        self.device_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
-        self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
-        self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
+        self.device_menu.add_command(label=i18n.get_string("menu_device_info", "Device Info"), command=self.show_device_info)
+        self.device_menu.add_command(label=i18n.get_string("menu_adb_shell", "ADB Shell"), command=self.open_adb_shell)
+        self.device_menu.add_command(label=i18n.get_string("menu_file_explorer", "File Explorer"), command=self.open_file_explorer)
+        self.device_menu.add_command(label=i18n.get_string("menu_home", "Home"), command=self.go_home)
+        self.device_menu.add_command(label=i18n.get_string("menu_recent_apps", "Recent Apps"), command=self.show_recent_apps)
+        self.device_menu.add_command(label=i18n.get_string("menu_change_device_language", "Change Device Language"), command=self.change_device_language)
         self.device_menu.add_separator()
-        self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+        self.device_menu.add_command(label=i18n.get_string("menu_install_firmware", "Install Firmware"), command=self.install_firmware)
         
+        # Apps menu
         self.apps_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Apps", menu=self.apps_menu)
-        self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
-        self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
+        menubar.add_cascade(label=i18n.get_string("menu_apps", "Apps"), menu=self.apps_menu)
+        self.apps_menu.add_command(label=i18n.get_string("menu_browse_apks", "Browse APKs..."), command=self.browse_apks)
+        self.apps_menu.add_command(label=i18n.get_string("menu_install_apps", "Install Apps"), command=self.install_apps)
         self.apps_menu.add_separator()
         self.refresh_apps()  # Populate on startup
         
+        # Tools menu
+        tools_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label=i18n.get_string("menu_tools", "Tools"), menu=tools_menu)
+        tools_menu.add_command(label=i18n.get_string("menu_toggle_debug", "Toggle Debug Menu"), command=self.toggle_debug_menu)
+        tools_menu.add_separator()
+        tools_menu.add_command(label=i18n.get_string("menu_language", "Language"), command=self.change_app_language)
+        
         # Debug menu (hidden by default, shown with Ctrl+D)
         self.debug_menu = Menu(menubar, tearoff=0)
-        self.debug_menu.add_command(label="Change Update Branch...", command=self.change_update_branch)
-        self.debug_menu.add_command(label="Show Current Branch", command=self.show_current_branch)
+        self.debug_menu.add_command(label=i18n.get_string("menu_change_branch", "Change Update Branch..."), command=self.change_update_branch)
+        self.debug_menu.add_command(label=i18n.get_string("menu_show_branch", "Show Current Branch"), command=self.show_current_branch)
         self.debug_menu.add_separator()
-        self.debug_menu.add_command(label="Run Updater", command=self.run_updater)
+        self.debug_menu.add_command(label=i18n.get_string("menu_run_updater", "Run Updater"), command=self.run_updater)
+        
+        # Help menu
+        help_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label=i18n.get_string("menu_help", "Help"), menu=help_menu)
+        help_menu.add_command(label=i18n.get_string("menu_about", "About"), command=self.show_about_dialog)
         
         # Apply theme colors
         self.apply_menu_colors()
@@ -1231,8 +1327,8 @@ class Y1HelperApp(tk.Tk):
         """Refresh list of installed apps (Apps menu only)"""
         debug_print("Refreshing apps list")
         self.apps_menu.delete(0, tk.END)
-        self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
-        self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
+        self.apps_menu.add_command(label=i18n.get_string("menu_browse_apks", "Browse APKs..."), command=self.browse_apks)
+        self.apps_menu.add_command(label=i18n.get_string("menu_install_apps", "Install Apps"), command=self.install_apps)
         self.apps_menu.add_separator()
         
         # Get user-installed apps
@@ -1280,8 +1376,8 @@ class Y1HelperApp(tk.Tk):
             user_apps_menu = Menu(self.apps_menu, tearoff=0)
             for app in sorted(user_apps):
                 app_menu = Menu(user_apps_menu, tearoff=0)
-                app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
-                app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a))
+                app_menu.add_command(label=i18n.get_string("menu_launch", "Launch"), command=lambda a=app: self.launch_app(a))
+                app_menu.add_command(label=i18n.get_string("menu_uninstall", "Uninstall"), command=lambda a=app: self.uninstall_app(a))
                 user_apps_menu.add_cascade(label=app, menu=app_menu)
                 
                 # Apply theme colors to new app menu
@@ -1308,18 +1404,18 @@ class Y1HelperApp(tk.Tk):
                     bd=0
                 )
             
-            self.apps_menu.add_cascade(label=f"User Apps ({len(user_apps)})", menu=user_apps_menu)
+            self.apps_menu.add_cascade(label=f"{i18n.get_string('menu_user_apps', 'User Apps')} ({len(user_apps)})", menu=user_apps_menu)
         else:
-            self.apps_menu.add_command(label="No user apps installed", state="disabled")
+            self.apps_menu.add_command(label=i18n.get_string("general_none", "No user apps installed"), state="disabled")
         
         # Add System Apps submenu
         if system_apps:
             system_apps_menu = Menu(self.apps_menu, tearoff=0)
             for app in sorted(system_apps):
                 app_menu = Menu(system_apps_menu, tearoff=0)
-                app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
+                app_menu.add_command(label=i18n.get_string("menu_launch", "Launch"), command=lambda a=app: self.launch_app(a))
                 # Don't allow uninstall for system apps
-                app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a), state="disabled")
+                app_menu.add_command(label=i18n.get_string("menu_uninstall", "Uninstall"), command=lambda a=app: self.uninstall_app(a), state="disabled")
                 system_apps_menu.add_cascade(label=app, menu=app_menu)
                 
                 # Apply theme colors to new app menu
@@ -1346,9 +1442,9 @@ class Y1HelperApp(tk.Tk):
                     bd=0
                 )
             
-            self.apps_menu.add_cascade(label=f"System Apps ({len(system_apps)})", menu=system_apps_menu)
+            self.apps_menu.add_cascade(label=f"{i18n.get_string('menu_system_apps', 'System Apps')} ({len(system_apps)})", menu=system_apps_menu)
         else:
-            self.apps_menu.add_command(label="No system apps found", state="disabled")
+            self.apps_menu.add_command(label=i18n.get_string("general_none", "No system apps found"), state="disabled")
         
         debug_print(f"Added {len(user_apps)} user apps and {len(system_apps)} system apps to menu")
     
@@ -2844,32 +2940,144 @@ class Y1HelperApp(tk.Tk):
         info_text = "\n".join(info) if info else "Unable to get device info"
         messagebox.showinfo("Device Information", info_text)
     
+    def go_home(self):
+        """Go to home screen"""
+        if not self.device_connected:
+            messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
+                               i18n.get_string("msg_device_not_connected", "Device not connected!\n\nPlease ensure:\n- Device is connected via USB\n- USB debugging is enabled\n- Device is authorized for ADB"))
+            return
+        
+        self.status_var.set(i18n.get_string("status_connecting", "Connecting..."))
+        success, stdout, stderr = self.run_adb_command("shell input keyevent KEYCODE_HOME")
+        
+        if success:
+            self.status_var.set(i18n.get_string("status_ready", "Ready"))
+        else:
+            error_msg = stderr.strip() if stderr else stdout.strip()
+            self.status_var.set(f"{i18n.get_string('msg_operation_failed', 'Operation failed')}: {error_msg}")
+
     def change_device_language(self):
         """Open Android language settings"""
         if not self.device_connected:
-            messagebox.showerror("Error", "Device not connected!\n\nPlease ensure:\n- Device is connected via USB\n- USB debugging is enabled\n- Device is authorized for ADB")
+            messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
+                               i18n.get_string("msg_device_not_connected", "Device not connected!\n\nPlease ensure:\n- Device is connected via USB\n- USB debugging is enabled\n- Device is authorized for ADB"))
             return
         
-        self.status_var.set("Opening language settings...")
+        self.status_var.set(i18n.get_string("status_opening_language_settings", "Opening language settings..."))
         success, stdout, stderr = self.run_adb_command("shell am start -a android.settings.LOCALE_SETTINGS")
         
         if success:
-            self.status_var.set("Language settings opened")
-            messagebox.showinfo("Language Settings", 
-                              "Language settings have been opened on your device.\n\n"
+            self.status_var.set(i18n.get_string("status_language_settings_opened", "Language settings opened"))
+            messagebox.showinfo(i18n.get_string("language_title", "Language Settings"), 
+                              i18n.get_string("msg_language_settings_instructions", "Language settings have been opened on your device.\n\n"
                               "You can now:\n"
                               "• Select your preferred language\n"
                               "• Choose regional settings\n"
-                              "• Configure input methods")
+                              "• Configure input methods"))
         else:
             error_msg = stderr.strip() if stderr else stdout.strip()
-            self.status_var.set(f"Failed to open language settings: {error_msg}")
-            messagebox.showerror("Error", 
-                               f"Failed to open language settings:\n\n{error_msg}\n\n"
-                               "Please ensure:\n"
-                               "- Device is unlocked\n"
-                               "- Settings app is available\n"
-                               "- Device is responsive")
+            self.status_var.set(f"{i18n.get_string('error_failed_open_language_settings', 'Failed to open language settings')}: {error_msg}")
+            messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
+                               f"{i18n.get_string('error_failed_open_language_settings', 'Failed to open language settings')}:\n\n{error_msg}\n\n"
+                               f"{i18n.get_string('msg_prepare_device_instructions', 'Please ensure:\n'
+                               '- Device is unlocked\n'
+                               '- Settings app is available\n'
+                               '- Device is responsive')}")
+    
+    def change_app_language(self):
+        """Change the application language"""
+        available_languages = i18n.get_available_languages()
+        
+        if not available_languages:
+            messagebox.showwarning(i18n.get_string("dialog_warning", "Warning"), 
+                                  i18n.get_string("msg_no_language_files", "No language files found"))
+            return
+        
+        # Create language selection dialog
+        dialog = tk.Toplevel(self)
+        dialog.title(i18n.get_string("menu_select_language", "Select Language"))
+        dialog.geometry("300x400")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (self.winfo_screenwidth() // 2) - (300 // 2)
+        y = (self.winfo_screenheight() // 2) - (400 // 2)
+        dialog.geometry(f"300x400+{x}+{y}")
+        
+        # Language list
+        listbox = tk.Listbox(dialog, font=("Segoe UI", 10))
+        listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Language names mapping
+        language_names = {
+            'en': i18n.get_string('language_english', 'English'),
+            'fr': i18n.get_string('language_french', 'French'),
+            'es': i18n.get_string('language_spanish', 'Spanish'),
+            'pt': i18n.get_string('language_portuguese', 'Portuguese'),
+            'hi': i18n.get_string('language_hindi', 'Hindi'),
+            'zh': i18n.get_string('language_chinese', 'Chinese'),
+            'ja': i18n.get_string('language_japanese', 'Japanese'),
+            'ru': i18n.get_string('language_russian', 'Russian')
+        }
+        
+        # Populate listbox
+        for lang_code in available_languages:
+            lang_name = language_names.get(lang_code, lang_code.upper())
+            listbox.insert(tk.END, lang_name)
+        
+        # Select current language
+        try:
+            current_index = available_languages.index(i18n.current_language)
+            listbox.selection_set(current_index)
+            listbox.see(current_index)
+        except ValueError:
+            pass
+        
+        def on_select():
+            selection = listbox.curselection()
+            if selection:
+                selected_lang = available_languages[selection[0]]
+                if i18n.set_language(selected_lang):
+                    messagebox.showinfo(i18n.get_string("dialog_info", "Information"), 
+                                      i18n.get_string("msg_language_changed", "Language changed successfully"))
+                    # Update window title
+                    self.title(f"{i18n.get_string('app_title', 'Y1 Helper')} v{self.version}")
+                    # Rebuild menu with new language
+                    self.setup_menu()
+                else:
+                    messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
+                                       i18n.get_string("msg_failed_change_language", "Failed to change language"))
+            dialog.destroy()
+        
+        def on_cancel():
+            dialog.destroy()
+        
+        # Buttons
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        ok_button = tk.Button(button_frame, text=i18n.get_string("dialog_ok", "OK"), command=on_select)
+        ok_button.pack(side=tk.RIGHT, padx=(5, 0))
+        
+        cancel_button = tk.Button(button_frame, text=i18n.get_string("dialog_cancel", "Cancel"), command=on_cancel)
+        cancel_button.pack(side=tk.RIGHT)
+        
+        # Bind double-click and Enter key
+        listbox.bind("<Double-Button-1>", lambda e: on_select())
+        listbox.bind("<Return>", lambda e: on_select())
+        dialog.bind("<Escape>", lambda e: on_cancel())
+        
+        # Focus on listbox
+        listbox.focus_set()
+    
+    def show_about_dialog(self):
+        """Show about dialog with application information"""
+        about_text = i18n.get_string("msg_about", "Y1 Helper is a tool for managing Y1 devices and installing custom firmware.\n\nVersion: {version}\n\nDeveloped by Team Slide").format(version=self.version)
+        
+        messagebox.showinfo(i18n.get_string("about_title", "About Y1 Helper"), about_text)
     
     def open_file_explorer(self):
         """Open the file explorer dialog"""
