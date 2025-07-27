@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.8"
+        self.version = "0.5.9"
         
         # Write version.txt file
         self.write_version_file()
@@ -1247,7 +1247,7 @@ class Y1HelperApp(tk.Tk):
                 controls_text = (
                     "Scroll Wheel Mode (Inverted):\n"
                     "Touch: Left Click | Back: Right Click\n"
-                    "Scroll: W/S or Up/Down Arrows sends DPAD_LEFT/DPAD_RIGHT\n"
+                    "Scroll: W/S or Up/Down Arrows sends DPAD_RIGHT/DPAD_LEFT\n"
                     "D-pad: A/D or Left/Right Arrows sends DPAD_UP/DPAD_DOWN\n"
                     "Enter: Wheel Click, Enter, E sends ENTER\n"
                     "Toggle: Alt"
@@ -2732,13 +2732,13 @@ class Y1HelperApp(tk.Tk):
             should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
             
             if should_invert:
-                # Inverted direction - Y1 scroll wheel behavior
+                # Inverted direction - remap scroll wheel to D-pad (no direction reversal)
                 if direction > 0:
-                    keycode = 21  # KEYCODE_DPAD_LEFT
-                    dir_str = "left"
-                else:
-                    keycode = 22  # KEYCODE_DPAD_RIGHT
+                    keycode = 22  # KEYCODE_DPAD_RIGHT (up becomes right)
                     dir_str = "right"
+                else:
+                    keycode = 21  # KEYCODE_DPAD_LEFT (down becomes left)
+                    dir_str = "left"
                 debug_print(f"Scroll wheel mode (inverted): sending D-pad {dir_str}")
             else:
                 # Normal direction - standard behavior
@@ -2825,23 +2825,23 @@ class Y1HelperApp(tk.Tk):
                 should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
                 
                 if should_invert:
-                    # Inverted direction - Y1 scroll wheel behavior
+                    # Inverted direction - remap D-pad axes (no direction reversal)
                     if keycode == 19:  # UP
-                        keycode = 21  # LEFT
-                        direction = 'left'
-                        debug_print("Scroll wheel mode: remapping up -> left (inverted)")
-                    elif keycode == 20:  # DOWN
-                        keycode = 22  # RIGHT
+                        keycode = 22  # RIGHT (up becomes right)
                         direction = 'right'
-                        debug_print("Scroll wheel mode: remapping down -> right (inverted)")
+                        debug_print("Scroll wheel mode: remapping up -> right (inverted)")
+                    elif keycode == 20:  # DOWN
+                        keycode = 21  # LEFT (down becomes left)
+                        direction = 'left'
+                        debug_print("Scroll wheel mode: remapping down -> left (inverted)")
                     elif keycode == 21:  # LEFT
-                        keycode = 19  # UP
-                        direction = 'up'
-                        debug_print("Scroll wheel mode: remapping left -> up (inverted)")
-                    elif keycode == 22:  # RIGHT
-                        keycode = 20  # DOWN
+                        keycode = 20  # DOWN (left becomes down)
                         direction = 'down'
-                        debug_print("Scroll wheel mode: remapping right -> down (inverted)")
+                        debug_print("Scroll wheel mode: remapping left -> down (inverted)")
+                    elif keycode == 22:  # RIGHT
+                        keycode = 19  # UP (right becomes up)
+                        direction = 'up'
+                        debug_print("Scroll wheel mode: remapping right -> up (inverted)")
                 else:
                     debug_print("Scroll wheel mode: using normal mapping")
                 
