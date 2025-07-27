@@ -31,6 +31,32 @@ assets_dir = os.path.join(base_dir, 'assets')
 
 # This comment proves the patcher worked for Ryan
 
+def check_and_update_launcher():
+    """Check for new_launcher.py and update launcher.py if found"""
+    try:
+        new_launcher_path = os.path.join(base_dir, 'new_launcher.py')
+        launcher_path = os.path.join(base_dir, 'launcher.py')
+        
+        if os.path.exists(new_launcher_path):
+            debug_print("Found new_launcher.py, updating launcher.py")
+            
+            # Copy new_launcher.py to launcher.py
+            shutil.copy2(new_launcher_path, launcher_path)
+            debug_print("Successfully copied new_launcher.py to launcher.py")
+            
+            # Delete new_launcher.py
+            os.remove(new_launcher_path)
+            debug_print("Successfully deleted new_launcher.py")
+            
+            return True
+        else:
+            debug_print("No new_launcher.py found")
+            return False
+            
+    except Exception as e:
+        debug_print(f"Error updating launcher: {e}")
+        return False
+
 def debug_print(message):
     """Print debug messages with timestamp"""
     timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -62,6 +88,11 @@ class Y1HelperApp(tk.Tk):
         
         # Base directory (for config file access)
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Check for and apply launcher updates
+        launcher_updated = check_and_update_launcher()
+        if launcher_updated:
+            debug_print("Launcher was updated during startup")
         
         # Version information
         self.version = "0.5.1"
