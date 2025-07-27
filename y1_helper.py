@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.7"
+        self.version = "0.5.8"
         
         # Write version.txt file
         self.write_version_file()
@@ -191,9 +191,9 @@ class Y1HelperApp(tk.Tk):
         self.scroll_cursor_duration = 25  # Very brief cursor display (25ms) - reduced for better responsiveness
         
         # Performance optimization variables
-        self.framebuffer_refresh_interval = 4.0  # Refresh every 4 seconds
+        self.framebuffer_refresh_interval = 1.0  # Refresh every 1 second for better responsiveness
         self.last_framebuffer_refresh = 0
-        self.unified_check_interval = 10  # Check device and refresh apps every 10 seconds
+        self.unified_check_interval = 5  # Check device and refresh apps every 5 seconds (more frequent)
         self.last_unified_check = 0
         self.app_detection_interval = 10  # Check app every 10 seconds (increased from 5)
         self.last_app_detection = 0
@@ -210,6 +210,16 @@ class Y1HelperApp(tk.Tk):
         self.device_stay_awake_set = False
         self.last_blank_screen_detection = 0
         self.blank_screen_threshold = 0.01  # 10ms of blank screen before showing placeholder
+        
+        # Enhanced device connection tracking
+        self.device_connection_lock = threading.Lock()  # Thread-safe device state management
+        self.last_device_check_time = 0
+        self.device_check_failures = 0
+        self.max_device_check_failures = 2  # Reduced failures before marking as disconnected (more responsive)
+        self.device_validation_interval = 3.0  # Validate device responsiveness every 3 seconds (more frequent)
+        self.last_device_validation = 0
+        self.consecutive_framebuffer_failures = 0  # Track consecutive framebuffer pull failures
+        self.max_framebuffer_failures = 3  # Max framebuffer failures before showing ready placeholder
         
         # Input mode persistence
         self.manual_mode_override = False  # Track if user manually changed mode
@@ -1482,74 +1492,105 @@ class Y1HelperApp(tk.Tk):
         debug_print(f"Added {len(user_apps)} user apps and {len(system_apps)} system apps to menu")
     
     def unified_device_check(self):
-        """Unified method to check device connection and refresh app list"""
-        debug_print("Performing unified device check")
-        try:
-            adb_path = self.get_adb_path()
-            
-            # Check device connection
-            result = subprocess.run([adb_path, "devices"], 
-                                  capture_output=True, text=True, timeout=5)
-            debug_print(f"ADB devices output: {result.stdout.strip()}")
-            
-            if "device" in result.stdout and "List of devices" in result.stdout:
-                # Device is connected
-                if not self.device_connected:
-                    # Device just reconnected
-                    self.device_connected = True
-                    self.status_var.set("Device connected")
-                    debug_print("Device reconnected")
-                    
-                    # Show controls frame and enable input bindings when device connects
-                    self.show_controls_frame()
-                    self.enable_input_bindings()
-                    
-                    # Set device to stay awake
-                    self.set_device_stay_awake()
-                    
-                    # Device connected - no firmware preparation check needed
-                    pass
+        """Unified method to check device connection and refresh app list with enhanced robustness"""
+        # Use thread lock to prevent race conditions
+        with self.device_connection_lock:
+            try:
+                adb_path = self.get_adb_path()
+                current_time = time.time()
                 
-                # Always refresh apps when device is connected
-                self.refresh_apps()
-                debug_print("Apps refreshed")
+                # Check device connection with more robust parsing
+                result = subprocess.run([adb_path, "devices"], 
+                                      capture_output=True, text=True, timeout=3)
                 
-            else:
-                # Device is not connected
-                if self.device_connected:
-                    # Device just disconnected
+                # More robust device detection - look for actual device lines
+                device_lines = [line.strip() for line in result.stdout.strip().split('\n') 
+                              if line.strip() and not line.startswith('List of devices')]
+                
+                device_found = False
+                for line in device_lines:
+                    if line.endswith('device'):  # Only fully authorized devices
+                        device_found = True
+                        break
+                
+                if device_found:
+                    # Device appears to be connected, validate it's actually responsive
+                    if current_time - self.last_device_validation > self.device_validation_interval:
+                        if self.validate_device_connection():
+                            self.device_check_failures = 0  # Reset failure counter
+                            self.consecutive_framebuffer_failures = 0  # Reset framebuffer failures
+                            self.last_device_validation = current_time
+                            
+                            if not self.device_connected:
+                                # Device just reconnected
+                                self.device_connected = True
+                                self.status_var.set("Device connected")
+                                
+                                # Show controls frame and enable input bindings when device connects
+                                self.show_controls_frame()
+                                self.enable_input_bindings()
+                                
+                                # Set device to stay awake
+                                self.set_device_stay_awake()
+                            
+                            # Always refresh apps when device is connected and validated
+                            self.refresh_apps()
+                        else:
+                            # Device detected but not responsive
+                            self.device_check_failures += 1
+                            
+                            if self.device_check_failures >= self.max_device_check_failures:
+                                if self.device_connected:
+                                    self.device_connected = False
+                                    self.status_var.set("Device disconnected - not responsive")
+                                    
+                                    # Hide controls frame and disable input bindings
+                                    self.hide_controls_frame()
+                                    self.disable_input_bindings()
+                    else:
+                        # Skip validation this time, but ensure device is marked as connected if it was before
+                        if not self.device_connected:
+                            self.device_connected = True
+                            self.status_var.set("Device connected")
+                            
+                            # Show controls frame and enable input bindings
+                            self.show_controls_frame()
+                            self.enable_input_bindings()
+                            
+                            # Set device to stay awake
+                            self.set_device_stay_awake()
+                        
+                        # Refresh apps even if validation was skipped
+                        self.refresh_apps()
+                        
+                else:
+                    # No device found
+                    self.device_check_failures += 1
+                    
+                    if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
+                        self.device_connected = False
+                        self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                        
+                        # Hide controls frame and disable input bindings
+                        self.hide_controls_frame()
+                        self.disable_input_bindings()
+                    
+                self.last_device_check_time = current_time
+                    
+            except Exception as e:
+                self.device_check_failures += 1
+                
+                if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
                     self.device_connected = False
                     self.status_var.set("First time? Install a Firmware from the Device Menu.")
-                    debug_print("Device disconnected")
                     
-                    # Hide controls frame and disable input bindings when device disconnects
+                    # Hide controls frame and disable input bindings
                     self.hide_controls_frame()
                     self.disable_input_bindings()
-                else:
-                    self.status_var.set("No ADB device found")
-                    self.device_connected = False
-                    debug_print("No ADB device found")
-                    
-                    # Hide controls frame and disable input bindings when no device is found
-                    self.hide_controls_frame()
-                    self.disable_input_bindings()
-                    
-        except Exception as e:
-            debug_print(f"Unified device check failed: {e}")
-            if self.device_connected:
-                self.device_connected = False
-                self.status_var.set("First time? Install a Firmware from the Device Menu.")
-                debug_print("Device disconnected due to error")
-                
-                # Hide controls frame and disable input bindings when device disconnects due to error
-                self.hide_controls_frame()
-                self.disable_input_bindings()
-            else:
-                self.status_var.set(f"ADB Error: {str(e)}")
-                self.device_connected = False
-        finally:
-            if getattr(self, 'is_flashing_firmware', False):
-                return
+        
+        # Check if firmware flashing is in progress
+        if getattr(self, 'is_flashing_firmware', False):
+            return
     
     def detect_current_app(self):
         """Detect currently running app and set launcher control accordingly"""
@@ -1731,6 +1772,29 @@ class Y1HelperApp(tk.Tk):
         if result:
             self.install_firmware()
     
+    def validate_device_connection(self):
+        """Validate that the detected device is actually responsive and accessible"""
+        try:
+            # Test basic device responsiveness with a simple command
+            success, stdout, stderr = self.run_adb_command("shell echo 'test'", timeout=2)
+            if not success:
+                return False
+            
+            # Test if we can get device properties (more comprehensive check)
+            success, stdout, stderr = self.run_adb_command("shell getprop ro.product.model", timeout=2)
+            if not success or not stdout.strip():
+                return False
+            
+            # Test if we can access the framebuffer (critical for screen capture)
+            success, stdout, stderr = self.run_adb_command("shell ls /dev/graphics/fb0", timeout=2)
+            if not success:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            return False
+    
     def run_adb_command(self, command, timeout=10):
         """Run ADB command and return result"""
         debug_print(f"Running ADB command: {command}")
@@ -1778,42 +1842,40 @@ class Y1HelperApp(tk.Tk):
             debug_print("Screen capture already running")
     
     def capture_screen_loop(self):
-        """Optimized screen capture loop with reduced refresh rate"""
-        debug_print("Starting optimized screen capture loop")
+        """Optimized screen capture loop with 1-second refresh rate"""
         import tempfile
         import os
         
         temp_dir = tempfile.gettempdir()
         fb_temp_path = os.path.join(temp_dir, "y1_fb0.tmp")
-        debug_print(f"Using temp file: {fb_temp_path}")
         placeholder_shown = False
         
         while self.is_capturing:
             try:
                 current_time = time.time()
                 
-                # Periodically check device connection status (less frequent)
+                # Periodically check device connection status
                 if current_time - self.last_unified_check > self.unified_check_interval:
-                    debug_print("Performing periodic connection check")
                     self.unified_device_check()
                     self.last_unified_check = current_time
                 
-                # Check if device is connected
-                if not self.device_connected:
+                # Check if device is connected using thread-safe access
+                with self.device_connection_lock:
+                    device_connected = self.device_connected
+                
+                if not device_connected:
                     if not placeholder_shown:
-                        debug_print("Device disconnected, showing ready placeholder")
                         self.show_ready_placeholder()
                         placeholder_shown = True
                         self.status_var.set("First time? Install a Firmware from the Device Menu.")
                         # Disable input bindings when device is disconnected
                         self.disable_input_bindings()
-                    time.sleep(2)  # Check less frequently when disconnected
+                    time.sleep(1)  # Check less frequently when disconnected
                     continue
                 
                 # Reset placeholder flag when device is connected
                 if placeholder_shown:
                     placeholder_shown = False
-                    debug_print("Device reconnected, hiding placeholder")
                     self.status_var.set("Device connected")
                     # Enable input bindings when device reconnects
                     self.enable_input_bindings()
@@ -1828,41 +1890,43 @@ class Y1HelperApp(tk.Tk):
                 )
                 
                 if should_refresh:
-                    debug_print("Pulling framebuffer from device (optimized refresh)")
                     success, stdout, stderr = self.run_adb_command(f"pull /dev/graphics/fb0 \"{fb_temp_path}\"")
                     if success:
                         if os.path.exists(fb_temp_path):
-                            debug_print("Framebuffer pulled successfully, processing")
                             self.process_framebuffer(fb_temp_path)
+                            self.consecutive_framebuffer_failures = 0  # Reset failure counter on success
                             self.last_framebuffer_refresh = current_time
                             self.force_refresh_requested = False
                         else:
-                            debug_print("Framebuffer pull succeeded but file doesn't exist, showing ready.png")
-                            self.show_ready_placeholder()
+                            # Framebuffer pull succeeded but file doesn't exist
+                            self.consecutive_framebuffer_failures += 1
+                            if self.consecutive_framebuffer_failures >= self.max_framebuffer_failures:
+                                if not placeholder_shown:
+                                    self.show_ready_placeholder()
+                                    placeholder_shown = True
+                                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
                             self.last_framebuffer_refresh = current_time
                             self.force_refresh_requested = False
                     else:
-                        debug_print("Framebuffer pull failed - device disconnected")
-                        # If framebuffer pull fails, device is disconnected
-                        if not placeholder_shown:
-                            self.device_connected = False
-                            debug_print("Device appears disconnected, showing ready placeholder")
-                            self.show_ready_placeholder()
-                            placeholder_shown = True
-                            self.status_var.set("First time? Install a Firmware from the Device Menu.")
-                        time.sleep(1)
+                        # Framebuffer pull failed
+                        self.consecutive_framebuffer_failures += 1
+                        if self.consecutive_framebuffer_failures >= self.max_framebuffer_failures:
+                            if not placeholder_shown:
+                                self.show_ready_placeholder()
+                                placeholder_shown = True
+                                self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                        time.sleep(0.5)
                 else:
-                    # Sleep longer when not refreshing to reduce CPU usage
-                    time.sleep(0.5)
+                    # Sleep when not refreshing to reduce CPU usage
+                    time.sleep(0.1)
                     
             except Exception as e:
-                debug_print(f"Capture loop error: {e}")
                 if not placeholder_shown:
                     self.device_connected = False
                     self.show_ready_placeholder()
                     placeholder_shown = True
                     self.status_var.set("First time? Install a Firmware from the Device Menu.")
-                time.sleep(1)
+                time.sleep(0.5)
     
     def process_framebuffer(self, fb_path):
         """Process framebuffer data and display on canvas (optimized)"""
