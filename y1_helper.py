@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.4"
+        self.version = "0.5.5"
         
         # Write version.txt file
         self.write_version_file()
@@ -899,13 +899,17 @@ class Y1HelperApp(tk.Tk):
                                        font=("Segoe UI", 8))
         self.controls_label.pack(anchor="w")
         
-        # Mode selection frame with reduced padding
+        # Mode selection frame with reduced padding - now taller with two rows
         mode_frame = ttk.Frame(self.controls_frame)
         mode_frame.pack(fill=tk.X, pady=(3, 0))
         
+        # First row - Main controls
+        main_controls_frame = ttk.Frame(mode_frame)
+        main_controls_frame.pack(fill=tk.X, pady=(0, 5))
+        
         # Input Mode toggle button with modern styling
         self.input_mode_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="Touch Screen Mode",
             command=self.toggle_scroll_wheel_mode,
             style="TButton"
@@ -914,7 +918,7 @@ class Y1HelperApp(tk.Tk):
         
         # Set Time button with modern styling
         self.set_time_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="🕐 Set Time",
             command=self.sync_device_time,
             style="TButton"
@@ -923,7 +927,7 @@ class Y1HelperApp(tk.Tk):
         
         # Install Firmware button with modern styling
         self.install_firmware_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="⚡ Install Firmware",
             command=self.install_firmware,
             style="TButton"
@@ -932,7 +936,7 @@ class Y1HelperApp(tk.Tk):
         
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="📸 Screenshot",
             command=self.take_screenshot,
             style="TButton"
@@ -941,7 +945,7 @@ class Y1HelperApp(tk.Tk):
         
         # Navigation buttons
         self.home_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="🏠 Home",
             command=self.go_home,
             style="TButton"
@@ -949,7 +953,7 @@ class Y1HelperApp(tk.Tk):
         self.home_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         
         self.back_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="⬅ Back",
             command=self.send_back_key,
             style="TButton"
@@ -958,7 +962,7 @@ class Y1HelperApp(tk.Tk):
         
         # Additional navigation buttons
         self.recent_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="📱 Recent",
             command=self.show_recent_apps,
             style="TButton"
@@ -966,7 +970,7 @@ class Y1HelperApp(tk.Tk):
         self.recent_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         
         self.menu_btn = ttk.Button(
-            mode_frame,
+            main_controls_frame,
             text="☰ Menu",
             command=self.nav_center,
             style="TButton"
@@ -975,7 +979,7 @@ class Y1HelperApp(tk.Tk):
         
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
-            mode_frame,
+            main_controls_frame,
             text="Invert Scroll Direction",
             variable=self.disable_dpad_swap_var,
             command=self.update_controls_display,
@@ -983,6 +987,69 @@ class Y1HelperApp(tk.Tk):
         )
         self.disable_swap_checkbox.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         self.disable_swap_checkbox.pack_forget()  # Hidden by default
+        
+        # Second row - D-pad controls
+        dpad_frame = ttk.Frame(mode_frame)
+        dpad_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # D-pad label
+        dpad_label = ttk.Label(dpad_frame, text="D-pad Controls:", font=("Segoe UI", 9, "bold"))
+        dpad_label.pack(side=tk.LEFT, anchor="w")
+        
+        # D-pad buttons in a cross layout
+        dpad_buttons_frame = ttk.Frame(dpad_frame)
+        dpad_buttons_frame.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Up button
+        self.dpad_up_btn = ttk.Button(
+            dpad_buttons_frame,
+            text="▲",
+            command=self.nav_up,
+            style="TButton",
+            width=3
+        )
+        self.dpad_up_btn.pack()
+        
+        # Middle row with left, center, right buttons
+        middle_row = ttk.Frame(dpad_buttons_frame)
+        middle_row.pack()
+        
+        self.dpad_left_btn = ttk.Button(
+            middle_row,
+            text="◀",
+            command=self.nav_left,
+            style="TButton",
+            width=3
+        )
+        self.dpad_left_btn.pack(side=tk.LEFT)
+        
+        self.dpad_center_btn = ttk.Button(
+            middle_row,
+            text="●",
+            command=self.nav_center,
+            style="TButton",
+            width=3
+        )
+        self.dpad_center_btn.pack(side=tk.LEFT, padx=(2, 0))
+        
+        self.dpad_right_btn = ttk.Button(
+            middle_row,
+            text="▶",
+            command=self.nav_right,
+            style="TButton",
+            width=3
+        )
+        self.dpad_right_btn.pack(side=tk.LEFT, padx=(2, 0))
+        
+        # Down button
+        self.dpad_down_btn = ttk.Button(
+            dpad_buttons_frame,
+            text="▼",
+            command=self.nav_down,
+            style="TButton",
+            width=3
+        )
+        self.dpad_down_btn.pack()
         
         # Add tooltips with modern styling
         self._add_tooltip(self.input_mode_btn, (
@@ -1011,6 +1078,32 @@ class Y1HelperApp(tk.Tk):
         self._add_tooltip(self.install_firmware_btn, (
             "Install Firmware: Download and install the latest firmware for your Y1 device. "
             "This updates the device's operating system to the newest version with bug fixes and improvements."
+        ))
+        
+        # Add tooltips for D-pad buttons
+        self._add_tooltip(self.dpad_up_btn, (
+            "D-pad Up: Navigate up in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_down_btn, (
+            "D-pad Down: Navigate down in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_left_btn, (
+            "D-pad Left: Navigate left in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_right_btn, (
+            "D-pad Right: Navigate right in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_center_btn, (
+            "D-pad Center: Select or confirm the current item. "
+            "Works in any input mode and sends ADB commands to the device."
         ))
         
         # Status bar at bottom with modern styling
