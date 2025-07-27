@@ -602,23 +602,25 @@ class Y1Launcher:
             
             self.update_progress(50, 100, f"Running {exe_file['path']} for user installation...")
             
-            # Run the exe file
+            # Run the exe file as a detached process
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_SHOW  # Show the exe window
+            startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
             process = subprocess.Popen(
                 [local_exe_path],
-                startupinfo=startupinfo
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
             )
             
-            self.update_progress(75, 100, f"Waiting for {exe_file['path']} to complete...")
+            print(f"Launched {exe_file['path']} with PID: {process.pid}")
             
-            # Wait for the exe to complete
-            process.wait()
+            # Close the launcher window immediately
+            if self.progress_window and self.progress_window.winfo_exists():
+                self.progress_window.destroy()
             
-            self.update_progress(100, 100, f"{exe_file['path']} installation completed")
-            return True
+            # Exit the launcher process
+            sys.exit(0)
             
         except Exception as e:
             print(f"Error running exe update: {e}")
@@ -661,23 +663,25 @@ class Y1Launcher:
             
             self.update_progress(50, 100, f"Running {asset_name} for installation...")
             
-            # Run the exe file
+            # Run the exe file as a detached process
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_SHOW  # Show the exe window
+            startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
             process = subprocess.Popen(
                 [local_exe_path],
-                startupinfo=startupinfo
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
             )
             
-            self.update_progress(75, 100, f"Waiting for {asset_name} to complete installation...")
+            print(f"Launched {asset_name} with PID: {process.pid}")
             
-            # Wait for the exe to complete
-            process.wait()
+            # Close the launcher window immediately
+            if self.progress_window and self.progress_window.winfo_exists():
+                self.progress_window.destroy()
             
-            self.update_progress(100, 100, f"{asset_name} installation completed successfully")
-            return True
+            # Exit the launcher process
+            sys.exit(0)
             
         except Exception as e:
             print(f"Error running release exe update: {e}")
@@ -757,13 +761,10 @@ class Y1Launcher:
                 if not archive_dir:
                     print("Warning: Failed to archive current version")
                 
-                # Download and run the exe
+                # Download and run the exe (this will exit the launcher immediately)
                 success = self.download_and_run_release_exe(release_info)
-                if success:
-                    self.update_progress(100, 100, "Exe update completed - launcher will exit")
-                    return "exit"
-                else:
-                    return False
+                # If we get here, the exe launch failed
+                return False
             elif release_info and release_info['type'] == 'exe_required_incompatible':
                 # Exe-only release required but version is incompatible
                 self.update_progress(20, 100, f"Exe update required but version incompatible")
@@ -793,11 +794,8 @@ class Y1Launcher:
             if len(self.exe_files) == 1 and len(github_files) == 1 and self.exe_files[0]['path'].endswith('.exe'):
                 self.update_progress(70, 100, f"Detected exe-only release in repository: {self.exe_files[0]['path']}")
                 success = self.download_and_run_exe(self.exe_files[0])
-                if success:
-                    self.update_progress(100, 100, "Exe update completed - launcher will exit")
-                    return "exit"
-                else:
-                    return False
+                # If we get here, the exe launch failed
+                return False
             
             self.update_progress(40, 100, "Scanning local files...")
             local_files = self.get_local_files()
@@ -835,11 +833,8 @@ class Y1Launcher:
                     exe_file = self.exe_files[0]
                     self.update_progress(70, 100, f"Using exe update: {exe_file['path']}")
                     success = self.download_and_run_exe(exe_file)
-                    if success:
-                        self.update_progress(100, 100, "Exe update completed - launcher will exit")
-                        return "exit"
-                    else:
-                        return False
+                    # If we get here, the exe launch failed
+                    return False
                 else:
                     self.update_progress(100, 100, "No exe files found for update")
                     return False
@@ -852,35 +847,33 @@ class Y1Launcher:
             return False
     
     def launch_y1_helper(self):
-        """Launch y1_helper.py and show real-time output in the progress modal (single line)"""
+        """Launch y1_helper.py and close launcher window while keeping child process open"""
         try:
             y1_helper_path = os.path.join(self.base_dir, "y1_helper.py")
             python_path = os.path.join(self.base_dir, "assets", "python", "python.exe")
             if not os.path.exists(y1_helper_path) or not os.path.exists(python_path):
                 return False
-            process = subprocess.Popen([python_path, y1_helper_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-            if not self.progress_window or not self.progress_window.winfo_exists():
-                self.create_progress_window()
-            status_var = self.progress_window.status_var
-            def read_output():
-                for line in process.stdout:
-                    status_var.set(line.strip())
-                    self.progress_window.update()
-                process.stdout.close()
-                process.wait()
-                self.progress_window.after(0, lambda: self.progress_window.title("Y1 Helper Finished - Close this window"))
-                self.progress_window.after(0, lambda: self.progress_window.grab_release())
-                self.progress_window.after(0, lambda: self.progress_window.focus_force())
-                # Add a close button when done
-                def close_modal():
-                    self.progress_window.destroy()
-                close_btn = ttk.Button(self.progress_window, text="Close", command=close_modal)
-                close_btn.pack(pady=8)
-                self.progress_window.protocol("WM_DELETE_WINDOW", close_modal)
-                # Exit launcher after launching y1_helper.py
-                sys.exit(0)
-            threading.Thread(target=read_output, daemon=True).start()
-            return True
+            
+            # Launch y1_helper.py as a detached process
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
+            
+            process = subprocess.Popen(
+                [python_path, y1_helper_path], 
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+            
+            print(f"Launched y1_helper.py with PID: {process.pid}")
+            
+            # Close the launcher window immediately
+            if self.progress_window and self.progress_window.winfo_exists():
+                self.progress_window.destroy()
+            
+            # Exit the launcher process
+            sys.exit(0)
+            
         except Exception as e:
             print(f"Error launching y1_helper.py: {e}")
             sys.exit(1)
@@ -900,15 +893,7 @@ class Y1Launcher:
                 print(f"Update completed with result: {result}")
                 
                 # Handle result
-                if result == "exit":
-                    # Exe update completed, show completion message and exit launcher
-                    print("Exe update completed, exiting launcher...")
-                    self.update_progress(100, 100, "Update completed successfully! Launcher will close.")
-                    time.sleep(2)  # Brief delay to show completion
-                    if self.progress_window:
-                        self.progress_window.after(2000, lambda: self.progress_window.destroy())
-                        self.progress_window.after(2500, sys.exit)
-                elif result:
+                if result:
                     # Patch update completed, launch y1_helper.py
                     print("Patch update completed, launching y1_helper.py...")
                     self.update_progress(100, 100, "Patch update completed! Launching Y1 Helper...")
@@ -955,13 +940,7 @@ def main():
         # --- Start update/patching in a thread ---
         def update_thread():
             result = launcher.check_and_update()
-            if result == "exit":
-                # Exe update completed, show completion message and exit launcher
-                launcher.update_progress(100, 100, "Update completed successfully! Launcher will close.")
-                time.sleep(2)  # Brief delay to show completion
-                launcher.progress_window.after(2000, lambda: launcher.progress_window.destroy())
-                launcher.progress_window.after(2500, sys.exit)
-            elif result:
+            if result:
                 launcher.launch_y1_helper()
             else:
                 launcher.launch_y1_helper()

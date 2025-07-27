@@ -29,81 +29,6 @@ import datetime
 base_dir = os.path.dirname(os.path.abspath(__file__))
 assets_dir = os.path.join(base_dir, 'assets')
 
-# Internationalization system
-class I18nManager:
-    def __init__(self):
-        self.strings = {}
-        self.current_language = "en"
-        self.fallback_language = "en"
-        self.load_language("en")  # Always load English as fallback
-    
-    def load_language(self, language_code):
-        """Load language strings from XML file"""
-        try:
-            lang_file = os.path.join(base_dir, 'languages', f'{language_code}.xml')
-            if os.path.exists(lang_file):
-                tree = ET.parse(lang_file)
-                root = tree.getroot()
-                
-                # Clear existing strings for this language
-                if language_code not in self.strings:
-                    self.strings[language_code] = {}
-                
-                # Load strings from XML
-                for string_elem in root.findall('string'):
-                    name = string_elem.get('name')
-                    value = string_elem.text or ""
-                    self.strings[language_code][name] = value
-                
-                debug_print(f"Loaded language: {language_code}")
-                return True
-            else:
-                debug_print(f"Language file not found: {lang_file}")
-                return False
-        except Exception as e:
-            debug_print(f"Error loading language {language_code}: {e}")
-            return False
-    
-    def set_language(self, language_code):
-        """Set the current language"""
-        if language_code != self.current_language:
-            if self.load_language(language_code):
-                self.current_language = language_code
-                return True
-        return False
-    
-    def get_string(self, key, default=None):
-        """Get a localized string with fallback to English"""
-        if default is None:
-            default = key  # Use key as default if no default provided
-        
-        # Try current language first
-        if (self.current_language in self.strings and 
-            key in self.strings[self.current_language]):
-            return self.strings[self.current_language][key]
-        
-        # Fallback to English
-        if (self.fallback_language in self.strings and 
-            key in self.strings[self.fallback_language]):
-            return self.strings[self.fallback_language][key]
-        
-        # Return default if nothing found
-        return default
-    
-    def get_available_languages(self):
-        """Get list of available language files"""
-        languages = []
-        lang_dir = os.path.join(base_dir, 'languages')
-        if os.path.exists(lang_dir):
-            for file in os.listdir(lang_dir):
-                if file.endswith('.xml'):
-                    lang_code = file[:-4]  # Remove .xml extension
-                    languages.append(lang_code)
-        return sorted(languages)
-
-# Global i18n instance
-i18n = I18nManager()
-
 # This comment proves the patcher worked for Ryan
 
 def check_and_update_launcher():
@@ -170,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.2"
+        self.version = "0.6.1"
         
         # Write version.txt file
         self.write_version_file()
@@ -206,8 +131,8 @@ class Y1HelperApp(tk.Tk):
             except Exception as e:
                 debug_print(f'Failed to copy/delete new.xml: {e}')
         
-        self.title(f"{i18n.get_string('app_title', 'Y1 Helper')} v{self.version}")
-        self.geometry("452x661")  # Increased by 32px width and 32px height
+        self.title(f"Y1 Helper v{self.version}")
+        self.geometry("520x720")  # Increased width and height for better button spacing
         self.resizable(False, False)
         
         # Ensure window gets focus and appears in front
@@ -218,9 +143,9 @@ class Y1HelperApp(tk.Tk):
         
         # Center window on screen
         self.update_idletasks()  # Update window info
-        x = (self.winfo_screenwidth() // 2) - (452 // 2)
-        y = (self.winfo_screenheight() // 2) - (661 // 2)
-        self.geometry(f"452x661+{x}+{y}")
+        x = (self.winfo_screenwidth() // 2) - (520 // 2)
+        y = (self.winfo_screenheight() // 2) - (720 // 2)
+        self.geometry(f"520x720+{x}+{y}")
         
         # Detect Windows 11 theme
         self.setup_windows_11_theme()
@@ -266,9 +191,9 @@ class Y1HelperApp(tk.Tk):
         self.scroll_cursor_duration = 25  # Very brief cursor display (25ms) - reduced for better responsiveness
         
         # Performance optimization variables
-        self.framebuffer_refresh_interval = 4.0  # Refresh every 4 seconds
+        self.framebuffer_refresh_interval = 1.0  # Refresh every 1 second for better responsiveness
         self.last_framebuffer_refresh = 0
-        self.unified_check_interval = 10  # Check device and refresh apps every 10 seconds
+        self.unified_check_interval = 5  # Check device and refresh apps every 5 seconds (more frequent)
         self.last_unified_check = 0
         self.app_detection_interval = 10  # Check app every 10 seconds (increased from 5)
         self.last_app_detection = 0
@@ -285,6 +210,17 @@ class Y1HelperApp(tk.Tk):
         self.device_stay_awake_set = False
         self.last_blank_screen_detection = 0
         self.blank_screen_threshold = 0.01  # 10ms of blank screen before showing placeholder
+        
+        # Enhanced device connection tracking
+        self.device_connection_lock = threading.Lock()  # Thread-safe device state management
+        self.last_device_check_time = 0
+        self.device_check_failures = 0
+        self.max_device_check_failures = 2  # Reduced failures before marking as disconnected (more responsive)
+        self.device_validation_interval = 3.0  # Validate device responsiveness every 3 seconds (more frequent)
+        self.last_device_validation = 0
+        self.consecutive_framebuffer_failures = 0  # Track consecutive framebuffer pull failures
+        self.max_framebuffer_failures = 3  # Max framebuffer failures before showing ready placeholder
+        self.input_command_in_progress = False  # Flag to track input commands
         
         # Input mode persistence
         self.manual_mode_override = False  # Track if user manually changed mode
@@ -307,12 +243,8 @@ class Y1HelperApp(tk.Tk):
         if not hasattr(self, 'device_connected') or not self.device_connected:
             debug_print("No device connected, showing ready placeholder")
             self.show_ready_placeholder()
-            # Hide controls frame and disable input bindings when no device is connected
-            self.hide_controls_frame()
-            self.disable_input_bindings()
         else:
-            # Device is connected, show controls
-            self.show_controls_frame()
+            # Device is connected, enable input bindings
             self.enable_input_bindings()
         
         # Set device to stay awake while charging
@@ -324,6 +256,11 @@ class Y1HelperApp(tk.Tk):
         
         # Start screen capture immediately
         self.start_screen_capture()
+        
+        # Initialize config download and background updates
+        self.download_and_unpack_config()
+        self.update_config_background()
+        
         debug_print("Y1HelperApp initialization complete")
     
     def write_version_file(self):
@@ -648,6 +585,113 @@ class Y1HelperApp(tk.Tk):
         # Return root path as default (will be created if needed)
         return root_config
     
+    def download_and_unpack_config(self):
+        """Download config.zip from GitHub and unpack config.ini to root directory"""
+        try:
+            config_url = "https://github.com/team-slide/Y1-helper/raw/refs/heads/master/config.zip"
+            config_zip_path = os.path.join(self.base_dir, "config.zip")
+            config_ini_path = os.path.join(self.base_dir, "config.ini")
+            
+            debug_print("Downloading config.zip...")
+            
+            # Download config.zip
+            urllib.request.urlretrieve(config_url, config_zip_path)
+            
+            # Extract config.ini from the zip
+            with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
+                zip_ref.extract("config.ini", self.base_dir)
+            
+            # Clean up the zip file
+            os.remove(config_zip_path)
+            
+            debug_print("Config.ini extracted successfully")
+            
+        except Exception as e:
+            debug_print(f"Failed to download/unpack config.zip: {e}")
+            # Continue without config.ini if download fails
+    
+    def get_random_api_key(self):
+        """Get a random API key from config.ini for rate limit prevention"""
+        try:
+            config_path = self.get_config_path()
+            if not os.path.exists(config_path):
+                return None
+            
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            
+            # Get all API keys from the config
+            api_keys = []
+            if 'api_keys' in config:
+                for key, value in config['api_keys'].items():
+                    if value.strip():  # Only add non-empty keys
+                        api_keys.append(value.strip())
+            
+            # If no API keys found, try legacy github.token
+            if not api_keys and 'github' in config and 'token' in config['github']:
+                token = config['github']['token'].strip()
+                if token:
+                    api_keys.append(token)
+            
+            if api_keys:
+                # Return a random key
+                import random
+                return random.choice(api_keys)
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error getting API key: {e}")
+            return None
+    
+    def add_api_key_to_config(self, new_key):
+        """Add a new API key to config.ini"""
+        try:
+            config_path = self.get_config_path()
+            
+            import configparser
+            config = configparser.ConfigParser()
+            
+            # Read existing config if it exists
+            if os.path.exists(config_path):
+                config.read(config_path)
+            
+            # Ensure api_keys section exists
+            if 'api_keys' not in config:
+                config['api_keys'] = {}
+            
+            # Find next available key number
+            key_number = 1
+            while f'key_{key_number}' in config['api_keys']:
+                key_number += 1
+            
+            # Add the new key
+            config['api_keys'][f'key_{key_number}'] = new_key
+            
+            # Write back to file
+            with open(config_path, 'w', encoding='utf-8') as f:
+                config.write(f)
+            
+            debug_print(f"Added new API key (key_{key_number}) to config.ini")
+            
+        except Exception as e:
+            debug_print(f"Error adding API key to config: {e}")
+    
+    def update_config_background(self):
+        """Update config.ini in background every 5 minutes"""
+        try:
+            # Download and unpack config
+            self.download_and_unpack_config()
+            
+            # Schedule next update in 5 minutes
+            self.after(300000, self.update_config_background)  # 300000ms = 5 minutes
+            
+        except Exception as e:
+            debug_print(f"Background config update failed: {e}")
+            # Schedule retry in 1 minute on failure
+            self.after(60000, self.update_config_background)  # 60000ms = 1 minute
+    
     def download_app(self, app_info):
         """Download app from GitHub releases with progress"""
         progress_dialog = None
@@ -667,23 +711,16 @@ class Y1HelperApp(tk.Tk):
             
             update_progress("Connecting to GitHub...")
             
-            # Get GitHub token from config
-            config_path = self.get_config_path()
-            github_token = None
-            if os.path.exists(config_path):
-                import configparser
-                config = configparser.ConfigParser()
-                config.read(config_path)
-                if 'github' in config and 'token' in config['github']:
-                    github_token = config['github']['token']
+            # Get random API key from config for rate limit prevention
+            api_key = self.get_random_api_key()
             
             # Parse the GitHub URL to get repo and latest release
             repo_url = app_info['url']
             release_data = None
             repo_path = None
             headers = {}
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
+            if api_key:
+                headers['Authorization'] = f'token {api_key}'
 
             if 'github.com' in repo_url:
                 if '/releases/latest' in repo_url:
@@ -952,11 +989,11 @@ class Y1HelperApp(tk.Tk):
     def setup_ui(self):
         # Main frame with modern styling
         main_frame = ttk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Screen viewer frame with modern styling
-        screen_frame = ttk.LabelFrame(main_frame, text="Mouse Input Panel (480x360)", padding=5)
-        screen_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+        screen_frame = ttk.LabelFrame(main_frame, text="Mouse Input Panel (480x360)", padding=8)
+        screen_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
         
         # Create canvas for screen display (scaled down to 75%) with modern styling
         self.screen_canvas = tk.Canvas(screen_frame, width=self.display_width, height=self.display_height, 
@@ -966,80 +1003,173 @@ class Y1HelperApp(tk.Tk):
         self.screen_canvas.config(width=self.display_width, height=self.display_height)
         
         # Create controls display frame with modern styling
-        self.controls_frame = ttk.LabelFrame(screen_frame, text="Controls", padding=3)
-        self.controls_frame.pack(fill=tk.X, pady=(5, 0))
+        self.controls_frame = ttk.LabelFrame(screen_frame, text="Controls", padding=6)
+        self.controls_frame.pack(fill=tk.X, pady=(8, 0))
         
         # Controls display label with compact font
         self.controls_label = ttk.Label(self.controls_frame, text="", justify=tk.LEFT, 
                                        font=("Segoe UI", 8))
         self.controls_label.pack(anchor="w")
         
-        # Mode selection frame with reduced padding
+        # Mode selection frame with reduced padding - now taller with two rows
         mode_frame = ttk.Frame(self.controls_frame)
-        mode_frame.pack(fill=tk.X, pady=(3, 0))
+        mode_frame.pack(fill=tk.X, pady=(6, 0))
+        
+        # First row - Main controls (now with multiple rows)
+        main_controls_frame = ttk.Frame(mode_frame)
+        main_controls_frame.pack(fill=tk.X, pady=(0, 8))
+        
+        # Row 1 - Primary controls
+        row1_frame = ttk.Frame(main_controls_frame)
+        row1_frame.pack(fill=tk.X, pady=(0, 6))
         
         # Input Mode toggle button with modern styling
         self.input_mode_btn = ttk.Button(
-            mode_frame,
+            row1_frame,
             text="Touch Screen Mode",
             command=self.toggle_scroll_wheel_mode,
             style="TButton"
         )
         self.input_mode_btn.pack(side=tk.LEFT, anchor="w")
         
+        # Set Time button with modern styling
+        self.set_time_btn = ttk.Button(
+            row1_frame,
+            text="🕐 Set Time",
+            command=self.sync_device_time,
+            style="TButton"
+        )
+        self.set_time_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        
+        # Install Firmware button with modern styling
+        self.install_firmware_btn = ttk.Button(
+            row1_frame,
+            text="⚡ Install Firmware",
+            command=self.install_firmware,
+            style="TButton"
+        )
+        self.install_firmware_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
-            mode_frame,
+            row1_frame,
             text="📸 Screenshot",
             command=self.take_screenshot,
             style="TButton"
         )
-        self.screenshot_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.screenshot_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        
+        # Row 2 - Navigation controls
+        row2_frame = ttk.Frame(main_controls_frame)
+        row2_frame.pack(fill=tk.X, pady=(6, 0))
         
         # Navigation buttons
         self.home_btn = ttk.Button(
-            mode_frame,
+            row2_frame,
             text="🏠 Home",
             command=self.go_home,
             style="TButton"
         )
-        self.home_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.home_btn.pack(side=tk.LEFT, anchor="w")
         
         self.back_btn = ttk.Button(
-            mode_frame,
+            row2_frame,
             text="⬅ Back",
             command=self.send_back_key,
             style="TButton"
         )
-        self.back_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.back_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         # Additional navigation buttons
         self.recent_btn = ttk.Button(
-            mode_frame,
+            row2_frame,
             text="📱 Recent",
             command=self.show_recent_apps,
             style="TButton"
         )
-        self.recent_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.recent_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         self.menu_btn = ttk.Button(
-            mode_frame,
+            row2_frame,
             text="☰ Menu",
             command=self.nav_center,
             style="TButton"
         )
-        self.menu_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.menu_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
-            mode_frame,
+            row2_frame,
             text="Invert Scroll Direction",
             variable=self.disable_dpad_swap_var,
             command=self.update_controls_display,
             style="TCheckbutton"
         )
-        self.disable_swap_checkbox.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.disable_swap_checkbox.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         self.disable_swap_checkbox.pack_forget()  # Hidden by default
+        
+        # Second row - D-pad controls
+        dpad_frame = ttk.Frame(mode_frame)
+        dpad_frame.pack(fill=tk.X, pady=(8, 0))
+        
+        # D-pad label
+        dpad_label = ttk.Label(dpad_frame, text="D-pad Controls:", font=("Segoe UI", 9, "bold"))
+        dpad_label.pack(side=tk.LEFT, anchor="w")
+        
+        # D-pad buttons in a cross layout
+        dpad_buttons_frame = ttk.Frame(dpad_frame)
+        dpad_buttons_frame.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Up button
+        self.dpad_up_btn = ttk.Button(
+            dpad_buttons_frame,
+            text="▲",
+            command=self.nav_up,
+            style="TButton",
+            width=3
+        )
+        self.dpad_up_btn.pack()
+        
+        # Middle row with left, center, right buttons
+        middle_row = ttk.Frame(dpad_buttons_frame)
+        middle_row.pack()
+        
+        self.dpad_left_btn = ttk.Button(
+            middle_row,
+            text="◀",
+            command=self.nav_left,
+            style="TButton",
+            width=3
+        )
+        self.dpad_left_btn.pack(side=tk.LEFT)
+        
+        self.dpad_center_btn = ttk.Button(
+            middle_row,
+            text="●",
+            command=self.nav_center,
+            style="TButton",
+            width=3
+        )
+        self.dpad_center_btn.pack(side=tk.LEFT, padx=(2, 0))
+        
+        self.dpad_right_btn = ttk.Button(
+            middle_row,
+            text="▶",
+            command=self.nav_right,
+            style="TButton",
+            width=3
+        )
+        self.dpad_right_btn.pack(side=tk.LEFT, padx=(2, 0))
+        
+        # Down button
+        self.dpad_down_btn = ttk.Button(
+            dpad_buttons_frame,
+            text="▼",
+            command=self.nav_down,
+            style="TButton",
+            width=3
+        )
+        self.dpad_down_btn.pack()
         
         # Add tooltips with modern styling
         self._add_tooltip(self.input_mode_btn, (
@@ -1060,9 +1190,45 @@ class Y1HelperApp(tk.Tk):
             "Use this for apps that expect the opposite scroll behavior."
         ))
         
+        self._add_tooltip(self.set_time_btn, (
+            "Set Time: Synchronize the device's time with your computer's current time. "
+            "This ensures the device has the correct date and time for proper operation."
+        ))
+        
+        self._add_tooltip(self.install_firmware_btn, (
+            "Install Firmware: Download and install the latest firmware for your Y1 device. "
+            "This updates the device's operating system to the newest version with bug fixes and improvements."
+        ))
+        
+        # Add tooltips for D-pad buttons
+        self._add_tooltip(self.dpad_up_btn, (
+            "D-pad Up: Navigate up in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_down_btn, (
+            "D-pad Down: Navigate down in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_left_btn, (
+            "D-pad Left: Navigate left in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_right_btn, (
+            "D-pad Right: Navigate right in the current app or menu. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
+        self._add_tooltip(self.dpad_center_btn, (
+            "D-pad Center: Select or confirm the current item. "
+            "Works in any input mode and sends ADB commands to the device."
+        ))
+        
         # Status bar at bottom with modern styling
         status_frame = ttk.Frame(main_frame)
-        status_frame.pack(fill=tk.X, pady=(10, 0))
+        status_frame.pack(fill=tk.X, pady=(12, 0))
         
         # Modern status label with flat styling
         status_label = ttk.Label(status_frame, textvariable=self.status_var, 
@@ -1118,7 +1284,35 @@ class Y1HelperApp(tk.Tk):
         # Flag to track if input should be disabled (when showing ready.png)
         self.input_disabled = True
         
-
+        # Mouse wheel bindings for Linux
+        self.screen_canvas.bind("<Button-4>", self.on_mouse_wheel)        # Linux scroll up
+        self.screen_canvas.bind("<Button-5>", self.on_mouse_wheel)        # Linux scroll down
+        # Mouse wheel release bindings for cursor control
+        self.screen_canvas.bind("<ButtonRelease-4>", self.on_mouse_wheel_release)  # Linux scroll up release
+        self.screen_canvas.bind("<ButtonRelease-5>", self.on_mouse_wheel_release)  # Linux scroll down release
+        
+        # Initialize controls display
+        self.update_controls_display()
+        
+        # Navigation buttons (no virtual nav bar)
+        self.nav_bar_height = 0  # No virtual nav bar
+        
+        # Context menu with modern styling
+        self.context_menu = Menu(self, tearoff=0, 
+                                bg=self.menu_bg if hasattr(self, 'menu_bg') else "#ffffff",
+                                fg=self.menu_fg if hasattr(self, 'menu_fg') else "#000000",
+                                activebackground=self.menu_select_bg if hasattr(self, 'menu_select_bg') else "#0078d4",
+                                activeforeground=self.menu_select_fg if hasattr(self, 'menu_select_fg') else "#ffffff",
+                                relief="flat", bd=0)
+        self.context_menu.add_command(label="Go Home", command=self.go_home)
+        self.context_menu.add_command(label="Open Settings", command=self.launch_settings)
+        self.context_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
+        
+        # Apply theme colors to context menu
+        if hasattr(self, 'apply_menu_colors'):
+            self.apply_menu_colors()
+        
+        # Controls are always visible regardless of device connection
     
     def hide_controls_frame(self):
         """Hide the controls frame when no device is connected"""
@@ -1183,7 +1377,7 @@ class Y1HelperApp(tk.Tk):
                 controls_text = (
                     "Scroll Wheel Mode (Inverted):\n"
                     "Touch: Left Click | Back: Right Click\n"
-                    "Scroll: W/S or Up/Down Arrows sends DPAD_LEFT/DPAD_RIGHT\n"
+                    "Scroll: W/S or Up/Down Arrows sends DPAD_RIGHT/DPAD_LEFT\n"
                     "D-pad: A/D or Left/Right Arrows sends DPAD_UP/DPAD_DOWN\n"
                     "Enter: Wheel Click, Enter, E sends ENTER\n"
                     "Toggle: Alt"
@@ -1268,55 +1462,36 @@ class Y1HelperApp(tk.Tk):
     def setup_menu(self):
         menubar = Menu(self)
         self.config(menu=menubar)
-        
-        # File menu
-        file_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label=i18n.get_string("menu_file", "File"), menu=file_menu)
-        file_menu.add_command(label=i18n.get_string("menu_screenshot", "Take Screenshot"), command=self.take_screenshot)
-        file_menu.add_separator()
-        file_menu.add_command(label=i18n.get_string("menu_exit", "Exit"), command=self.on_closing)
-        
-        # Device menu
         device_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label=i18n.get_string("menu_device", "Device"), menu=device_menu)
+        menubar.add_cascade(label="Device", menu=device_menu)
         self.device_menu = device_menu
         
         # Add standard device menu items
-        self.device_menu.add_command(label=i18n.get_string("menu_device_info", "Device Info"), command=self.show_device_info)
-        self.device_menu.add_command(label=i18n.get_string("menu_adb_shell", "ADB Shell"), command=self.open_adb_shell)
-        self.device_menu.add_command(label=i18n.get_string("menu_file_explorer", "File Explorer"), command=self.open_file_explorer)
-        self.device_menu.add_command(label=i18n.get_string("menu_home", "Home"), command=self.go_home)
-        self.device_menu.add_command(label=i18n.get_string("menu_recent_apps", "Recent Apps"), command=self.show_recent_apps)
-        self.device_menu.add_command(label=i18n.get_string("menu_change_device_language", "Change Device Language"), command=self.change_device_language)
+        self.device_menu.add_command(label="Device Info", command=self.show_device_info)
+        self.device_menu.add_command(label="ADB Shell", command=self.open_adb_shell)
+        self.device_menu.add_command(label="File Explorer", command=self.open_file_explorer)
+        self.device_menu.add_command(label="Take Screenshot", command=self.take_screenshot)
+        self.device_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
+        self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
+        self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
         self.device_menu.add_separator()
-        self.device_menu.add_command(label=i18n.get_string("menu_install_firmware", "Install Firmware"), command=self.install_firmware)
+        self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+        self.device_menu.add_separator()
+        self.device_menu.add_command(label="Restart Device", command=self.restart_device)
         
-        # Apps menu
         self.apps_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label=i18n.get_string("menu_apps", "Apps"), menu=self.apps_menu)
-        self.apps_menu.add_command(label=i18n.get_string("menu_browse_apks", "Browse APKs..."), command=self.browse_apks)
-        self.apps_menu.add_command(label=i18n.get_string("menu_install_apps", "Install Apps"), command=self.install_apps)
+        menubar.add_cascade(label="Apps", menu=self.apps_menu)
+        self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
+        self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
         self.apps_menu.add_separator()
         self.refresh_apps()  # Populate on startup
         
-        # Tools menu
-        tools_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label=i18n.get_string("menu_tools", "Tools"), menu=tools_menu)
-        tools_menu.add_command(label=i18n.get_string("menu_toggle_debug", "Toggle Debug Menu"), command=self.toggle_debug_menu)
-        tools_menu.add_separator()
-        tools_menu.add_command(label=i18n.get_string("menu_language", "Language"), command=self.change_app_language)
-        
         # Debug menu (hidden by default, shown with Ctrl+D)
         self.debug_menu = Menu(menubar, tearoff=0)
-        self.debug_menu.add_command(label=i18n.get_string("menu_change_branch", "Change Update Branch..."), command=self.change_update_branch)
-        self.debug_menu.add_command(label=i18n.get_string("menu_show_branch", "Show Current Branch"), command=self.show_current_branch)
+        self.debug_menu.add_command(label="Change Update Branch...", command=self.change_update_branch)
+        self.debug_menu.add_command(label="Show Current Branch", command=self.show_current_branch)
         self.debug_menu.add_separator()
-        self.debug_menu.add_command(label=i18n.get_string("menu_run_updater", "Run Updater"), command=self.run_updater)
-        
-        # Help menu
-        help_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label=i18n.get_string("menu_help", "Help"), menu=help_menu)
-        help_menu.add_command(label=i18n.get_string("menu_about", "About"), command=self.show_about_dialog)
+        self.debug_menu.add_command(label="Run Updater", command=self.run_updater)
         
         # Apply theme colors
         self.apply_menu_colors()
@@ -1327,8 +1502,8 @@ class Y1HelperApp(tk.Tk):
         """Refresh list of installed apps (Apps menu only)"""
         debug_print("Refreshing apps list")
         self.apps_menu.delete(0, tk.END)
-        self.apps_menu.add_command(label=i18n.get_string("menu_browse_apks", "Browse APKs..."), command=self.browse_apks)
-        self.apps_menu.add_command(label=i18n.get_string("menu_install_apps", "Install Apps"), command=self.install_apps)
+        self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
+        self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
         self.apps_menu.add_separator()
         
         # Get user-installed apps
@@ -1376,8 +1551,14 @@ class Y1HelperApp(tk.Tk):
             user_apps_menu = Menu(self.apps_menu, tearoff=0)
             for app in sorted(user_apps):
                 app_menu = Menu(user_apps_menu, tearoff=0)
-                app_menu.add_command(label=i18n.get_string("menu_launch", "Launch"), command=lambda a=app: self.launch_app(a))
-                app_menu.add_command(label=i18n.get_string("menu_uninstall", "Uninstall"), command=lambda a=app: self.uninstall_app(a))
+                app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
+                app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a))
+                
+                # Add restart option for Rockbox
+                if app == "org.rockbox":
+                    app_menu.add_separator()
+                    app_menu.add_command(label="Restart Rockbox", command=self.restart_rockbox)
+                
                 user_apps_menu.add_cascade(label=app, menu=app_menu)
                 
                 # Apply theme colors to new app menu
@@ -1404,18 +1585,18 @@ class Y1HelperApp(tk.Tk):
                     bd=0
                 )
             
-            self.apps_menu.add_cascade(label=f"{i18n.get_string('menu_user_apps', 'User Apps')} ({len(user_apps)})", menu=user_apps_menu)
+            self.apps_menu.add_cascade(label=f"User Apps ({len(user_apps)})", menu=user_apps_menu)
         else:
-            self.apps_menu.add_command(label=i18n.get_string("general_none", "No user apps installed"), state="disabled")
+            self.apps_menu.add_command(label="No user apps installed", state="disabled")
         
         # Add System Apps submenu
         if system_apps:
             system_apps_menu = Menu(self.apps_menu, tearoff=0)
             for app in sorted(system_apps):
                 app_menu = Menu(system_apps_menu, tearoff=0)
-                app_menu.add_command(label=i18n.get_string("menu_launch", "Launch"), command=lambda a=app: self.launch_app(a))
+                app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
                 # Don't allow uninstall for system apps
-                app_menu.add_command(label=i18n.get_string("menu_uninstall", "Uninstall"), command=lambda a=app: self.uninstall_app(a), state="disabled")
+                app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a), state="disabled")
                 system_apps_menu.add_cascade(label=app, menu=app_menu)
                 
                 # Apply theme colors to new app menu
@@ -1442,81 +1623,112 @@ class Y1HelperApp(tk.Tk):
                     bd=0
                 )
             
-            self.apps_menu.add_cascade(label=f"{i18n.get_string('menu_system_apps', 'System Apps')} ({len(system_apps)})", menu=system_apps_menu)
+            self.apps_menu.add_cascade(label=f"System Apps ({len(system_apps)})", menu=system_apps_menu)
         else:
-            self.apps_menu.add_command(label=i18n.get_string("general_none", "No system apps found"), state="disabled")
+            self.apps_menu.add_command(label="No system apps found", state="disabled")
         
         debug_print(f"Added {len(user_apps)} user apps and {len(system_apps)} system apps to menu")
     
     def unified_device_check(self):
-        """Unified method to check device connection and refresh app list"""
-        debug_print("Performing unified device check")
-        try:
-            adb_path = self.get_adb_path()
-            
-            # Check device connection
-            result = subprocess.run([adb_path, "devices"], 
-                                  capture_output=True, text=True, timeout=5)
-            debug_print(f"ADB devices output: {result.stdout.strip()}")
-            
-            if "device" in result.stdout and "List of devices" in result.stdout:
-                # Device is connected
-                if not self.device_connected:
-                    # Device just reconnected
-                    self.device_connected = True
-                    self.status_var.set("Device connected")
-                    debug_print("Device reconnected")
-                    
-                    # Show controls frame and enable input bindings when device connects
-                    self.show_controls_frame()
-                    self.enable_input_bindings()
-                    
-                    # Set device to stay awake
-                    self.set_device_stay_awake()
-                    
-                    # Device connected - no firmware preparation check needed
-                    pass
+        """Unified method to check device connection and refresh app list with enhanced robustness"""
+        # Use thread lock to prevent race conditions
+        with self.device_connection_lock:
+            try:
+                adb_path = self.get_adb_path()
+                current_time = time.time()
                 
-                # Always refresh apps when device is connected
-                self.refresh_apps()
-                debug_print("Apps refreshed")
+                # Check device connection with more robust parsing
+                result = subprocess.run([adb_path, "devices"], 
+                                      capture_output=True, text=True, timeout=3)
                 
-            else:
-                # Device is not connected
-                if self.device_connected:
-                    # Device just disconnected
-                    self.device_connected = False
-                    self.status_var.set("Device disconnected - Please reconnect")
-                    debug_print("Device disconnected")
-                    
-                    # Hide controls frame and disable input bindings when device disconnects
-                    self.hide_controls_frame()
-                    self.disable_input_bindings()
+                # More robust device detection - look for actual device lines
+                device_lines = [line.strip() for line in result.stdout.strip().split('\n') 
+                              if line.strip() and not line.startswith('List of devices')]
+                
+                device_found = False
+                for line in device_lines:
+                    if line.endswith('device'):  # Only fully authorized devices
+                        device_found = True
+                        break
+                
+                if device_found:
+                    # Device appears to be connected, validate it's actually responsive
+                    if current_time - self.last_device_validation > self.device_validation_interval:
+                        if self.validate_device_connection():
+                            self.device_check_failures = 0  # Reset failure counter
+                            self.consecutive_framebuffer_failures = 0  # Reset framebuffer failures
+                            self.last_device_validation = current_time
+                            
+                            if not self.device_connected:
+                                # Device just reconnected
+                                self.device_connected = True
+                                self.status_var.set("Device connected")
+                                
+                                # Show controls frame and enable input bindings when device connects
+                                self.show_controls_frame()
+                                self.enable_input_bindings()
+                                
+                                # Set device to stay awake
+                                self.set_device_stay_awake()
+                            
+                            # Always refresh apps when device is connected and validated
+                            self.refresh_apps()
+                        else:
+                            # Device detected but not responsive
+                            self.device_check_failures += 1
+                            
+                            if self.device_check_failures >= self.max_device_check_failures:
+                                if self.device_connected:
+                                    self.device_connected = False
+                                    self.status_var.set("Device disconnected - not responsive")
+                                    
+                                    # Hide controls frame and disable input bindings
+                                    self.hide_controls_frame()
+                                    self.disable_input_bindings()
+                    else:
+                        # Skip validation this time, but ensure device is marked as connected if it was before
+                        if not self.device_connected:
+                            self.device_connected = True
+                            self.status_var.set("Device connected")
+                            
+                            # Show controls frame and enable input bindings
+                            self.show_controls_frame()
+                            self.enable_input_bindings()
+                            
+                            # Set device to stay awake
+                            self.set_device_stay_awake()
+                        
+                        # Refresh apps even if validation was skipped
+                        self.refresh_apps()
+                        
                 else:
-                    self.status_var.set("No ADB device found")
-                    self.device_connected = False
-                    debug_print("No ADB device found")
+                    # No device found
+                    self.device_check_failures += 1
                     
-                    # Hide controls frame and disable input bindings when no device is found
+                    if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
+                        self.device_connected = False
+                        self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                        
+                        # Hide controls frame and disable input bindings
+                        self.hide_controls_frame()
+                        self.disable_input_bindings()
+                    
+                self.last_device_check_time = current_time
+                    
+            except Exception as e:
+                self.device_check_failures += 1
+                
+                if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
+                    self.device_connected = False
+                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                    
+                    # Hide controls frame and disable input bindings
                     self.hide_controls_frame()
                     self.disable_input_bindings()
-                    
-        except Exception as e:
-            debug_print(f"Unified device check failed: {e}")
-            if self.device_connected:
-                self.device_connected = False
-                self.status_var.set("Device disconnected - Please reconnect")
-                debug_print("Device disconnected due to error")
-                
-                # Hide controls frame and disable input bindings when device disconnects due to error
-                self.hide_controls_frame()
-                self.disable_input_bindings()
-            else:
-                self.status_var.set(f"ADB Error: {str(e)}")
-                self.device_connected = False
-        finally:
-            if getattr(self, 'is_flashing_firmware', False):
-                return
+        
+        # Check if firmware flashing is in progress
+        if getattr(self, 'is_flashing_firmware', False):
+            return
     
     def detect_current_app(self):
         """Detect currently running app and set launcher control accordingly"""
@@ -1698,6 +1910,29 @@ class Y1HelperApp(tk.Tk):
         if result:
             self.install_firmware()
     
+    def validate_device_connection(self):
+        """Validate that the detected device is actually responsive and accessible"""
+        try:
+            # Test basic device responsiveness with a simple command
+            success, stdout, stderr = self.run_adb_command("shell echo 'test'", timeout=2)
+            if not success:
+                return False
+            
+            # Test if we can get device properties (more comprehensive check)
+            success, stdout, stderr = self.run_adb_command("shell getprop ro.product.model", timeout=2)
+            if not success or not stdout.strip():
+                return False
+            
+            # Test if we can access the framebuffer (critical for screen capture)
+            success, stdout, stderr = self.run_adb_command("shell ls /dev/graphics/fb0", timeout=2)
+            if not success:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            return False
+    
     def run_adb_command(self, command, timeout=10):
         """Run ADB command and return result"""
         debug_print(f"Running ADB command: {command}")
@@ -1745,42 +1980,40 @@ class Y1HelperApp(tk.Tk):
             debug_print("Screen capture already running")
     
     def capture_screen_loop(self):
-        """Optimized screen capture loop with reduced refresh rate"""
-        debug_print("Starting optimized screen capture loop")
+        """Optimized screen capture loop with 1-second refresh rate"""
         import tempfile
         import os
         
         temp_dir = tempfile.gettempdir()
         fb_temp_path = os.path.join(temp_dir, "y1_fb0.tmp")
-        debug_print(f"Using temp file: {fb_temp_path}")
         placeholder_shown = False
         
         while self.is_capturing:
             try:
                 current_time = time.time()
                 
-                # Periodically check device connection status (less frequent)
+                # Periodically check device connection status
                 if current_time - self.last_unified_check > self.unified_check_interval:
-                    debug_print("Performing periodic connection check")
                     self.unified_device_check()
                     self.last_unified_check = current_time
                 
-                # Check if device is connected
-                if not self.device_connected:
+                # Check if device is connected using thread-safe access
+                with self.device_connection_lock:
+                    device_connected = self.device_connected
+                
+                if not device_connected:
                     if not placeholder_shown:
-                        debug_print("Device disconnected, showing ready placeholder")
                         self.show_ready_placeholder()
                         placeholder_shown = True
-                        self.status_var.set("Device disconnected - Please reconnect")
+                        self.status_var.set("First time? Install a Firmware from the Device Menu.")
                         # Disable input bindings when device is disconnected
                         self.disable_input_bindings()
-                    time.sleep(2)  # Check less frequently when disconnected
+                    time.sleep(1)  # Check less frequently when disconnected
                     continue
                 
                 # Reset placeholder flag when device is connected
                 if placeholder_shown:
                     placeholder_shown = False
-                    debug_print("Device reconnected, hiding placeholder")
                     self.status_var.set("Device connected")
                     # Enable input bindings when device reconnects
                     self.enable_input_bindings()
@@ -1795,41 +2028,48 @@ class Y1HelperApp(tk.Tk):
                 )
                 
                 if should_refresh:
-                    debug_print("Pulling framebuffer from device (optimized refresh)")
+                    # Skip framebuffer pull if input command is in progress to avoid interference
+                    if self.input_command_in_progress:
+                        time.sleep(0.1)
+                        continue
+                        
                     success, stdout, stderr = self.run_adb_command(f"pull /dev/graphics/fb0 \"{fb_temp_path}\"")
                     if success:
                         if os.path.exists(fb_temp_path):
-                            debug_print("Framebuffer pulled successfully, processing")
                             self.process_framebuffer(fb_temp_path)
+                            self.consecutive_framebuffer_failures = 0  # Reset failure counter on success
                             self.last_framebuffer_refresh = current_time
                             self.force_refresh_requested = False
                         else:
-                            debug_print("Framebuffer pull succeeded but file doesn't exist, showing ready.png")
-                            self.show_ready_placeholder()
+                            # Framebuffer pull succeeded but file doesn't exist
+                            self.consecutive_framebuffer_failures += 1
+                            if self.consecutive_framebuffer_failures >= self.max_framebuffer_failures:
+                                if not placeholder_shown:
+                                    self.show_ready_placeholder()
+                                    placeholder_shown = True
+                                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
                             self.last_framebuffer_refresh = current_time
                             self.force_refresh_requested = False
                     else:
-                        debug_print("Framebuffer pull failed - device disconnected")
-                        # If framebuffer pull fails, device is disconnected
-                        if not placeholder_shown:
-                            self.device_connected = False
-                            debug_print("Device appears disconnected, showing ready placeholder")
-                            self.show_ready_placeholder()
-                            placeholder_shown = True
-                            self.status_var.set("Device disconnected - Please reconnect")
-                        time.sleep(1)
+                        # Framebuffer pull failed
+                        self.consecutive_framebuffer_failures += 1
+                        if self.consecutive_framebuffer_failures >= self.max_framebuffer_failures:
+                            if not placeholder_shown:
+                                self.show_ready_placeholder()
+                                placeholder_shown = True
+                                self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                        time.sleep(0.5)
                 else:
-                    # Sleep longer when not refreshing to reduce CPU usage
-                    time.sleep(0.5)
+                    # Sleep when not refreshing to reduce CPU usage
+                    time.sleep(0.1)
                     
             except Exception as e:
-                debug_print(f"Capture loop error: {e}")
                 if not placeholder_shown:
                     self.device_connected = False
                     self.show_ready_placeholder()
                     placeholder_shown = True
-                    self.status_var.set("Device disconnected - Please reconnect")
-                time.sleep(1)
+                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                time.sleep(0.5)
     
     def process_framebuffer(self, fb_path):
         """Process framebuffer data and display on canvas (optimized)"""
@@ -2635,13 +2875,13 @@ class Y1HelperApp(tk.Tk):
             should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
             
             if should_invert:
-                # Inverted direction - Y1 scroll wheel behavior
+                # Inverted direction - remap scroll wheel to D-pad (no direction reversal)
                 if direction > 0:
-                    keycode = 21  # KEYCODE_DPAD_LEFT
-                    dir_str = "left"
-                else:
-                    keycode = 22  # KEYCODE_DPAD_RIGHT
+                    keycode = 22  # KEYCODE_DPAD_RIGHT (up becomes right)
                     dir_str = "right"
+                else:
+                    keycode = 21  # KEYCODE_DPAD_LEFT (down becomes left)
+                    dir_str = "left"
                 debug_print(f"Scroll wheel mode (inverted): sending D-pad {dir_str}")
             else:
                 # Normal direction - standard behavior
@@ -2661,8 +2901,15 @@ class Y1HelperApp(tk.Tk):
                 dir_str = "down"
             debug_print(f"Touch screen mode: sending D-pad {dir_str}")
         
+        # Set input command flag to prevent false disconnection detection
+        self.input_command_in_progress = True
+        
         # Send input immediately (framebuffer refresh is now non-blocking)
         success, stdout, stderr = self.run_adb_command(f"shell input keyevent {keycode}")
+        
+        # Clear input command flag
+        self.input_command_in_progress = False
+        
         if success:
             self.status_var.set(f"D-pad {dir_str} pressed")
             debug_print(f"D-pad {dir_str} sent successfully")
@@ -2671,6 +2918,8 @@ class Y1HelperApp(tk.Tk):
         else:
             self.status_var.set(f"D-pad {dir_str} failed: {stderr}")
             debug_print(f"D-pad {dir_str} failed: {stderr}")
+            # Don't trigger device disconnection for input command failures
+            # as they can be temporary and don't indicate device disconnection
     
     def on_mouse_wheel_click(self, event):
         if self.input_disabled:
@@ -2690,8 +2939,15 @@ class Y1HelperApp(tk.Tk):
             action = "d-pad center"
             debug_print("Touch screen mode: sending D-pad center")
         
+        # Set input command flag to prevent false disconnection detection
+        self.input_command_in_progress = True
+        
         # Send input immediately (framebuffer refresh is now non-blocking)
         success, stdout, stderr = self.run_adb_command(f"shell input keyevent {keycode}")
+        
+        # Clear input command flag
+        self.input_command_in_progress = False
+        
         if success:
             self.status_var.set(f"Mouse wheel click: {action} pressed")
             debug_print(f"Mouse wheel click ({action}) sent successfully")
@@ -2700,6 +2956,8 @@ class Y1HelperApp(tk.Tk):
         else:
             self.status_var.set(f"Mouse wheel click failed: {stderr}")
             debug_print(f"Mouse wheel click failed: {stderr}")
+            # Don't trigger device disconnection for input command failures
+            # as they can be temporary and don't indicate device disconnection
     
     def on_key_press(self, event):
         if self.input_disabled:
@@ -2728,23 +2986,23 @@ class Y1HelperApp(tk.Tk):
                 should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
                 
                 if should_invert:
-                    # Inverted direction - Y1 scroll wheel behavior
+                    # Inverted direction - remap D-pad axes (no direction reversal)
                     if keycode == 19:  # UP
-                        keycode = 21  # LEFT
-                        direction = 'left'
-                        debug_print("Scroll wheel mode: remapping up -> left (inverted)")
-                    elif keycode == 20:  # DOWN
-                        keycode = 22  # RIGHT
+                        keycode = 22  # RIGHT (up becomes right)
                         direction = 'right'
-                        debug_print("Scroll wheel mode: remapping down -> right (inverted)")
+                        debug_print("Scroll wheel mode: remapping up -> right (inverted)")
+                    elif keycode == 20:  # DOWN
+                        keycode = 21  # LEFT (down becomes left)
+                        direction = 'left'
+                        debug_print("Scroll wheel mode: remapping down -> left (inverted)")
                     elif keycode == 21:  # LEFT
-                        keycode = 19  # UP
-                        direction = 'up'
-                        debug_print("Scroll wheel mode: remapping left -> up (inverted)")
-                    elif keycode == 22:  # RIGHT
-                        keycode = 20  # DOWN
+                        keycode = 20  # DOWN (left becomes down)
                         direction = 'down'
-                        debug_print("Scroll wheel mode: remapping right -> down (inverted)")
+                        debug_print("Scroll wheel mode: remapping left -> down (inverted)")
+                    elif keycode == 22:  # RIGHT
+                        keycode = 19  # UP (right becomes up)
+                        direction = 'up'
+                        debug_print("Scroll wheel mode: remapping right -> up (inverted)")
                 else:
                     debug_print("Scroll wheel mode: using normal mapping")
                 
@@ -2783,8 +3041,15 @@ class Y1HelperApp(tk.Tk):
             return
         debug_print(f"Sending keycode {keycode} ({direction})")
         
+        # Set input command flag to prevent false disconnection detection
+        self.input_command_in_progress = True
+        
         # Send input immediately (framebuffer refresh is now non-blocking)
         success, stdout, stderr = self.run_adb_command(f"shell input keyevent {keycode}")
+        
+        # Clear input command flag
+        self.input_command_in_progress = False
+        
         if success:
             self.status_var.set(f"Key {direction} pressed")
             debug_print(f"Key {direction} sent successfully")
@@ -2794,6 +3059,8 @@ class Y1HelperApp(tk.Tk):
         else:
             self.status_var.set(f"Key {direction} failed: {stderr}")
             debug_print(f"Key {direction} failed: {stderr}")
+            # Don't trigger device disconnection for input command failures
+            # as they can be temporary and don't indicate device disconnection
     
     def on_key_release(self, event):
         """Handle key release to hide scroll cursor immediately"""
@@ -2940,144 +3207,32 @@ class Y1HelperApp(tk.Tk):
         info_text = "\n".join(info) if info else "Unable to get device info"
         messagebox.showinfo("Device Information", info_text)
     
-    def go_home(self):
-        """Go to home screen"""
-        if not self.device_connected:
-            messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
-                               i18n.get_string("msg_device_not_connected", "Device not connected!\n\nPlease ensure:\n- Device is connected via USB\n- USB debugging is enabled\n- Device is authorized for ADB"))
-            return
-        
-        self.status_var.set(i18n.get_string("status_connecting", "Connecting..."))
-        success, stdout, stderr = self.run_adb_command("shell input keyevent KEYCODE_HOME")
-        
-        if success:
-            self.status_var.set(i18n.get_string("status_ready", "Ready"))
-        else:
-            error_msg = stderr.strip() if stderr else stdout.strip()
-            self.status_var.set(f"{i18n.get_string('msg_operation_failed', 'Operation failed')}: {error_msg}")
-
     def change_device_language(self):
         """Open Android language settings"""
         if not self.device_connected:
-            messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
-                               i18n.get_string("msg_device_not_connected", "Device not connected!\n\nPlease ensure:\n- Device is connected via USB\n- USB debugging is enabled\n- Device is authorized for ADB"))
+            messagebox.showerror("Error", "Device not connected!\n\nPlease ensure:\n- Device is connected via USB\n- USB debugging is enabled\n- Device is authorized for ADB")
             return
         
-        self.status_var.set(i18n.get_string("status_opening_language_settings", "Opening language settings..."))
+        self.status_var.set("Opening language settings...")
         success, stdout, stderr = self.run_adb_command("shell am start -a android.settings.LOCALE_SETTINGS")
         
         if success:
-            self.status_var.set(i18n.get_string("status_language_settings_opened", "Language settings opened"))
-            messagebox.showinfo(i18n.get_string("language_title", "Language Settings"), 
-                              i18n.get_string("msg_language_settings_instructions", "Language settings have been opened on your device.\n\n"
+            self.status_var.set("Language settings opened")
+            messagebox.showinfo("Language Settings", 
+                              "Language settings have been opened on your device.\n\n"
                               "You can now:\n"
                               "• Select your preferred language\n"
                               "• Choose regional settings\n"
-                              "• Configure input methods"))
+                              "• Configure input methods")
         else:
             error_msg = stderr.strip() if stderr else stdout.strip()
-            self.status_var.set(f"{i18n.get_string('error_failed_open_language_settings', 'Failed to open language settings')}: {error_msg}")
-            messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
-                               f"{i18n.get_string('error_failed_open_language_settings', 'Failed to open language settings')}:\n\n{error_msg}\n\n"
-                               f"{i18n.get_string('msg_prepare_device_instructions', 'Please ensure:\n'
-                               '- Device is unlocked\n'
-                               '- Settings app is available\n'
-                               '- Device is responsive')}")
-    
-    def change_app_language(self):
-        """Change the application language"""
-        available_languages = i18n.get_available_languages()
-        
-        if not available_languages:
-            messagebox.showwarning(i18n.get_string("dialog_warning", "Warning"), 
-                                  i18n.get_string("msg_no_language_files", "No language files found"))
-            return
-        
-        # Create language selection dialog
-        dialog = tk.Toplevel(self)
-        dialog.title(i18n.get_string("menu_select_language", "Select Language"))
-        dialog.geometry("300x400")
-        dialog.resizable(False, False)
-        dialog.transient(self)
-        dialog.grab_set()
-        
-        # Center dialog
-        dialog.update_idletasks()
-        x = (self.winfo_screenwidth() // 2) - (300 // 2)
-        y = (self.winfo_screenheight() // 2) - (400 // 2)
-        dialog.geometry(f"300x400+{x}+{y}")
-        
-        # Language list
-        listbox = tk.Listbox(dialog, font=("Segoe UI", 10))
-        listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Language names mapping
-        language_names = {
-            'en': i18n.get_string('language_english', 'English'),
-            'fr': i18n.get_string('language_french', 'French'),
-            'es': i18n.get_string('language_spanish', 'Spanish'),
-            'pt': i18n.get_string('language_portuguese', 'Portuguese'),
-            'hi': i18n.get_string('language_hindi', 'Hindi'),
-            'zh': i18n.get_string('language_chinese', 'Chinese'),
-            'ja': i18n.get_string('language_japanese', 'Japanese'),
-            'ru': i18n.get_string('language_russian', 'Russian')
-        }
-        
-        # Populate listbox
-        for lang_code in available_languages:
-            lang_name = language_names.get(lang_code, lang_code.upper())
-            listbox.insert(tk.END, lang_name)
-        
-        # Select current language
-        try:
-            current_index = available_languages.index(i18n.current_language)
-            listbox.selection_set(current_index)
-            listbox.see(current_index)
-        except ValueError:
-            pass
-        
-        def on_select():
-            selection = listbox.curselection()
-            if selection:
-                selected_lang = available_languages[selection[0]]
-                if i18n.set_language(selected_lang):
-                    messagebox.showinfo(i18n.get_string("dialog_info", "Information"), 
-                                      i18n.get_string("msg_language_changed", "Language changed successfully"))
-                    # Update window title
-                    self.title(f"{i18n.get_string('app_title', 'Y1 Helper')} v{self.version}")
-                    # Rebuild menu with new language
-                    self.setup_menu()
-                else:
-                    messagebox.showerror(i18n.get_string("dialog_error", "Error"), 
-                                       i18n.get_string("msg_failed_change_language", "Failed to change language"))
-            dialog.destroy()
-        
-        def on_cancel():
-            dialog.destroy()
-        
-        # Buttons
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        
-        ok_button = tk.Button(button_frame, text=i18n.get_string("dialog_ok", "OK"), command=on_select)
-        ok_button.pack(side=tk.RIGHT, padx=(5, 0))
-        
-        cancel_button = tk.Button(button_frame, text=i18n.get_string("dialog_cancel", "Cancel"), command=on_cancel)
-        cancel_button.pack(side=tk.RIGHT)
-        
-        # Bind double-click and Enter key
-        listbox.bind("<Double-Button-1>", lambda e: on_select())
-        listbox.bind("<Return>", lambda e: on_select())
-        dialog.bind("<Escape>", lambda e: on_cancel())
-        
-        # Focus on listbox
-        listbox.focus_set()
-    
-    def show_about_dialog(self):
-        """Show about dialog with application information"""
-        about_text = i18n.get_string("msg_about", "Y1 Helper is a tool for managing Y1 devices and installing custom firmware.\n\nVersion: {version}\n\nDeveloped by Team Slide").format(version=self.version)
-        
-        messagebox.showinfo(i18n.get_string("about_title", "About Y1 Helper"), about_text)
+            self.status_var.set(f"Failed to open language settings: {error_msg}")
+            messagebox.showerror("Error", 
+                               f"Failed to open language settings:\n\n{error_msg}\n\n"
+                               "Please ensure:\n"
+                               "- Device is unlocked\n"
+                               "- Settings app is available\n"
+                               "- Device is responsive")
     
     def open_file_explorer(self):
         """Open the file explorer dialog"""
@@ -3089,6 +3244,50 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error opening file explorer: {e}")
             messagebox.showerror("Error", f"Failed to open file explorer: {e}")
+    
+    def restart_device(self):
+        """Restart the connected device"""
+        debug_print("Restarting device")
+        try:
+            success, stdout, stderr = self.run_adb_command("reboot")
+            if success:
+                self.status_var.set("Device restarting...")
+                debug_print("Device restart command sent successfully")
+            else:
+                self.status_var.set(f"Failed to restart device: {stderr}")
+                debug_print(f"Device restart failed: {stderr}")
+                messagebox.showerror("Error", f"Failed to restart device: {stderr}")
+        except Exception as e:
+            debug_print(f"Error restarting device: {e}")
+            messagebox.showerror("Error", f"Failed to restart device: {e}")
+    
+    def restart_rockbox(self):
+        """Restart Rockbox application"""
+        debug_print("Restarting Rockbox")
+        try:
+            # Force stop Rockbox
+            success, stdout, stderr = self.run_adb_command("shell am force-stop org.rockbox")
+            if not success:
+                self.status_var.set(f"Failed to stop Rockbox: {stderr}")
+                debug_print(f"Failed to stop Rockbox: {stderr}")
+                messagebox.showerror("Error", f"Failed to stop Rockbox: {stderr}")
+                return
+            
+            # Wait a moment for the app to fully stop
+            time.sleep(1)
+            
+            # Launch Rockbox
+            success, stdout, stderr = self.run_adb_command("shell monkey -p org.rockbox -c android.intent.category.LAUNCHER 1")
+            if success:
+                self.status_var.set("Rockbox restarted")
+                debug_print("Rockbox restarted successfully")
+            else:
+                self.status_var.set(f"Failed to restart Rockbox: {stderr}")
+                debug_print(f"Failed to restart Rockbox: {stderr}")
+                messagebox.showerror("Error", f"Failed to restart Rockbox: {stderr}")
+        except Exception as e:
+            debug_print(f"Error restarting Rockbox: {e}")
+            messagebox.showerror("Error", f"Failed to restart Rockbox: {e}")
     
     def cleanup(self):
         """Clean up resources before closing"""
@@ -4627,4 +4826,3 @@ if __name__ == "__main__":
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
     debug_print("Entering main loop")
     app.mainloop()
-    debug_print("Application exited")
