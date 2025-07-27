@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.5.5"
+        self.version = "0.5.6"
         
         # Write version.txt file
         self.write_version_file()
@@ -903,13 +903,17 @@ class Y1HelperApp(tk.Tk):
         mode_frame = ttk.Frame(self.controls_frame)
         mode_frame.pack(fill=tk.X, pady=(3, 0))
         
-        # First row - Main controls
+        # First row - Main controls (now with multiple rows)
         main_controls_frame = ttk.Frame(mode_frame)
         main_controls_frame.pack(fill=tk.X, pady=(0, 5))
         
+        # Row 1 - Primary controls
+        row1_frame = ttk.Frame(main_controls_frame)
+        row1_frame.pack(fill=tk.X, pady=(0, 3))
+        
         # Input Mode toggle button with modern styling
         self.input_mode_btn = ttk.Button(
-            main_controls_frame,
+            row1_frame,
             text="Touch Screen Mode",
             command=self.toggle_scroll_wheel_mode,
             style="TButton"
@@ -918,7 +922,7 @@ class Y1HelperApp(tk.Tk):
         
         # Set Time button with modern styling
         self.set_time_btn = ttk.Button(
-            main_controls_frame,
+            row1_frame,
             text="🕐 Set Time",
             command=self.sync_device_time,
             style="TButton"
@@ -927,7 +931,7 @@ class Y1HelperApp(tk.Tk):
         
         # Install Firmware button with modern styling
         self.install_firmware_btn = ttk.Button(
-            main_controls_frame,
+            row1_frame,
             text="⚡ Install Firmware",
             command=self.install_firmware,
             style="TButton"
@@ -936,24 +940,28 @@ class Y1HelperApp(tk.Tk):
         
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
-            main_controls_frame,
+            row1_frame,
             text="📸 Screenshot",
             command=self.take_screenshot,
             style="TButton"
         )
         self.screenshot_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         
+        # Row 2 - Navigation controls
+        row2_frame = ttk.Frame(main_controls_frame)
+        row2_frame.pack(fill=tk.X, pady=(3, 0))
+        
         # Navigation buttons
         self.home_btn = ttk.Button(
-            main_controls_frame,
+            row2_frame,
             text="🏠 Home",
             command=self.go_home,
             style="TButton"
         )
-        self.home_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
+        self.home_btn.pack(side=tk.LEFT, anchor="w")
         
         self.back_btn = ttk.Button(
-            main_controls_frame,
+            row2_frame,
             text="⬅ Back",
             command=self.send_back_key,
             style="TButton"
@@ -962,7 +970,7 @@ class Y1HelperApp(tk.Tk):
         
         # Additional navigation buttons
         self.recent_btn = ttk.Button(
-            main_controls_frame,
+            row2_frame,
             text="📱 Recent",
             command=self.show_recent_apps,
             style="TButton"
@@ -970,7 +978,7 @@ class Y1HelperApp(tk.Tk):
         self.recent_btn.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
         
         self.menu_btn = ttk.Button(
-            main_controls_frame,
+            row2_frame,
             text="☰ Menu",
             command=self.nav_center,
             style="TButton"
@@ -979,7 +987,7 @@ class Y1HelperApp(tk.Tk):
         
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
-            main_controls_frame,
+            row2_frame,
             text="Invert Scroll Direction",
             variable=self.disable_dpad_swap_var,
             command=self.update_controls_display,
