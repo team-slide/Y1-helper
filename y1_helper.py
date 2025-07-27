@@ -95,7 +95,7 @@ class Y1HelperApp(tk.Tk):
             debug_print("Launcher was updated during startup")
         
         # Version information
-        self.version = "0.6.1"
+        self.version = "0.7.0"
         
         # Write version.txt file
         self.write_version_file()
