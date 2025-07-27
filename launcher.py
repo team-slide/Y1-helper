@@ -99,6 +99,107 @@ class Y1Launcher:
                 pass
         return None
     
+    def get_y1_helper_version(self):
+        """Get version from y1_helper.py file directly"""
+        y1_helper_path = os.path.join(self.base_dir, "y1_helper.py")
+        if os.path.exists(y1_helper_path):
+            try:
+                with open(y1_helper_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Look for version assignment pattern
+                    import re
+                    match = re.search(r'self\.version\s*=\s*["\']([^"\']+)["\']', content)
+                    if match:
+                        return match.group(1)
+            except:
+                pass
+        return None
+    
+    def get_current_version(self):
+        """Get current version from multiple sources, with fallback"""
+        # Try version.txt first
+        version = self.get_version()
+        if version:
+            return version
+        
+        # Fallback to y1_helper.py
+        version = self.get_y1_helper_version()
+        if version:
+            return version
+        
+        # Final fallback
+        return "0.0.0"
+    
+    def parse_version(self, version_string):
+        """Parse version string into components (major, minor, patch)"""
+        try:
+            # Handle version strings like "v1.2.3", "1.2.3", "1.2.3-beta", etc.
+            import re
+            # Remove 'v' prefix and any suffix after dash or plus
+            clean_version = re.sub(r'^v', '', version_string)
+            clean_version = re.sub(r'[-+].*$', '', clean_version)
+            
+            parts = clean_version.split('.')
+            if len(parts) >= 3:
+                return (int(parts[0]), int(parts[1]), int(parts[2]))
+            elif len(parts) == 2:
+                return (int(parts[0]), int(parts[1]), 0)
+            elif len(parts) == 1:
+                return (int(parts[0]), 0, 0)
+            else:
+                return (0, 0, 0)
+        except:
+            return (0, 0, 0)
+    
+    def is_version_compatible(self, current_version, target_version):
+        """Check if current version is compatible with target version for exe update"""
+        current_parts = self.parse_version(current_version)
+        target_parts = self.parse_version(target_version)
+        
+        # For exe-only releases, we want to ensure the user has a recent enough version
+        # This prevents running exe updates on very old versions that might need incremental updates first
+        
+        # Check if target version is newer than current
+        if target_parts > current_parts:
+            # Calculate version difference
+            major_diff = target_parts[0] - current_parts[0]
+            minor_diff = target_parts[1] - current_parts[1]
+            patch_diff = target_parts[2] - current_parts[2]
+            
+            # Allow exe updates if:
+            # 1. Same major version with minor/patch updates (usually safe)
+            # 2. Major version bump of 1 (e.g., 0.5.1 -> 1.0.0)
+            # 3. Minor version bump within reasonable range (e.g., 0.5.1 -> 0.6.0 or 0.7.0)
+            
+            if major_diff == 0:
+                # Same major version - allow minor/patch updates within reasonable range
+                if minor_diff <= 2:
+                    return True
+                else:
+                    return False
+            elif major_diff == 1 and current_parts[0] >= 0:
+                # Major version bump of 1 - allow if current major >= 0
+                return True
+            else:
+                # Too big of a jump - require incremental updates
+                return False
+        else:
+            # Target version is same or older - no need for exe update
+            return False
+    
+    def get_version_from_release_tag(self, release_tag):
+        """Extract version from release tag"""
+        # Handle various tag formats: "v1.2.3", "1.2.3", "release-1.2.3", etc.
+        import re
+        
+        # Try to extract version from tag
+        version_match = re.search(r'(\d+\.\d+\.\d+)', release_tag)
+        if version_match:
+            return version_match.group(1)
+        
+        # If no version found, try to parse the tag as a version
+        return release_tag
+    
     def archive_current_version(self):
         """Archive current version to .old directory"""
         try:
@@ -216,8 +317,12 @@ class Y1Launcher:
             return []
     
     def check_latest_release_for_exe(self):
-        """Check the latest release for exe-only updates"""
+        """Check the latest release for exe-only updates with version compatibility"""
         try:
+            # Get current version first
+            current_version = self.get_current_version()
+            print(f"Current version: {current_version}")
+            
             # Get the latest release
             api_url = f"https://api.github.com/repos/{self.github_repo}/releases/latest"
             with urllib.request.urlopen(api_url) as response:
@@ -226,35 +331,58 @@ class Y1Launcher:
             assets = release_data.get('assets', [])
             exe_assets = [asset for asset in assets if asset['name'].endswith('.exe')]
             py_assets = [asset for asset in assets if asset['name'].endswith('.py')]
+            release_tag = release_data.get('tag_name', 'unknown')
             
-            print(f"Latest release: {release_data.get('tag_name', 'unknown')}")
+            print(f"Latest release: {release_tag}")
             print(f"Release assets: {len(assets)} total, {len(exe_assets)} exe, {len(py_assets)} py")
             
             # Check if this is an exe-only release (only exe files, no py files)
             if len(exe_assets) > 0 and len(py_assets) == 0:
-                # This is an exe-only release
+                # This is an exe-only release - check version compatibility
                 exe_asset = exe_assets[0]  # Take the first exe
-                return {
-                    'type': 'exe_only',
-                    'asset': exe_asset,
-                    'release_tag': release_data.get('tag_name', 'unknown'),
-                    'release_name': release_data.get('name', ''),
-                    'release_body': release_data.get('body', '')
-                }
+                
+                # Extract version from release tag
+                release_version = self.get_version_from_release_tag(release_tag)
+                print(f"Release version: {release_version}")
+                
+                # Check if version is compatible
+                is_compatible = self.is_version_compatible(current_version, release_version)
+                print(f"Version compatibility: {is_compatible}")
+                
+                if is_compatible:
+                    return {
+                        'type': 'exe_only',
+                        'asset': exe_asset,
+                        'release_tag': release_tag,
+                        'release_name': release_data.get('name', ''),
+                        'release_body': release_data.get('body', ''),
+                        'release_version': release_version,
+                        'current_version': current_version
+                    }
+                else:
+                    # Version not compatible - return info for logging
+                    return {
+                        'type': 'exe_only_incompatible',
+                        'asset': exe_asset,
+                        'release_tag': release_tag,
+                        'release_version': release_version,
+                        'current_version': current_version,
+                        'reason': f"Version jump too large: {current_version} -> {release_version}"
+                    }
             elif len(exe_assets) > 0 and len(py_assets) > 0:
                 # This is a mixed release with both exe and py files
                 return {
                     'type': 'mixed',
                     'exe_assets': exe_assets,
                     'py_assets': py_assets,
-                    'release_tag': release_data.get('tag_name', 'unknown')
+                    'release_tag': release_tag
                 }
             else:
                 # No exe files in this release
                 return {
                     'type': 'no_exe',
                     'assets': assets,
-                    'release_tag': release_data.get('tag_name', 'unknown')
+                    'release_tag': release_tag
                 }
                 
         except Exception as e:
@@ -397,7 +525,12 @@ class Y1Launcher:
             download_url = asset['browser_download_url']
             file_size = asset.get('size', 0)
             
+            # Show version information
+            current_version = release_info.get('current_version', 'unknown')
+            release_version = release_info.get('release_version', 'unknown')
+            
             self.update_progress(0, 100, f"Downloading {asset_name} from release {release_info['release_tag']}...")
+            self.update_progress(5, 100, f"Updating from version {current_version} to {release_version}")
             
             # Download the exe file
             local_exe_path = os.path.join(self.base_dir, asset_name)
@@ -508,6 +641,7 @@ class Y1Launcher:
                 # This is an exe-only release, handle it directly
                 self.update_progress(20, 100, f"Detected exe-only release: {release_info['release_tag']}")
                 self.update_progress(25, 100, f"Release: {release_info['release_name'] or release_info['release_tag']}")
+                self.update_progress(30, 100, f"Version: {release_info['current_version']} -> {release_info['release_version']}")
                 
                 # Archive current version before running exe
                 archive_dir = self.archive_current_version()
@@ -521,6 +655,13 @@ class Y1Launcher:
                     return "exit"
                 else:
                     return False
+            elif release_info and release_info['type'] == 'exe_only_incompatible':
+                # Exe-only release found but version is incompatible
+                self.update_progress(20, 100, f"Found exe-only release but version incompatible")
+                self.update_progress(25, 100, f"Current: {release_info['current_version']} -> Release: {release_info['release_version']}")
+                self.update_progress(30, 100, f"Reason: {release_info['reason']}")
+                self.update_progress(35, 100, "Proceeding with normal patch updates...")
+                print(f"Version incompatible for exe update: {release_info['reason']}")
             
             # If not an exe-only release, proceed with normal repository file checking
             archive_dir = self.archive_current_version()
