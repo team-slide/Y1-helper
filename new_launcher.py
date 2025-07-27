@@ -600,27 +600,54 @@ class Y1Launcher:
             
             local_exe_path = os.path.join(self.base_dir, exe_file['path'])
             
+            # Verify the exe file exists and is executable
+            if not os.path.exists(local_exe_path):
+                print(f"Error: Exe file not found at {local_exe_path}")
+                self.update_progress(100, 100, f"Error: Exe file not found at {local_exe_path}")
+                return False
+            
+            print(f"Exe file found at: {local_exe_path}")
+            print(f"File size: {os.path.getsize(local_exe_path)} bytes")
+            
             self.update_progress(50, 100, f"Running {exe_file['path']} for user installation...")
             
-            # Run the exe file as a detached process
+            # Run the exe file as a detached process with proper error handling
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
-            process = subprocess.Popen(
-                [local_exe_path],
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-            )
-            
-            print(f"Launched {exe_file['path']} with PID: {process.pid}")
-            
-            # Close the launcher window immediately
-            if self.progress_window and self.progress_window.winfo_exists():
-                self.progress_window.destroy()
-            
-            # Exit the launcher process
-            sys.exit(0)
+            try:
+                process = subprocess.Popen(
+                    [local_exe_path],
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                )
+                
+                print(f"Launched {exe_file['path']} with PID: {process.pid}")
+                
+                # Close the launcher window immediately
+                if self.progress_window and self.progress_window.winfo_exists():
+                    self.progress_window.destroy()
+                
+                # Exit the launcher process
+                sys.exit(0)
+                
+            except subprocess.SubprocessError as e:
+                print(f"Subprocess error: {e}")
+                # Try alternative method without DETACHED_PROCESS
+                process = subprocess.Popen(
+                    [local_exe_path],
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                print(f"Launched {exe_file['path']} with PID: {process.pid} (alternative method)")
+                
+                # Close the launcher window immediately
+                if self.progress_window and self.progress_window.winfo_exists():
+                    self.progress_window.destroy()
+                
+                # Exit the launcher process
+                sys.exit(0)
             
         except Exception as e:
             print(f"Error running exe update: {e}")
@@ -661,27 +688,54 @@ class Y1Launcher:
                         else:
                             self.update_progress(25, 100, f"Downloading {asset_name}... {downloaded:,} bytes")
             
+            # Verify the exe file exists and is executable
+            if not os.path.exists(local_exe_path):
+                print(f"Error: Exe file not found at {local_exe_path}")
+                self.update_progress(100, 100, f"Error: Exe file not found at {local_exe_path}")
+                return False
+            
+            print(f"Exe file found at: {local_exe_path}")
+            print(f"File size: {os.path.getsize(local_exe_path)} bytes")
+            
             self.update_progress(50, 100, f"Running {asset_name} for installation...")
             
-            # Run the exe file as a detached process
+            # Run the exe file as a detached process with proper error handling
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
-            process = subprocess.Popen(
-                [local_exe_path],
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-            )
-            
-            print(f"Launched {asset_name} with PID: {process.pid}")
-            
-            # Close the launcher window immediately
-            if self.progress_window and self.progress_window.winfo_exists():
-                self.progress_window.destroy()
-            
-            # Exit the launcher process
-            sys.exit(0)
+            try:
+                process = subprocess.Popen(
+                    [local_exe_path],
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                )
+                
+                print(f"Launched {asset_name} with PID: {process.pid}")
+                
+                # Close the launcher window immediately
+                if self.progress_window and self.progress_window.winfo_exists():
+                    self.progress_window.destroy()
+                
+                # Exit the launcher process
+                sys.exit(0)
+                
+            except subprocess.SubprocessError as e:
+                print(f"Subprocess error: {e}")
+                # Try alternative method without DETACHED_PROCESS
+                process = subprocess.Popen(
+                    [local_exe_path],
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                print(f"Launched {asset_name} with PID: {process.pid} (alternative method)")
+                
+                # Close the launcher window immediately
+                if self.progress_window and self.progress_window.winfo_exists():
+                    self.progress_window.destroy()
+                
+                # Exit the launcher process
+                sys.exit(0)
             
         except Exception as e:
             print(f"Error running release exe update: {e}")
