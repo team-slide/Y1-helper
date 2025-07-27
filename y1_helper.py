@@ -611,7 +611,7 @@ class Y1HelperApp(tk.Tk):
             # Continue without config.ini if download fails
     
     def get_random_api_key(self):
-        """Get a random API key from config.ini for rate limit prevention"""
+        """Get a random API key from config.ini for rate limit prevention - supports up to 1000+ tokens"""
         try:
             config_path = self.get_config_path()
             if not os.path.exists(config_path):
@@ -621,11 +621,20 @@ class Y1HelperApp(tk.Tk):
             config = configparser.ConfigParser()
             config.read(config_path)
             
-            # Get all API keys from the config
+            # Get all API keys from the config - support key_0 to key_1000+
             api_keys = []
             if 'api_keys' in config:
+                # First try numbered keys (key_0, key_1, key_2, ..., key_1000+)
+                for i in range(1001):  # Support up to key_1000
+                    key_name = f'key_{i}'
+                    if key_name in config['api_keys']:
+                        value = config['api_keys'][key_name].strip()
+                        if value:  # Only add non-empty keys
+                            api_keys.append(value)
+                
+                # Also check for any other keys in the section
                 for key, value in config['api_keys'].items():
-                    if value.strip():  # Only add non-empty keys
+                    if not key.startswith('key_') and value.strip():  # Non-numbered keys
                         api_keys.append(value.strip())
             
             # If no API keys found, try legacy github.token
@@ -637,8 +646,11 @@ class Y1HelperApp(tk.Tk):
             if api_keys:
                 # Return a random key
                 import random
-                return random.choice(api_keys)
+                selected_key = random.choice(api_keys)
+                debug_print(f"Selected API key from {len(api_keys)} available tokens")
+                return selected_key
             
+            debug_print("No API keys found in config.ini")
             return None
             
         except Exception as e:
@@ -646,7 +658,7 @@ class Y1HelperApp(tk.Tk):
             return None
     
     def add_api_key_to_config(self, new_key):
-        """Add a new API key to config.ini"""
+        """Add a new API key to config.ini - supports up to 1000+ tokens"""
         try:
             config_path = self.get_config_path()
             
@@ -661,9 +673,9 @@ class Y1HelperApp(tk.Tk):
             if 'api_keys' not in config:
                 config['api_keys'] = {}
             
-            # Find next available key number
-            key_number = 1
-            while f'key_{key_number}' in config['api_keys']:
+            # Find next available key number (start from 0, support up to 1000+)
+            key_number = 0
+            while f'key_{key_number}' in config['api_keys'] and key_number <= 1000:
                 key_number += 1
             
             # Add the new key
@@ -673,7 +685,7 @@ class Y1HelperApp(tk.Tk):
             with open(config_path, 'w', encoding='utf-8') as f:
                 config.write(f)
             
-            debug_print(f"Added new API key (key_{key_number}) to config.ini")
+            debug_print(f"Added new API key (key_{key_number}) to config.ini - total tokens: {len(config['api_keys'])}")
             
         except Exception as e:
             debug_print(f"Error adding API key to config: {e}")
