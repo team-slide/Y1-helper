@@ -94,23 +94,33 @@ class Y1Launcher:
             
             # Check for api_keys section (new format)
             if 'api_keys' in config:
-                for key, value in config['api_keys'].items():
-                    if key.startswith('key_') and value.strip():
-                        self.api_tokens.append(value.strip())
+                try:
+                    for key, value in config['api_keys'].items():
+                        if isinstance(value, str) and key.startswith('key_') and value.strip():
+                            self.api_tokens.append(value.strip())
+                except Exception as e:
+                    print(f"Error processing api_keys section: {e}")
             
             # Check for legacy token
             if 'github' in config and 'token' in config['github']:
-                legacy_token = config['github']['token'].strip()
-                if legacy_token and legacy_token not in self.api_tokens:
-                    self.api_tokens.append(legacy_token)
+                try:
+                    legacy_token = config['github']['token'].strip()
+                    if legacy_token and legacy_token not in self.api_tokens:
+                        self.api_tokens.append(legacy_token)
+                except Exception as e:
+                    print(f"Error processing legacy token: {e}")
             
             # Check for individual api_key entries (api_key0 - api_key1000)
-            for i in range(1001):  # 0 to 1000
-                key_name = f'api_key{i}'
-                if key_name in config.get('api_keys', {}):
-                    token = config['api_keys'][key_name].strip()
-                    if token and token not in self.api_tokens:
-                        self.api_tokens.append(token)
+            if 'api_keys' in config:
+                try:
+                    for i in range(1001):  # 0 to 1000
+                        key_name = f'api_key{i}'
+                        if key_name in config['api_keys']:
+                            token = config['api_keys'][key_name].strip()
+                            if token and token not in self.api_tokens:
+                                self.api_tokens.append(token)
+                except Exception as e:
+                    print(f"Error processing api_key entries: {e}")
             
             print(f"Loaded {len(self.api_tokens)} API tokens")
             self.config_loaded = True
@@ -125,8 +135,12 @@ class Y1Launcher:
             return random.choice(self.api_tokens)
         return None
     
+    def has_tokens_available(self):
+        """Check if any API tokens are available"""
+        return len(self.api_tokens) > 0
+    
     def create_github_request(self, url):
-        """Create a urllib request with GitHub API headers"""
+        """Create a urllib request with GitHub API headers and token"""
         token = self.get_random_token()
         headers = {
             'User-Agent': 'Y1-Helper-Launcher/0.7.0'
@@ -134,8 +148,31 @@ class Y1Launcher:
         
         if token:
             headers['Authorization'] = f'token {token}'
+            print(f"Using authenticated request with token")
+        else:
+            print(f"Using unauthenticated request (60 requests/hour limit)")
         
         return urllib.request.Request(url, headers=headers)
+    
+    def handle_rate_limit_error(self, response, url):
+        """Handle rate limit errors and provide fallback options"""
+        if response.status == 403:  # Rate limit exceeded
+            print(f"Rate limit exceeded for {url}")
+            
+            # Check if we have tokens available
+            if self.has_tokens_available():
+                print("Retrying with a different token...")
+                # Try again with a different token
+                return self.create_github_request(url)
+            else:
+                print("No tokens available, using unauthenticated request as fallback")
+                # Use unauthenticated request as last resort
+                headers = {
+                    'User-Agent': 'Y1-Helper-Launcher/0.7.0'
+                }
+                return urllib.request.Request(url, headers=headers)
+        
+        return None  # Not a rate limit error
         
     def get_branch_from_file(self):
         """Get branch from branch.txt file, default to master if not found"""
@@ -386,8 +423,18 @@ class Y1Launcher:
         try:
             api_url = f"https://api.github.com/repos/{self.github_repo}/git/trees/{self.github_branch}?recursive=1"
             request = self.create_github_request(api_url)
-            with urllib.request.urlopen(request) as response:
-                data = json.loads(response.read().decode('utf-8'))
+            
+            try:
+                with urllib.request.urlopen(request) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+            except urllib.error.HTTPError as e:
+                # Handle rate limit errors
+                fallback_request = self.handle_rate_limit_error(e, api_url)
+                if fallback_request:
+                    with urllib.request.urlopen(fallback_request) as response:
+                        data = json.loads(response.read().decode('utf-8'))
+                else:
+                    raise e
             files = []
             py_files = []
             exe_files = []
@@ -436,8 +483,17 @@ class Y1Launcher:
                 print(f"Fetching releases page {page}...")
                 
                 request = self.create_github_request(api_url)
-                with urllib.request.urlopen(request) as response:
-                    releases_data = json.loads(response.read().decode('utf-8'))
+                try:
+                    with urllib.request.urlopen(request) as response:
+                        releases_data = json.loads(response.read().decode('utf-8'))
+                except urllib.error.HTTPError as e:
+                    # Handle rate limit errors
+                    fallback_request = self.handle_rate_limit_error(e, api_url)
+                    if fallback_request:
+                        with urllib.request.urlopen(fallback_request) as response:
+                            releases_data = json.loads(response.read().decode('utf-8'))
+                    else:
+                        raise e
                 
                 if not releases_data:  # No more releases
                     break
@@ -953,6 +1009,11 @@ class Y1Launcher:
     def check_and_update(self):
         """Check for updates and download if needed (root files only, exe-only release support)"""
         try:
+            # Check if updates should be skipped due to version restore
+            if self.is_version_restored():
+                print("Updates skipped - version was restored")
+                return False
+            
             self.update_progress(0, 100, f"Checking for updates from branch: {self.github_branch}")
             
             # Refresh config.ini from config.zip
@@ -1068,14 +1129,22 @@ class Y1Launcher:
             return False
     
     def launch_y1_helper(self):
-        """Launch y1_helper.py and close launcher window while keeping child process open"""
+        """Launch y1_helper.py and monitor for failures with automatic rollback"""
         try:
             y1_helper_path = os.path.join(self.base_dir, "y1_helper.py")
             python_path = os.path.join(self.base_dir, "assets", "python", "python.exe")
-            if not os.path.exists(y1_helper_path) or not os.path.exists(python_path):
-                return False
             
-            # Launch y1_helper.py as a detached process
+            if not os.path.exists(y1_helper_path):
+                print(f"Error: y1_helper.py not found at {y1_helper_path}")
+                return self.handle_launch_failure("y1_helper.py not found")
+            
+            if not os.path.exists(python_path):
+                print(f"Error: Python not found at {python_path}")
+                return self.handle_launch_failure("Python interpreter not found")
+            
+            print(f"Launching y1_helper.py with Python: {python_path}")
+            
+            # Launch y1_helper.py with monitoring
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
@@ -1083,12 +1152,20 @@ class Y1Launcher:
             process = subprocess.Popen(
                 [python_path, y1_helper_path], 
                 startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
             )
             
             print(f"Launched y1_helper.py with PID: {process.pid}")
             
-            # Close the launcher window immediately
+            # Monitor the process for a short time to detect immediate failures
+            self.monitor_y1_helper_process(process)
+            
+            # Start background monitoring (optional - can be disabled)
+            self.start_background_monitoring(process)
+            
+            # Close the launcher window
             if self.progress_window and self.progress_window.winfo_exists():
                 self.progress_window.destroy()
             
@@ -1097,40 +1174,642 @@ class Y1Launcher:
             
         except Exception as e:
             print(f"Error launching y1_helper.py: {e}")
-            sys.exit(1)
+            return self.handle_launch_failure(f"Launch error: {str(e)}")
+    
+    def monitor_y1_helper_process(self, process):
+        """Monitor y1_helper.py process for failures and handle rollback if needed"""
+        try:
+            # Wait a short time to detect immediate failures
+            time.sleep(2)
+            
+            # Check if process is still running
+            if process.poll() is None:
+                print("y1_helper.py is running successfully")
+                # Clear version restored flag if it was set (newer version is working)
+                if self.is_version_restored():
+                    print("Clearing version restored flag - newer version is working")
+                    self.clear_version_restored()
+                return True
+            else:
+                # Process has exited, check exit code
+                exit_code = process.returncode
+                print(f"y1_helper.py exited with code: {exit_code}")
+                
+                # Get any error output
+                try:
+                    stdout, stderr = process.communicate(timeout=1)
+                    if stderr:
+                        print(f"y1_helper.py stderr: {stderr.decode('utf-8', errors='ignore')}")
+                except:
+                    pass
+                
+                # Handle the failure
+                if exit_code != 0:
+                    return self.handle_y1_helper_failure(exit_code)
+                else:
+                    print("y1_helper.py exited normally")
+                    # Clear version restored flag if it was set (newer version worked)
+                    if self.is_version_restored():
+                        print("Clearing version restored flag - newer version worked")
+                        self.clear_version_restored()
+                    return True
+                    
+        except Exception as e:
+            print(f"Error monitoring y1_helper.py process: {e}")
+            return self.handle_y1_helper_failure(-1)
+    
+    def handle_y1_helper_failure(self, exit_code):
+        """Handle y1_helper.py failure with automatic rollback and retry options"""
+        print(f"y1_helper.py failed with exit code: {exit_code}")
+        
+        # Record the failure
+        self.record_launch_failure(exit_code)
+        
+        # Check if we have backup versions to restore from
+        backup_versions = self.get_available_backup_versions()
+        if backup_versions:
+            print(f"Found {len(backup_versions)} backup versions available")
+            
+            # Show recovery dialog with version selection
+            action, selected_backup = self.show_recovery_dialog(None)
+            
+            if action == "restore" and selected_backup:
+                print(f"User chose to restore version: {selected_backup}")
+                if self.progress_window and self.progress_window.winfo_exists():
+                    self.update_progress(0, 100, "Restoring selected version...")
+                
+                success = self.restore_from_backup(selected_backup)
+                if success:
+                    # Mark that we've restored to an older version
+                    self.mark_version_restored(selected_backup)
+                    print("Version restored successfully, launching y1_helper.py...")
+                    if self.progress_window and self.progress_window.winfo_exists():
+                        self.update_progress(100, 100, "Version restored! Launching Y1 Helper...")
+                        time.sleep(1)
+                    return self.launch_y1_helper()
+                else:
+                    print("Version restore failed")
+                    if self.progress_window and self.progress_window.winfo_exists():
+                        self.update_progress(100, 100, "Version restore failed!")
+                        time.sleep(2)
+                    return self.handle_launch_failure("Version restore failed")
+            
+            else:
+                print("User cancelled recovery")
+                return self.handle_launch_failure("User cancelled recovery")
+        else:
+            print("No backup versions available for recovery")
+            return self.handle_launch_failure("No backup versions available")
+    
+    def get_latest_backup_dir(self):
+        """Get the most recent backup directory"""
+        try:
+            backup_base = os.path.join(self.base_dir, ".old")
+            if not os.path.exists(backup_base):
+                return None
+            
+            # Find the most recent backup directory
+            backup_dirs = []
+            for item in os.listdir(backup_base):
+                item_path = os.path.join(backup_base, item)
+                if os.path.isdir(item_path):
+                    backup_dirs.append(item_path)
+            
+            if not backup_dirs:
+                return None
+            
+            # Sort by modification time (newest first)
+            backup_dirs.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            return backup_dirs[0]
+            
+        except Exception as e:
+            print(f"Error finding backup directory: {e}")
+            return None
+    
+    def get_available_backup_versions(self):
+        """Get list of available backup versions with metadata"""
+        try:
+            backup_base = os.path.join(self.base_dir, ".old")
+            if not os.path.exists(backup_base):
+                return []
+            
+            backup_versions = []
+            for item in os.listdir(backup_base):
+                item_path = os.path.join(backup_base, item)
+                if os.path.isdir(item_path):
+                    # Get version info
+                    version_name = item
+                    version_path = item_path
+                    version_time = os.path.getmtime(item_path)
+                    version_date = datetime.fromtimestamp(version_time).strftime("%Y-%m-%d %H:%M")
+                    
+                    # Check if this version has y1_helper.py
+                    y1_helper_path = os.path.join(item_path, "y1_helper.py")
+                    if os.path.exists(y1_helper_path):
+                        backup_versions.append({
+                            'name': f"{version_name} ({version_date})",
+                            'path': version_path,
+                            'timestamp': version_time,
+                            'date': version_date
+                        })
+            
+            # Sort by timestamp (newest first)
+            backup_versions.sort(key=lambda x: x['timestamp'], reverse=True)
+            return backup_versions
+            
+        except Exception as e:
+            print(f"Error getting backup versions: {e}")
+            return []
+    
+    def mark_version_restored(self, backup_path):
+        """Mark that a version was restored to pause updates"""
+        try:
+            restore_file = os.path.join(self.base_dir, "version_restored.json")
+            restore_data = {
+                "timestamp": time.time(),
+                "restored_version": os.path.basename(backup_path),
+                "restored_path": backup_path,
+                "current_version": self.get_current_version()
+            }
+            
+            with open(restore_file, 'w') as f:
+                json.dump(restore_data, f, indent=2)
+            
+            print(f"Marked version restored: {os.path.basename(backup_path)}")
+            
+        except Exception as e:
+            print(f"Error marking version restored: {e}")
+    
+    def is_version_restored(self):
+        """Check if a version was restored and updates should be paused"""
+        try:
+            restore_file = os.path.join(self.base_dir, "version_restored.json")
+            if os.path.exists(restore_file):
+                with open(restore_file, 'r') as f:
+                    data = json.load(f)
+                return data
+            return None
+        except Exception as e:
+            print(f"Error checking version restore status: {e}")
+            return None
+    
+    def clear_version_restored(self):
+        """Clear the version restored flag to resume updates"""
+        try:
+            restore_file = os.path.join(self.base_dir, "version_restored.json")
+            if os.path.exists(restore_file):
+                os.remove(restore_file)
+                print("Cleared version restored flag")
+        except Exception as e:
+            print(f"Error clearing version restored flag: {e}")
+    
+    def show_try_newer_version_dialog(self):
+        """Show dialog asking if user wants to try the newer version again"""
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            
+            # Create dialog
+            dialog = tk.Toplevel()
+            dialog.title("Y1 Helper - Update Available")
+            dialog.geometry("450x200")
+            dialog.resizable(False, False)
+            dialog.grab_set()  # Make modal
+            
+            # Center the dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (450 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (200 // 2)
+            dialog.geometry(f"450x200+{x}+{y}")
+            
+            # Add content
+            frame = tk.Frame(dialog, padx=20, pady=20)
+            frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            tk.Label(frame, text="🔄 Update Available", font=("Segoe UI", 14, "bold")).pack(pady=(0, 15))
+            
+            # Message
+            tk.Label(frame, text="A newer version of Y1 Helper is available.\n\nWould you like to try the newer version again?", 
+                    font=("Segoe UI", 10), wraplength=410, justify=tk.CENTER).pack(pady=(0, 20))
+            
+            # Buttons
+            button_frame = tk.Frame(frame)
+            button_frame.pack()
+            
+            result = [None]  # Use list to store result
+            
+            def on_yes():
+                result[0] = True
+                dialog.destroy()
+            
+            def on_no():
+                result[0] = False
+                dialog.destroy()
+            
+            # Buttons
+            tk.Button(button_frame, text="Yes, Try Newer Version", command=on_yes, 
+                     bg="#0078d4", fg="white", font=("Segoe UI", 10), width=18).pack(side=tk.LEFT, padx=(0, 10))
+            tk.Button(button_frame, text="No, Keep Current", command=on_no, 
+                     font=("Segoe UI", 10), width=15).pack(side=tk.LEFT)
+            
+            # Wait for user response
+            dialog.wait_window()
+            return result[0] if result[0] is not None else False
+            
+        except Exception as e:
+            print(f"Error showing try newer version dialog: {e}")
+            return False
+    
+    def record_launch_failure(self, exit_code):
+        """Record a launch failure for tracking"""
+        try:
+            failure_file = os.path.join(self.base_dir, "launch_failure.json")
+            failure_data = {
+                "timestamp": time.time(),
+                "exit_code": exit_code,
+                "version": self.get_current_version(),
+                "branch": self.github_branch
+            }
+            
+            # Read existing failures
+            failures = []
+            if os.path.exists(failure_file):
+                try:
+                    with open(failure_file, 'r') as f:
+                        failures = json.load(f)
+                except:
+                    failures = []
+            
+            # Add new failure
+            failures.append(failure_data)
+            
+            # Keep only last 10 failures
+            if len(failures) > 10:
+                failures = failures[-10:]
+            
+            # Write back to file
+            with open(failure_file, 'w') as f:
+                json.dump(failures, f, indent=2)
+            
+            print(f"Recorded launch failure (exit code: {exit_code})")
+            
+        except Exception as e:
+            print(f"Error recording launch failure: {e}")
+    
+    def get_failure_history(self):
+        """Get history of recent launch failures"""
+        try:
+            failure_file = os.path.join(self.base_dir, "launch_failure.json")
+            if os.path.exists(failure_file):
+                with open(failure_file, 'r') as f:
+                    return json.load(f)
+            return []
+        except Exception as e:
+            print(f"Error reading failure history: {e}")
+            return []
+    
+    def show_recovery_dialog(self, backup_dir):
+        """Show simplified recovery dialog with version selection"""
+        try:
+            import tkinter as tk
+            from tkinter import ttk, messagebox
+            
+            # Get available backup versions
+            backup_versions = self.get_available_backup_versions()
+            
+            # Create dialog
+            dialog = tk.Toplevel()
+            dialog.title("Y1 Helper - Recovery")
+            dialog.geometry("400x300")
+            dialog.resizable(False, False)
+            dialog.grab_set()  # Make modal
+            
+            # Center the dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (300 // 2)
+            dialog.geometry(f"400x300+{x}+{y}")
+            
+            # Add content
+            frame = tk.Frame(dialog, padx=20, pady=20)
+            frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            tk.Label(frame, text="Y1 Helper Recovery", font=("Segoe UI", 14, "bold")).pack(pady=(0, 15))
+            
+            # Message
+            tk.Label(frame, text="Select a working version to restore:", 
+                    font=("Segoe UI", 10), wraplength=360).pack(pady=(0, 15))
+            
+            # Version selection
+            version_frame = tk.Frame(frame)
+            version_frame.pack(fill=tk.X, pady=(0, 20))
+            
+            tk.Label(version_frame, text="Version:", font=("Segoe UI", 10, "bold")).pack(anchor=tk.W)
+            
+            # Create dropdown
+            version_var = tk.StringVar()
+            version_combo = ttk.Combobox(version_frame, textvariable=version_var, 
+                                       font=("Segoe UI", 10), state="readonly", width=30)
+            version_combo.pack(fill=tk.X, pady=(5, 0))
+            
+            # Populate dropdown with available versions
+            if backup_versions:
+                version_combo['values'] = [v['name'] for v in backup_versions]
+                version_combo.current(0)  # Select first version
+            else:
+                version_combo['values'] = ['No backup versions available']
+                version_combo.current(0)
+            
+            # Buttons
+            button_frame = tk.Frame(frame)
+            button_frame.pack(pady=(0, 10))
+            
+            result = [None]  # Use list to store result
+            
+            def on_restore():
+                if backup_versions and version_var.get() in [v['name'] for v in backup_versions]:
+                    selected_version = next(v for v in backup_versions if v['name'] == version_var.get())
+                    result[0] = ("restore", selected_version['path'])
+                else:
+                    result[0] = ("cancel", None)
+                dialog.destroy()
+            
+            def on_cancel():
+                result[0] = ("cancel", None)
+                dialog.destroy()
+            
+            # Buttons
+            tk.Button(button_frame, text="Restore Version", command=on_restore, 
+                     bg="#0078d4", fg="white", font=("Segoe UI", 10), width=15).pack(side=tk.LEFT, padx=(0, 10))
+            tk.Button(button_frame, text="Cancel", command=on_cancel, 
+                     font=("Segoe UI", 10), width=15).pack(side=tk.LEFT)
+            
+            # Wait for user response
+            dialog.wait_window()
+            return result[0] if result[0] else ("cancel", None)
+            
+        except Exception as e:
+            print(f"Error showing recovery dialog: {e}")
+            # Default to cancel if dialog fails
+            return ("cancel", None)
+    
+
+    
+    def restore_from_backup(self, backup_dir):
+        """Restore files from backup directory"""
+        try:
+            print(f"Restoring from backup: {backup_dir}")
+            
+            # Get list of files to restore
+            files_to_restore = []
+            for root, dirs, files in os.walk(backup_dir):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), backup_dir)
+                    backup_file = os.path.join(backup_dir, rel_path)
+                    target_file = os.path.join(self.base_dir, rel_path)
+                    files_to_restore.append((backup_file, target_file))
+            
+            print(f"Found {len(files_to_restore)} files to restore")
+            
+            # Restore each file
+            for backup_file, target_file in files_to_restore:
+                try:
+                    # Ensure target directory exists
+                    target_dir = os.path.dirname(target_file)
+                    if not os.path.exists(target_dir):
+                        os.makedirs(target_dir)
+                    
+                    # Copy file
+                    shutil.copy2(backup_file, target_file)
+                    print(f"Restored: {os.path.relpath(target_file, self.base_dir)}")
+                    
+                except Exception as e:
+                    print(f"Error restoring {backup_file}: {e}")
+            
+            print("Restore completed successfully")
+            return True
+            
+        except Exception as e:
+            print(f"Error during restore: {e}")
+            return False
+    
+    def handle_launch_failure(self, reason):
+        """Handle launch failure with user notification"""
+        print(f"Launch failure: {reason}")
+        
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            
+            # Show error dialog
+            messagebox.showerror("Y1 Helper Launcher Error", 
+                               f"Failed to launch Y1 Helper:\n{reason}\n\nPlease check the installation.")
+            
+        except Exception as e:
+            print(f"Error showing failure dialog: {e}")
+        
+        # Exit with error code
+        sys.exit(1)
+    
+    def should_skip_updates_due_to_failures(self):
+        """Check for recent failures and ask user if they want to skip updates"""
+        try:
+            failures = self.get_failure_history()
+            
+            # Check for failures in the last 24 hours
+            recent_failures = [f for f in failures if time.time() - f.get('timestamp', 0) < 86400]  # 24 hours
+            
+            if len(recent_failures) >= 3:  # 3 or more failures in 24 hours
+                return self.show_skip_updates_dialog(len(recent_failures))
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error checking for recent failures: {e}")
+            return False
+    
+    def show_skip_updates_dialog(self, failure_count):
+        """Show dialog asking if user wants to skip updates due to recent failures"""
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            
+            # Create dialog
+            dialog = tk.Toplevel()
+            dialog.title("Y1 Helper - Recent Failures Detected")
+            dialog.geometry("450x250")
+            dialog.resizable(False, False)
+            dialog.grab_set()  # Make modal
+            
+            # Center the dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (450 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (250 // 2)
+            dialog.geometry(f"450x250+{x}+{y}")
+            
+            # Add content
+            frame = tk.Frame(dialog, padx=20, pady=20)
+            frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            tk.Label(frame, text="⚠️ Recent Failures Detected", font=("Segoe UI", 14, "bold"), fg="orange").pack(pady=(0, 15))
+            
+            # Message
+            message = f"Y1 Helper has encountered {failure_count} failures in the last 24 hours.\n\nThis may indicate an issue with recent updates.\n\nWould you like to skip updates for now and continue with the current version?"
+            
+            tk.Label(frame, text=message, font=("Segoe UI", 10), wraplength=410, justify=tk.LEFT).pack(pady=(0, 20))
+            
+            # Buttons
+            button_frame = tk.Frame(frame)
+            button_frame.pack(pady=(0, 10))
+            
+            result = [False]  # Use list to store result
+            
+            def on_skip():
+                result[0] = True
+                dialog.destroy()
+            
+            def on_continue():
+                result[0] = False
+                dialog.destroy()
+            
+            # Buttons with styling
+            tk.Button(button_frame, text="Skip Updates", command=on_skip, 
+                     bg="#ff8c00", fg="white", font=("Segoe UI", 10), width=12).pack(side=tk.LEFT, padx=(0, 10))
+            tk.Button(button_frame, text="Continue with Updates", command=on_continue, 
+                     bg="#0078d4", fg="white", font=("Segoe UI", 10), width=15).pack(side=tk.LEFT)
+            
+            # Wait for user response
+            dialog.wait_window()
+            return result[0]
+            
+        except Exception as e:
+            print(f"Error showing skip updates dialog: {e}")
+            return False
+    
+    def start_background_monitoring(self, process):
+        """Start background monitoring of y1_helper.py process (optional)"""
+        try:
+            # Only enable if user wants it (can be controlled by config)
+            # For now, disabled by default to avoid complexity
+            enable_monitoring = False
+            
+            if enable_monitoring:
+                def monitor_thread():
+                    try:
+                        # Monitor for up to 5 minutes
+                        for _ in range(300):  # 300 seconds = 5 minutes
+                            if process.poll() is not None:
+                                # Process has exited
+                                exit_code = process.returncode
+                                if exit_code != 0:
+                                    print(f"Background monitoring detected y1_helper.py failure (code: {exit_code})")
+                                    # Could implement automatic restart here
+                                    break
+                            time.sleep(1)
+                    except Exception as e:
+                        print(f"Background monitoring error: {e}")
+                
+                # Start monitoring thread
+                monitor_thread = threading.Thread(target=monitor_thread, daemon=True)
+                monitor_thread.start()
+                print("Background monitoring started")
+            else:
+                print("Background monitoring disabled")
+                
+        except Exception as e:
+            print(f"Error starting background monitoring: {e}")
     
     def run(self):
-        """Main launcher function"""
+        """Main launcher function with comprehensive error handling and fallback"""
         try:
             print("Creating progress window...")
-            # Create progress window
-            self.create_progress_window()
-            print("Progress window created successfully")
+            
+            # Create progress window with error handling
+            try:
+                self.create_progress_window()
+                print("Progress window created successfully")
+                window_created = True
+            except Exception as e:
+                print(f"Failed to create progress window: {e}")
+                window_created = False
             
             # Run update in a separate thread to keep UI responsive
             def update_thread():
-                print("Starting update thread...")
-                result = self.check_and_update()
-                print(f"Update completed with result: {result}")
-                
-                # Handle result
-                if result is True:
-                    # Patch update completed successfully, launch y1_helper.py
-                    print("Patch update completed, launching y1_helper.py...")
-                    self.update_progress(100, 100, "Patch update completed! Launching Y1 Helper...")
-                    time.sleep(1)  # Brief delay to show completion
-                    self.launch_y1_helper()
-                elif result is False:
-                    # Update failed or exe was launched (launcher should have exited)
-                    print("Update failed or exe was launched, launching y1_helper.py...")
-                    self.update_progress(100, 100, "No updates needed. Launching Y1 Helper...")
-                    time.sleep(1)
-                    self.launch_y1_helper()
-                else:
-                    # Unexpected result
-                    print(f"Unexpected update result: {result}")
-                    self.update_progress(100, 100, "Update completed. Launching Y1 Helper...")
-                    time.sleep(1)
+                try:
+                    print("Starting update thread...")
+                    
+                    # Check if a version was restored and updates should be paused
+                    restored_version = self.is_version_restored()
+                    if restored_version:
+                        print(f"Version was restored: {restored_version.get('restored_version', 'unknown')}")
+                        
+                        # Show dialog asking if user wants to try newer version
+                        if window_created:
+                            self.update_progress(10, 100, "Checking for updates...")
+                        
+                        try_again = self.show_try_newer_version_dialog()
+                        if try_again:
+                            print("User chose to try newer version again")
+                            # Clear the restored flag to allow updates
+                            self.clear_version_restored()
+                            if window_created:
+                                self.update_progress(20, 100, "Checking for updates...")
+                        else:
+                            print("User chose to keep current version")
+                            if window_created:
+                                self.update_progress(100, 100, "Keeping current version. Launching Y1 Helper...")
+                                time.sleep(1)
+                            self.launch_y1_helper()
+                            return
+                    
+                    # Check for recent failures and ask user if they want to skip updates
+                    if self.should_skip_updates_due_to_failures():
+                        print("User chose to skip updates due to recent failures")
+                        if window_created:
+                            self.update_progress(100, 100, "Skipping updates due to recent failures. Launching Y1 Helper...")
+                            time.sleep(1)
+                        self.launch_y1_helper()
+                        return
+                    
+                    # Update progress if window is available
+                    if window_created:
+                        self.update_progress(30, 100, "Checking for updates...")
+                    
+                    result = self.check_and_update()
+                    print(f"Update completed with result: {result}")
+                    
+                    # Handle result
+                    if result is True:
+                        # Patch update completed successfully, launch y1_helper.py
+                        print("Patch update completed, launching y1_helper.py...")
+                        if window_created:
+                            self.update_progress(100, 100, "Patch update completed! Launching Y1 Helper...")
+                            time.sleep(1)  # Brief delay to show completion
+                        self.launch_y1_helper()
+                    elif result is False:
+                        # Update failed or exe was launched (launcher should have exited)
+                        print("Update failed or exe was launched, launching y1_helper.py...")
+                        if window_created:
+                            self.update_progress(100, 100, "No updates needed. Launching Y1 Helper...")
+                            time.sleep(1)
+                        self.launch_y1_helper()
+                    else:
+                        # Unexpected result
+                        print(f"Unexpected update result: {result}")
+                        if window_created:
+                            self.update_progress(100, 100, "Update completed. Launching Y1 Helper...")
+                            time.sleep(1)
+                        self.launch_y1_helper()
+                        
+                except Exception as e:
+                    print(f"Error in update thread: {e}")
+                    # Always try to launch y1_helper.py even if update fails
+                    if window_created:
+                        self.update_progress(100, 100, f"Update error: {str(e)}. Launching Y1 Helper...")
+                        time.sleep(1)
                     self.launch_y1_helper()
             
             # Start update thread
@@ -1139,17 +1818,43 @@ class Y1Launcher:
             thread.start()
             
             # Run main loop with timeout protection
-            try:
-                self.progress_window.mainloop()
-            except Exception as e:
-                print(f"Main loop error: {e}")
-                # Fallback: try to launch y1_helper.py directly
-                print("Attempting fallback launch...")
+            if window_created:
+                try:
+                    # Set a timeout for the main loop
+                    self.progress_window.after(30000, self.timeout_handler)  # 30 second timeout
+                    self.progress_window.mainloop()
+                except Exception as e:
+                    print(f"Main loop error: {e}")
+                    # Fallback: try to launch y1_helper.py directly
+                    print("Attempting fallback launch...")
+                    self.launch_y1_helper()
+            else:
+                # No window, just wait for update thread to complete
+                print("No progress window, waiting for update to complete...")
+                thread.join(timeout=30)  # Wait up to 30 seconds
+                if thread.is_alive():
+                    print("Update thread timed out, launching y1_helper.py...")
                 self.launch_y1_helper()
             
         except Exception as e:
             print(f"Launcher error: {e}")
-            messagebox.showerror("Launcher Error", f"An error occurred: {str(e)}")
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+                messagebox.showerror("Launcher Error", f"An error occurred: {str(e)}")
+            except:
+                print(f"Could not show error dialog: {e}")
+            
+            # Always try to launch y1_helper.py as last resort
+            print("Attempting final fallback launch...")
+            self.launch_y1_helper()
+    
+    def timeout_handler(self):
+        """Handle timeout in main loop"""
+        print("Main loop timeout, launching y1_helper.py...")
+        if self.progress_window and self.progress_window.winfo_exists():
+            self.progress_window.destroy()
+        self.launch_y1_helper()
 
 def main():
     """Main entry point"""

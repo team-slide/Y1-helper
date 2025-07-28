@@ -628,24 +628,30 @@ class Y1HelperApp(tk.Tk):
             # Get all API keys from the config
             api_keys = []
             if 'api_keys' in config:
-                # Check for key_1, key_2, etc. format
-                for key, value in config['api_keys'].items():
-                    if key.startswith('key_') and value.strip():
-                        api_keys.append(value.strip())
-                
-                # Check for api_key0 - api_key1000 format
-                for i in range(1001):  # 0 to 1000
-                    key_name = f'api_key{i}'
-                    if key_name in config['api_keys']:
-                        token = config['api_keys'][key_name].strip()
-                        if token and token not in api_keys:
-                            api_keys.append(token)
+                try:
+                    # Check for key_1, key_2, etc. format
+                    for key, value in config['api_keys'].items():
+                        if isinstance(value, str) and key.startswith('key_') and value.strip():
+                            api_keys.append(value.strip())
+                    
+                    # Check for api_key0 - api_key1000 format
+                    for i in range(1001):  # 0 to 1000
+                        key_name = f'api_key{i}'
+                        if key_name in config['api_keys']:
+                            token = config['api_keys'][key_name].strip()
+                            if token and token not in api_keys:
+                                api_keys.append(token)
+                except Exception as e:
+                    debug_print(f"Error processing api_keys section: {e}")
             
             # If no API keys found, try legacy github.token
             if not api_keys and 'github' in config and 'token' in config['github']:
-                token = config['github']['token'].strip()
-                if token:
-                    api_keys.append(token)
+                try:
+                    token = config['github']['token'].strip()
+                    if token:
+                        api_keys.append(token)
+                except Exception as e:
+                    debug_print(f"Error processing legacy token: {e}")
             
             if api_keys:
                 # Return a random key
@@ -653,10 +659,50 @@ class Y1HelperApp(tk.Tk):
                 return random.choice(api_keys)
             
             return None
+    
+    def has_api_keys_available(self):
+        """Check if any API keys are available"""
+        try:
+            config_path = self.get_config_path()
+            if not os.path.exists(config_path):
+                return False
+            
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            
+            api_keys = []
+            if 'api_keys' in config:
+                try:
+                    # Check for key_1, key_2, etc. format
+                    for key, value in config['api_keys'].items():
+                        if isinstance(value, str) and key.startswith('key_') and value.strip():
+                            api_keys.append(value.strip())
+                    
+                    # Check for api_key0 - api_key1000 format
+                    for i in range(1001):  # 0 to 1000
+                        key_name = f'api_key{i}'
+                        if key_name in config['api_keys']:
+                            token = config['api_keys'][key_name].strip()
+                            if token and token not in api_keys:
+                                api_keys.append(token)
+                except Exception as e:
+                    debug_print(f"Error checking api_keys section: {e}")
+            
+            # If no API keys found, try legacy github.token
+            if not api_keys and 'github' in config and 'token' in config['github']:
+                try:
+                    token = config['github']['token'].strip()
+                    if token:
+                        api_keys.append(token)
+                except Exception as e:
+                    debug_print(f"Error checking legacy token: {e}")
+            
+            return len(api_keys) > 0
             
         except Exception as e:
-            debug_print(f"Error getting API key: {e}")
-            return None
+            debug_print(f"Error checking API keys availability: {e}")
+            return False
     
     def create_github_request(self, url):
         """Create a urllib request with GitHub API headers and token"""
@@ -667,8 +713,31 @@ class Y1HelperApp(tk.Tk):
         
         if token:
             headers['Authorization'] = f'token {token}'
+            debug_print(f"Using authenticated request with token")
+        else:
+            debug_print(f"Using unauthenticated request (60 requests/hour limit)")
         
         return urllib.request.Request(url, headers=headers)
+    
+    def handle_rate_limit_error(self, response, url):
+        """Handle rate limit errors and provide fallback options"""
+        if response.status == 403:  # Rate limit exceeded
+            debug_print(f"Rate limit exceeded for {url}")
+            
+            # Check if we have API keys available
+            if self.has_api_keys_available():
+                debug_print("Retrying with a different API key...")
+                # Try again with a different API key
+                return self.create_github_request(url)
+            else:
+                debug_print("No API keys available, using unauthenticated request as fallback")
+                # Use unauthenticated request as last resort
+                headers = {
+                    'User-Agent': 'Y1-Helper/0.7.0'
+                }
+                return urllib.request.Request(url, headers=headers)
+        
+        return None  # Not a rate limit error
     
     def add_api_key_to_config(self, new_key):
         """Add a new API key to config.ini"""
@@ -755,16 +824,35 @@ class Y1HelperApp(tk.Tk):
                     api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
                     try:
                         request = self.create_github_request(api_url)
-                        with urllib.request.urlopen(request) as response:
-                            release_data = json.loads(response.read().decode('utf-8'))
-                            debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                        try:
+                            with urllib.request.urlopen(request) as response:
+                                release_data = json.loads(response.read().decode('utf-8'))
+                                debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                        except urllib.error.HTTPError as e:
+                            # Handle rate limit errors
+                            fallback_request = self.handle_rate_limit_error(e, api_url)
+                            if fallback_request:
+                                with urllib.request.urlopen(fallback_request) as response:
+                                    release_data = json.loads(response.read().decode('utf-8'))
+                                    debug_print(f"Latest release data (fallback): {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                            else:
+                                raise e
                     except urllib.error.HTTPError as e:
                         if e.code == 404:
                             debug_print(f"Latest endpoint failed (404), trying first release...")
                             api_url = f"https://api.github.com/repos/{repo_path}/releases"
                             request = self.create_github_request(api_url)
-                            with urllib.request.urlopen(request) as response:
-                                releases = json.loads(response.read().decode('utf-8'))
+                            try:
+                                with urllib.request.urlopen(request) as response:
+                                    releases = json.loads(response.read().decode('utf-8'))
+                            except urllib.error.HTTPError as e:
+                                # Handle rate limit errors
+                                fallback_request = self.handle_rate_limit_error(e, api_url)
+                                if fallback_request:
+                                    with urllib.request.urlopen(fallback_request) as response:
+                                        releases = json.loads(response.read().decode('utf-8'))
+                                else:
+                                    raise e
                                 if releases:
                                     release_data = releases[0]
                                     debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
@@ -780,13 +868,27 @@ class Y1HelperApp(tk.Tk):
                     api_url = f"https://api.github.com/repos/{repo_path}/releases"
                     try:
                         request = self.create_github_request(api_url)
-                        with urllib.request.urlopen(request) as response:
-                            releases = json.loads(response.read().decode('utf-8'))
-                            if releases:
-                                release_data = releases[0]
-                                debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                        try:
+                            with urllib.request.urlopen(request) as response:
+                                releases = json.loads(response.read().decode('utf-8'))
+                                if releases:
+                                    release_data = releases[0]
+                                    debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                                else:
+                                    raise Exception(f"No releases found for {repo_path}")
+                        except urllib.error.HTTPError as e:
+                            # Handle rate limit errors
+                            fallback_request = self.handle_rate_limit_error(e, api_url)
+                            if fallback_request:
+                                with urllib.request.urlopen(fallback_request) as response:
+                                    releases = json.loads(response.read().decode('utf-8'))
+                                    if releases:
+                                        release_data = releases[0]
+                                        debug_print(f"First release data (fallback): {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                                    else:
+                                        raise Exception(f"No releases found for {repo_path}")
                             else:
-                                raise Exception(f"No releases found for {repo_path}")
+                                raise e
                     except urllib.error.HTTPError as e:
                         raise Exception(f"GitHub API error: {e.code} - {e.reason}")
                 else:
