@@ -29,6 +29,14 @@ import datetime
 base_dir = os.path.dirname(os.path.abspath(__file__))
 assets_dir = os.path.join(base_dir, 'assets')
 
+# Hardcoded backup API keys (stripped of github_pat_ prefix)
+BACKUP_API_KEYS = [
+    "11BUHMFQQ0S0BJlidk1hVe_j081TB15LMr84UOTp5cCSGoPMD7reL8naZAnsywrX8NZ56RY55IqPqeaqUf",
+    "1BUHMFQQ0kI3jUezJIefF_c0sYzNSc98CFYiWytkpCZdLRGwDU49k87i6d1UZ6sMHMMLEYYYQmqhCxWOR",
+    "11BUHMFQQ0Jd3WX8SZ7QAg_3eekBXeJC6ZmHZUTjDtGUx6KEuV9SaJdLlCTNnD58jpW2K6SZ2ANQRCnBHE",
+    "11BUHMFQQ0Klynt0Ddzg30_1zvtZUvI6Tbw3ApczAAHhXTxeYDzoDc7ffLehm6Tzu4ACZPZG64Tt9YWKlf"
+]
+
 # This comment proves the patcher worked for Ryan
 
 def check_and_update_launcher():
@@ -136,7 +144,7 @@ class Y1HelperApp(tk.Tk):
                 debug_print(f'Failed to copy/delete new.xml: {e}')
         
         self.title(f"Y1 Helper v{self.version}")
-        self.geometry("520x720")  # Increased width and height for better button spacing
+        self.geometry("520x800")  # Increased height for update status visibility
         self.resizable(False, False)
         
         # Ensure window gets focus and appears in front
@@ -148,8 +156,8 @@ class Y1HelperApp(tk.Tk):
         # Center window on screen
         self.update_idletasks()  # Update window info
         x = (self.winfo_screenwidth() // 2) - (520 // 2)
-        y = (self.winfo_screenheight() // 2) - (720 // 2)
-        self.geometry(f"520x720+{x}+{y}")
+        y = (self.winfo_screenheight() // 2) - (800 // 2)
+        self.geometry(f"520x800+{x}+{y}")
         
         # Detect Windows 11 theme
         self.setup_windows_11_theme()
@@ -184,6 +192,14 @@ class Y1HelperApp(tk.Tk):
         self.disable_dpad_swap_var = tk.BooleanVar()  # Variable for D-pad swap control (now "Invert Scroll Direction")
         self.y1_launcher_detected = False  # Track if com.innioasis.y1 is detected
         self.rgb_profile_var = tk.StringVar(value="BGRA8888")
+        
+        # Update system variables
+        self.update_check_interval = 300000  # 5 minutes in milliseconds
+        self.last_update_check = 0
+        self.update_available = False
+        self.update_info = None
+        self.update_button = None
+        self.patches_applied = os.environ.get('Y1_HELPER_PATCHES_APPLIED', '0') == '1'
         
         # Add input pacing: minimum delay between input events (in seconds)
         self.input_pacing_interval = 0.1  # 100ms
@@ -264,6 +280,13 @@ class Y1HelperApp(tk.Tk):
         # Initialize config download and background updates
         self.download_and_unpack_config()
         self.update_config_background()
+        
+        # Check for updates in background after a short delay
+        self.after(5000, self.show_update_button_if_needed)  # Check for updates after 5 seconds
+        
+        # Check for team-slide updates and show patch status
+        self.after(3000, self.check_and_show_team_slide_update)  # Check for team-slide updates after 3 seconds
+        self.after(1000, self.show_patch_status_message)  # Show patch status after 1 second
         
         debug_print("Y1HelperApp initialization complete")
     
@@ -615,61 +638,85 @@ class Y1HelperApp(tk.Tk):
             # Continue without config.ini if download fails
     
     def get_random_api_key(self):
-        """Get a random API key from config.ini for rate limit prevention"""
+        """Get a random API key from config.ini or hardcoded backup keys for rate limit prevention"""
         try:
-            config_path = self.get_config_path()
-            if not os.path.exists(config_path):
-                return None
-            
-            import configparser
-            config = configparser.ConfigParser()
-            config.read(config_path)
-            
-            # Get all API keys from the config
             api_keys = []
-            if 'api_keys' in config:
-                try:
-                    # Check for key_1, key_2, etc. format
-                    for key, value in config['api_keys'].items():
-                        if isinstance(value, str) and key.startswith('key_') and value.strip():
-                            token = value.strip()
-                            if token.startswith('github_pat_'):
-                                token = token[11:]  # Remove 'github_pat_' prefix
-                            api_keys.append(token)
-                    
-                    # Check for api_key0 - api_key1000 format
-                    for i in range(1001):  # 0 to 1000
-                        key_name = f'api_key{i}'
-                        if key_name in config['api_keys']:
-                            token = config['api_keys'][key_name].strip()
-                            if token and token not in api_keys:
+            
+            # First, try to get keys from config.ini
+            config_path = self.get_config_path()
+            debug_print(f"Looking for config at: {config_path}")
+            if os.path.exists(config_path):
+                import configparser
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                
+                if 'api_keys' in config:
+                    debug_print(f"Found api_keys section with {len(config['api_keys'])} entries")
+                    try:
+                        # Check for key_1, key_2, etc. format
+                        for key, value in config['api_keys'].items():
+                            if isinstance(value, str) and key.startswith('key_') and value.strip():
+                                token = value.strip()
+                                debug_print(f"Found key {key}: {token[:10]}... (length: {len(token)})")
                                 if token.startswith('github_pat_'):
                                     token = token[11:]  # Remove 'github_pat_' prefix
+                                    debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
                                 api_keys.append(token)
-                except Exception as e:
-                    debug_print(f"Error processing api_keys section: {e}")
+                        
+                        # Check for api_key0 - api_key1000 format
+                        for i in range(1001):  # 0 to 1000
+                            key_name = f'api_key{i}'
+                            if key_name in config['api_keys']:
+                                token = config['api_keys'][key_name].strip()
+                                if token and token not in api_keys:
+                                    debug_print(f"Found {key_name}: {token[:10]}... (length: {len(token)})")
+                                    if token.startswith('github_pat_'):
+                                        token = token[11:]  # Remove 'github_pat_' prefix
+                                        debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
+                                    api_keys.append(token)
+                    except Exception as e:
+                        debug_print(f"Error processing api_keys section: {e}")
+                
+                # If no API keys found, try legacy github.token
+                if not api_keys and 'github' in config and 'token' in config['github']:
+                    try:
+                        token = config['github']['token'].strip()
+                        if token:
+                            debug_print(f"Found legacy token: {token[:10]}... (length: {len(token)})")
+                            if token.startswith('github_pat_'):
+                                token = token[11:]  # Remove 'github_pat_' prefix
+                                debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
+                            api_keys.append(token)
+                    except Exception as e:
+                        debug_print(f"Error processing legacy token: {e}")
+            else:
+                debug_print(f"Config file not found at: {config_path}")
             
-            # If no API keys found, try legacy github.token
-            if not api_keys and 'github' in config and 'token' in config['github']:
-                try:
-                    token = config['github']['token'].strip()
-                    if token:
-                        if token.startswith('github_pat_'):
-                            token = token[11:]  # Remove 'github_pat_' prefix
-                        api_keys.append(token)
-                except Exception as e:
-                    debug_print(f"Error processing legacy token: {e}")
+            debug_print(f"Total API keys found from config: {len(api_keys)}")
+            
+            # Add hardcoded backup keys if no keys from config
+            if not api_keys:
+                debug_print("No API keys found in config.ini, using hardcoded backup keys")
+                api_keys.extend(BACKUP_API_KEYS)
+            else:
+                # Add hardcoded backup keys as additional options
+                api_keys.extend(BACKUP_API_KEYS)
+            
+            debug_print(f"Total API keys available (including backup): {len(api_keys)}")
             
             if api_keys:
                 # Return a random key
                 import random
-                return random.choice(api_keys)
+                selected_key = random.choice(api_keys)
+                debug_print(f"Selected API key: {selected_key[:10]}... (length: {len(selected_key)})")
+                return selected_key
             
             return None
-            
         except Exception as e:
             debug_print(f"Error getting random API key: {e}")
             return None
+    
+
     
     def has_api_keys_available(self):
         """Check if any API keys are available"""
@@ -731,10 +778,11 @@ class Y1HelperApp(tk.Tk):
         
         if token:
             headers['Authorization'] = f'token {token}'
-            debug_print(f"Using authenticated request with token")
+            debug_print(f"Using authenticated request with token: {token[:10]}...")
         else:
             debug_print(f"Using unauthenticated request (60 requests/hour limit)")
         
+        debug_print(f"Creating request for URL: {url}")
         return urllib.request.Request(url, headers=headers)
     
     def handle_rate_limit_error(self, response, url):
@@ -790,6 +838,152 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error adding API key to config: {e}")
     
+    def get_all_api_keys(self):
+        """Get all available API keys in priority order: config.ini keys first, then backup keys"""
+        try:
+            api_keys = []
+            
+            # First, try to get keys from config.ini
+            config_path = self.get_config_path()
+            debug_print(f"Looking for config at: {config_path}")
+            if os.path.exists(config_path):
+                import configparser
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                
+                if 'api_keys' in config:
+                    debug_print(f"Found api_keys section with {len(config['api_keys'])} entries")
+                    try:
+                        # Check for key_1, key_2, etc. format
+                        for key, value in config['api_keys'].items():
+                            if isinstance(value, str) and key.startswith('key_') and value.strip():
+                                token = value.strip()
+                                debug_print(f"Found config key {key}: {token[:10]}... (length: {len(token)})")
+                                if token.startswith('github_pat_'):
+                                    token = token[11:]  # Remove 'github_pat_' prefix
+                                    debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
+                                api_keys.append(token)
+                        
+                        # Check for api_key0 - api_key1000 format
+                        for i in range(1001):  # 0 to 1000
+                            key_name = f'api_key{i}'
+                            if key_name in config['api_keys']:
+                                token = config['api_keys'][key_name].strip()
+                                if token and token not in api_keys:
+                                    debug_print(f"Found config {key_name}: {token[:10]}... (length: {len(token)})")
+                                    if token.startswith('github_pat_'):
+                                        token = token[11:]  # Remove 'github_pat_' prefix
+                                        debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
+                                    api_keys.append(token)
+                    except Exception as e:
+                        debug_print(f"Error processing api_keys section: {e}")
+                
+                # If no API keys found, try legacy github.token
+                if not api_keys and 'github' in config and 'token' in config['github']:
+                    try:
+                        token = config['github']['token'].strip()
+                        if token:
+                            debug_print(f"Found legacy token: {token[:10]}... (length: {len(token)})")
+                            if token.startswith('github_pat_'):
+                                token = token[11:]  # Remove 'github_pat_' prefix
+                                debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
+                            api_keys.append(token)
+                    except Exception as e:
+                        debug_print(f"Error processing legacy token: {e}")
+            else:
+                debug_print(f"Config file not found at: {config_path}")
+            
+            debug_print(f"Total API keys found from config: {len(api_keys)}")
+            
+            # Add hardcoded backup keys
+            for i, backup_key in enumerate(BACKUP_API_KEYS):
+                debug_print(f"Adding backup key {i+1}: {backup_key[:10]}... (length: {len(backup_key)})")
+                api_keys.append(backup_key)
+            
+            debug_print(f"Total API keys available (config + backup): {len(api_keys)}")
+            return api_keys
+            
+        except Exception as e:
+            debug_print(f"Error getting all API keys: {e}")
+            # Return backup keys as fallback
+            return BACKUP_API_KEYS.copy()
+    
+    def _make_github_request_with_retries(self, url, method='GET', stream=False, **kwargs):
+        """
+        Make a GitHub request with comprehensive retry logic.
+        
+        Priority order:
+        1. All config.ini API keys (in order found)
+        2. All backup API keys (in order)
+        3. Unauthenticated request (final fallback)
+        
+        Returns: requests.Response object
+        Raises: requests.RequestException if all attempts fail
+        """
+        all_keys = self.get_all_api_keys()
+        tried_tokens = set()
+        
+        debug_print(f"Making GitHub request to: {url}")
+        debug_print(f"Available tokens: {len(all_keys)} (config + backup)")
+        
+        # Try each API key in order
+        for token in all_keys:
+            if token in tried_tokens:
+                continue
+                
+            tried_tokens.add(token)
+            debug_print(f"Trying token: {token[:10]}... (attempt {len(tried_tokens)})")
+            
+            headers = {
+                'User-Agent': 'Y1-Helper/0.7.0',
+                'Authorization': f'token {token}'
+            }
+            
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    stream=stream,
+                    timeout=30,
+                    **kwargs
+                )
+                
+                # Check for authentication/authorization errors
+                if response.status_code in [401, 403]:
+                    debug_print(f"Token failed with status {response.status_code}: {token[:10]}...")
+                    continue
+                
+                # Success!
+                debug_print(f"Request successful with token: {token[:10]}... (status: {response.status_code})")
+                return response
+                
+            except requests.RequestException as e:
+                debug_print(f"Request failed with token {token[:10]}...: {e}")
+                continue
+        
+        # If all authenticated requests failed, try unauthenticated
+        debug_print("All authenticated requests failed, trying unauthenticated request")
+        headers = {
+            'User-Agent': 'Y1-Helper/0.7.0'
+        }
+        
+        try:
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                stream=stream,
+                timeout=30,
+                **kwargs
+            )
+            debug_print(f"Unauthenticated request successful (status: {response.status_code})")
+            return response
+            
+        except requests.RequestException as e:
+            debug_print(f"Unauthenticated request also failed: {e}")
+            raise e
+    
     def update_config_background(self):
         """Update config.ini in background every 5 minutes"""
         try:
@@ -803,6 +997,790 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Background config update failed: {e}")
             # Schedule retry in 1 minute on failure
             self.after(60000, self.update_config_background)  # 60000ms = 1 minute
+    
+    def check_for_updates(self):
+        """Check for newer version and return update info if available"""
+        try:
+            debug_print("Checking for updates...")
+            
+            # Get random API key for rate limit prevention
+            api_key = self.get_random_api_key()
+            
+            # GitHub API URL for latest release
+            api_url = "https://api.github.com/repos/itsry/Y1-helper/releases/latest"
+            
+            # Try authenticated request first
+            request = self.create_github_request(api_url)
+            release_data = None
+            
+            try:
+                with urllib.request.urlopen(request) as response:
+                    release_data = json.loads(response.read().decode('utf-8'))
+                    debug_print(f"Latest release: {release_data.get('tag_name', 'unknown')}")
+            except urllib.error.HTTPError as e:
+                if e.code == 403:  # Rate limit or authentication error
+                    debug_print("Authenticated request failed, trying fallback...")
+                    # Try with different API key or unauthenticated
+                    request = self.handle_rate_limit_error(e, api_url)
+                    if request:
+                        with urllib.request.urlopen(request) as response:
+                            release_data = json.loads(response.read().decode('utf-8'))
+                            debug_print(f"Fallback successful, latest release: {release_data.get('tag_name', 'unknown')}")
+                else:
+                    debug_print(f"HTTP error checking for updates: {e.code}")
+                    return None
+            except Exception as e:
+                debug_print(f"Error checking for updates: {e}")
+                return None
+            
+            if not release_data:
+                debug_print("No release data received")
+                return None
+            
+            # Extract version from tag name (remove 'v' prefix if present)
+            latest_version = release_data.get('tag_name', '')
+            if latest_version.startswith('v'):
+                latest_version = latest_version[1:]
+            
+            debug_print(f"Current version: {self.version}, Latest version: {latest_version}")
+            
+            # Compare versions
+            if self.compare_versions(latest_version, self.version) > 0:
+                # Newer version available
+                update_info = {
+                    'version': latest_version,
+                    'assets': release_data.get('assets', []),
+                    'body': release_data.get('body', ''),
+                    'html_url': release_data.get('html_url', '')
+                }
+                debug_print(f"Update available: {latest_version}")
+                return update_info
+            else:
+                debug_print("No update available")
+                return None
+                
+        except Exception as e:
+            debug_print(f"Error in check_for_updates: {e}")
+            return None
+    
+    def compare_versions(self, version1, version2):
+        """Compare two version strings, return 1 if version1 > version2, -1 if version1 < version2, 0 if equal"""
+        try:
+            # Split versions into components
+            v1_parts = [int(x) for x in version1.split('.')]
+            v2_parts = [int(x) for x in version2.split('.')]
+            
+            # Pad with zeros to make lengths equal
+            max_len = max(len(v1_parts), len(v2_parts))
+            v1_parts.extend([0] * (max_len - len(v1_parts)))
+            v2_parts.extend([0] * (max_len - len(v2_parts)))
+            
+            # Compare each component
+            for i in range(max_len):
+                if v1_parts[i] > v2_parts[i]:
+                    return 1
+                elif v1_parts[i] < v2_parts[i]:
+                    return -1
+            
+            return 0  # Versions are equal
+        except Exception as e:
+            debug_print(f"Error comparing versions: {e}")
+            return 0
+    
+    def download_update(self, update_info):
+        """Download update executable (patch.exe or installer.exe)"""
+        try:
+            debug_print("Starting update download...")
+            
+            # Look for patch.exe first, then installer.exe
+            target_asset = None
+            for asset in update_info['assets']:
+                asset_name = asset.get('name', '').lower()
+                if asset_name == 'patch.exe':
+                    target_asset = asset
+                    break
+                elif asset_name == 'installer.exe' and target_asset is None:
+                    target_asset = asset
+            
+            if not target_asset:
+                debug_print("No suitable update executable found")
+                return None, "No update executable (patch.exe or installer.exe) found in release"
+            
+            debug_print(f"Downloading {target_asset['name']}...")
+            
+            # Create progress dialog
+            progress_dialog = self.create_progress_dialog("Downloading Update")
+            progress_dialog.progress_bar.start()
+            
+            def update_progress(message):
+                try:
+                    if progress_dialog and hasattr(progress_dialog, 'status_label'):
+                        progress_dialog.status_label.config(text=message)
+                        progress_dialog.update()
+                    debug_print(f"Update Download Progress: {message}")
+                except Exception as e:
+                    debug_print(f"Progress update failed: {e}")
+            
+            update_progress(f"Downloading {target_asset['name']}...")
+            
+            # Download the file
+            download_url = target_asset['browser_download_url']
+            temp_file = os.path.join(tempfile.gettempdir(), target_asset['name'])
+            
+            # Get random API key for rate limit prevention
+            api_key = self.get_random_api_key()
+            
+            # Try authenticated download first
+            request = self.create_github_request(download_url)
+            
+            try:
+                with urllib.request.urlopen(request) as response:
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded_size = 0
+                    
+                    with open(temp_file, 'wb') as f:
+                        while True:
+                            chunk = response.read(8192)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded_size += len(chunk)
+                            
+                            if total_size > 0:
+                                progress = (downloaded_size / total_size) * 100
+                                update_progress(f"Downloading {target_asset['name']}... {progress:.1f}%")
+                            else:
+                                update_progress(f"Downloading {target_asset['name']}... {downloaded_size} bytes")
+                
+                debug_print(f"Update downloaded successfully: {temp_file}")
+                return temp_file, None
+                
+            except urllib.error.HTTPError as e:
+                if e.code == 403:  # Rate limit or authentication error
+                    debug_print("Authenticated download failed, trying fallback...")
+                    # Try with different API key or unauthenticated
+                    request = self.handle_rate_limit_error(e, download_url)
+                    if request:
+                        with urllib.request.urlopen(request) as response:
+                            total_size = int(response.headers.get('content-length', 0))
+                            downloaded_size = 0
+                            
+                            with open(temp_file, 'wb') as f:
+                                while True:
+                                    chunk = response.read(8192)
+                                    if not chunk:
+                                        break
+                                    f.write(chunk)
+                                    downloaded_size += len(chunk)
+                                    
+                                    if total_size > 0:
+                                        progress = (downloaded_size / total_size) * 100
+                                        update_progress(f"Downloading {target_asset['name']}... {progress:.1f}%")
+                                    else:
+                                        update_progress(f"Downloading {target_asset['name']}... {downloaded_size} bytes")
+                        
+                        debug_print(f"Update downloaded successfully via fallback: {temp_file}")
+                        return temp_file, None
+                    else:
+                        return None, f"Download failed: HTTP {e.code}"
+                else:
+                    return None, f"Download failed: HTTP {e.code}"
+            except Exception as e:
+                debug_print(f"Error downloading update: {e}")
+                return None, f"Download failed: {str(e)}"
+            finally:
+                if progress_dialog:
+                    progress_dialog.destroy()
+                    
+        except Exception as e:
+            debug_print(f"Error in download_update: {e}")
+            return None, f"Download failed: {str(e)}"
+    
+    def run_update(self, update_file):
+        """Run the downloaded update executable and close y1_helper"""
+        try:
+            debug_print(f"Running update: {update_file}")
+            
+            # Launch the update executable
+            subprocess.Popen([update_file], shell=True)
+            
+            # Close y1_helper after a short delay
+            self.after(1000, self.quit)
+            
+        except Exception as e:
+            debug_print(f"Error running update: {e}")
+            messagebox.showerror("Update Error", f"Failed to run update: {str(e)}")
+    
+    def show_update_available(self, update_info):
+        """Show update available dialog"""
+        try:
+            result = messagebox.askyesno(
+                "Update Available",
+                f"A newer version ({update_info['version']}) is available!\n\n"
+                f"Current version: {self.version}\n"
+                f"Latest version: {update_info['version']}\n\n"
+                f"Would you like to download and install the update now?",
+                icon='info'
+            )
+            
+            if result:
+                self.perform_update(update_info)
+                
+        except Exception as e:
+            debug_print(f"Error showing update dialog: {e}")
+    
+    def perform_update(self, update_info):
+        """Perform the update process"""
+        try:
+            debug_print("Starting update process...")
+            
+            # Download the update
+            update_file, error = self.download_update(update_info)
+            
+            if error:
+                messagebox.showerror("Update Error", f"Failed to download update: {error}")
+                return
+            
+            if update_file and os.path.exists(update_file):
+                # Run the update
+                self.run_update(update_file)
+            else:
+                messagebox.showerror("Update Error", "Update file not found after download")
+                
+        except Exception as e:
+            debug_print(f"Error in perform_update: {e}")
+            messagebox.showerror("Update Error", f"Update failed: {str(e)}")
+    
+    def check_and_show_update(self):
+        """Show update dialog if update is available"""
+        try:
+            debug_print("Manual update check triggered")
+            
+            if self.update_available and self.update_info:
+                self.show_team_slide_update_prompt(self.update_info)
+            else:
+                # Do a fresh check if no stored update info
+                update_info = self.check_for_team_slide_updates()
+                if update_info:
+                    self.update_available = True
+                    self.update_info = update_info
+                    self.show_team_slide_update_prompt(update_info)
+                else:
+                    messagebox.showinfo("Update Check", "You are running the latest version!")
+                
+        except Exception as e:
+            debug_print(f"Error in check_and_show_update: {e}")
+            messagebox.showerror("Update Error", f"Failed to check for updates: {str(e)}")
+    
+    def show_update_button_if_needed(self):
+        """Show update button if update is available"""
+        try:
+            if self.update_available and self.update_info:
+                debug_print("Update available, showing update button")
+                # Show the update button
+                self.update_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+                
+                # Update button text with version info
+                if self.update_info.get('patch_asset'):
+                    self.update_btn.config(text=f"🔄 Update to v{self.update_info['version']} (Patch)")
+                elif self.update_info.get('installer_asset'):
+                    self.update_btn.config(text=f"🔄 Update to v{self.update_info['version']} (Full)")
+                else:
+                    self.update_btn.config(text=f"🔄 Update to v{self.update_info['version']}")
+            else:
+                debug_print("No update available")
+                
+        except Exception as e:
+            debug_print(f"Error in show_update_button_if_needed: {e}")
+    
+    def check_for_team_slide_updates(self):
+        """Check for updates from team-slide/y1-helper repository with comprehensive fallbacks"""
+        try:
+            debug_print("Checking for team-slide updates...")
+            
+            # Method 1: GitHub API (primary method)
+            update_info = self._check_updates_via_api()
+            if update_info:
+                return update_info
+            
+            # Method 2: Fallback to releases page scraping
+            debug_print("API method failed, trying releases page fallback...")
+            update_info = self._check_updates_via_releases_page()
+            if update_info:
+                return update_info
+            
+            # Method 3: Fallback to master branch checking
+            debug_print("Releases page failed, trying master branch fallback...")
+            update_info = self._check_updates_via_master_branch()
+            if update_info:
+                return update_info
+            
+            debug_print("All update check methods failed")
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error checking for team-slide updates: {e}")
+            return None
+    
+    def _check_updates_via_api(self):
+        """Check for updates using GitHub API"""
+        try:
+            debug_print("Checking updates via GitHub API...")
+            
+            # GitHub API URL for latest release
+            api_url = "https://api.github.com/repos/team-slide/y1-helper/releases/latest"
+            
+            # Use our comprehensive retry mechanism with rate limiting
+            response = self._make_github_request_with_retries(api_url)
+            
+            if response.status_code != 200:
+                debug_print(f"GitHub API returned status {response.status_code}")
+                return None
+            
+            release_data = json.loads(response.text)
+            
+            if not release_data:
+                debug_print("No release data received from API")
+                return None
+            
+            # Extract version from tag name (remove 'v' prefix if present)
+            latest_version = release_data.get('tag_name', '')
+            if latest_version.startswith('v'):
+                latest_version = latest_version[1:]
+            
+            debug_print(f"Current version: {self.version}, Latest version: {latest_version}")
+            
+            # Compare versions
+            if self.compare_versions(latest_version, self.version) > 0:
+                debug_print(f"Newer version available: {latest_version}")
+                
+                # Check for patch.exe or installer.exe
+                assets = release_data.get('assets', [])
+                patch_asset = None
+                installer_asset = None
+                
+                for asset in assets:
+                    asset_name = asset.get('name', '').lower()
+                    if asset_name == 'patch.exe':
+                        patch_asset = asset
+                        debug_print("Found patch.exe in release")
+                    elif asset_name == 'installer.exe':
+                        installer_asset = asset
+                        debug_print("Found installer.exe in release")
+                
+                return {
+                    'version': latest_version,
+                    'tag_name': release_data.get('tag_name', ''),
+                    'body': release_data.get('body', ''),
+                    'assets': assets,
+                    'patch_asset': patch_asset,
+                    'installer_asset': installer_asset,
+                    'html_url': release_data.get('html_url', ''),
+                    'method': 'api'
+                }
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error checking updates via API: {e}")
+            return None
+    
+    def _check_updates_via_releases_page(self):
+        """Check for updates by scraping the releases page"""
+        try:
+            debug_print("Checking updates via releases page...")
+            
+            # Scrape the releases page
+            releases_url = "https://github.com/team-slide/y1-helper/releases"
+            response = self._make_github_request_with_retries(releases_url)
+            
+            if response.status_code != 200:
+                debug_print(f"Releases page returned status {response.status_code}")
+                return None
+            
+            # Parse the HTML to find the latest release
+            import re
+            content = response.text
+            
+            # Look for release tags in the page
+            tag_pattern = r'releases/tag/v?([0-9]+\.[0-9]+\.[0-9]+)'
+            tags = re.findall(tag_pattern, content)
+            
+            if not tags:
+                debug_print("No version tags found in releases page")
+                return None
+            
+            # Get the latest version
+            latest_version = max(tags, key=lambda v: self.compare_versions(v, "0.0.0"))
+            debug_print(f"Found latest version in releases page: {latest_version}")
+            
+            # Compare versions
+            if self.compare_versions(latest_version, self.version) > 0:
+                debug_print(f"Newer version available: {latest_version}")
+                
+                # Check for patch.exe or installer.exe in the page
+                patch_found = 'patch.exe' in content.lower()
+                installer_found = 'installer.exe' in content.lower()
+                
+                debug_print(f"Found in releases page - patch.exe: {patch_found}, installer.exe: {installer_found}")
+                
+                return {
+                    'version': latest_version,
+                    'tag_name': f"v{latest_version}",
+                    'body': f"Update to version {latest_version}",
+                    'assets': [],
+                    'patch_asset': {'name': 'patch.exe'} if patch_found else None,
+                    'installer_asset': {'name': 'installer.exe'} if installer_found else None,
+                    'html_url': f"https://github.com/team-slide/y1-helper/releases/tag/v{latest_version}",
+                    'method': 'releases_page'
+                }
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error checking updates via releases page: {e}")
+            return None
+    
+    def _check_updates_via_master_branch(self):
+        """Check for updates by checking master branch version"""
+        try:
+            debug_print("Checking updates via master branch...")
+            
+            # Check version.txt in master branch
+            version_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/version.txt"
+            response = self._make_github_request_with_retries(version_url)
+            
+            if response.status_code != 200:
+                debug_print(f"Master version.txt returned status {response.status_code}")
+                return None
+            
+            latest_version = response.text.strip()
+            debug_print(f"Master branch version: {latest_version}")
+            
+            # Compare versions
+            if self.compare_versions(latest_version, self.version) > 0:
+                debug_print(f"Newer version available in master: {latest_version}")
+                
+                # Check for patch.zip or installer.exe in master
+                patch_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/patch.zip"
+                installer_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/installer.exe"
+                
+                patch_response = self._make_github_request_with_retries(patch_url, method='HEAD')
+                installer_response = self._make_github_request_with_retries(installer_url, method='HEAD')
+                
+                patch_available = patch_response.status_code == 200
+                installer_available = installer_response.status_code == 200
+                
+                debug_print(f"Master branch - patch.zip: {patch_available}, installer.exe: {installer_available}")
+                
+                return {
+                    'version': latest_version,
+                    'tag_name': f"v{latest_version}",
+                    'body': f"Update to version {latest_version} from master branch",
+                    'assets': [],
+                    'patch_asset': {'name': 'patch.zip', 'browser_download_url': patch_url} if patch_available else None,
+                    'installer_asset': {'name': 'installer.exe', 'browser_download_url': installer_url} if installer_available else None,
+                    'html_url': "https://github.com/team-slide/y1-helper",
+                    'method': 'master_branch'
+                }
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error checking updates via master branch: {e}")
+            return None
+    
+    def download_patch_from_team_slide(self):
+        """Download patch files from team-slide/y1-helper repository"""
+        try:
+            debug_print("Downloading patch from team-slide repository...")
+            
+            # GitHub API URL for the patch directory
+            api_url = "https://api.github.com/repos/team-slide/y1-helper/contents/patch"
+            
+            # Use our comprehensive retry mechanism
+            response = self._make_github_request_with_retries(api_url)
+            contents_data = json.loads(response.text)
+            
+            if not isinstance(contents_data, list):
+                debug_print("No patch directory found or not a directory")
+                return False
+            
+            # Create patch directory
+            patch_dir = os.path.join(self.base_dir, 'patch')
+            os.makedirs(patch_dir, exist_ok=True)
+            
+            downloaded_files = 0
+            
+            for item in contents_data:
+                if item.get('type') == 'file':
+                    file_name = item.get('name')
+                    download_url = item.get('download_url')
+                    
+                    if file_name and download_url:
+                        file_path = os.path.join(patch_dir, file_name)
+                        debug_print(f"Downloading patch file: {file_name}")
+                        
+                        # Download the file
+                        file_response = self._make_github_request_with_retries(download_url)
+                        with open(file_path, 'wb') as f:
+                            f.write(file_response.content)
+                        
+                        downloaded_files += 1
+                        debug_print(f"Downloaded: {file_name}")
+            
+            debug_print(f"Downloaded {downloaded_files} patch files")
+            return downloaded_files > 0
+            
+        except Exception as e:
+            debug_print(f"Error downloading patch: {e}")
+            return False
+    
+    def show_team_slide_update_prompt(self, update_info):
+        """Show update prompt for team-slide updates"""
+        try:
+            title = "Update Available"
+            message = f"A new version of Y1 Helper is available!\n\n"
+            message += f"Current version: {self.version}\n"
+            message += f"New version: {update_info['version']}\n\n"
+            
+            if update_info.get('body'):
+                # Strip markdown and limit length
+                body = update_info['body']
+                if len(body) > 200:
+                    body = body[:200] + "..."
+                message += f"Changes:\n{body}\n\n"
+            
+            if update_info.get('patch_asset'):
+                message += "A patch update is available for quick installation."
+            elif update_info.get('installer_asset'):
+                message += "A full installer is available for complete update."
+            else:
+                message += "Update files are available for download."
+            
+            message += "\n\nWould you like to download and install the update now?"
+            
+            result = messagebox.askyesno(title, message)
+            
+            if result:
+                self.perform_team_slide_update(update_info)
+                
+        except Exception as e:
+            debug_print(f"Error showing update prompt: {e}")
+    
+    def perform_team_slide_update(self, update_info):
+        """Perform the team-slide update, prioritizing patch.exe over installer.exe, and robustly handle UAC/installer launching."""
+        try:
+            debug_print("Performing team-slide update...")
+            # Prioritize patch.exe if both are available
+            if update_info.get('patch_asset'):
+                debug_print("Using patch.exe for update")
+                self.download_and_run_patch(update_info['patch_asset'])
+            elif update_info.get('installer_asset'):
+                debug_print("Using installer.exe for update")
+                self.download_and_run_installer(update_info['installer_asset'])
+            else:
+                debug_print("No update assets found, trying manual patch download")
+                if self.download_patch_from_team_slide():
+                    messagebox.showinfo("Patch Downloaded", 
+                        "Patch files have been downloaded and will be applied on the next restart of Y1 Helper.")
+                else:
+                    messagebox.showerror("Download Failed", 
+                        "Failed to download patch files. Please try again later.")
+        except Exception as e:
+            debug_print(f"Error performing update: {e}")
+            messagebox.showerror("Update Failed", f"Update failed: {e}")
+
+    def _run_update_exe_and_wait(self, exe_path, friendly_name):
+        """Launch the update exe and wait for it to start, showing a modal dialog and handling UAC/errors robustly."""
+        import subprocess
+        import tkinter as tk
+        from tkinter import messagebox
+        import time
+        try:
+            debug_print(f"Launching {friendly_name}: {exe_path}")
+            # Start the process
+            try:
+                proc = subprocess.Popen([exe_path], shell=True)
+            except Exception as e:
+                debug_print(f"Failed to launch {friendly_name}: {e}")
+                messagebox.showerror(f"{friendly_name} Launch Failed", f"Failed to launch {friendly_name}: {e}")
+                return
+            # Show modal dialog while waiting
+            dialog = tk.Toplevel(self)
+            dialog.title(f"{friendly_name} Running...")
+            dialog.geometry("400x120")
+            dialog.transient(self)
+            dialog.grab_set()
+            label = tk.Label(dialog, text=f"{friendly_name} is running. Please complete the update in the new window.\n\nY1 Helper will close automatically when the update process finishes.", wraplength=380, justify=tk.CENTER)
+            label.pack(pady=20, padx=10)
+            cancel_btn = tk.Button(dialog, text="Cancel and Close Y1 Helper", command=dialog.destroy)
+            cancel_btn.pack(pady=(0, 15))
+            # Poll for process exit or dialog close
+            for _ in range(600):  # Wait up to 60 seconds
+                if proc.poll() is not None:
+                    break
+                if not dialog.winfo_exists():
+                    break
+                dialog.update()
+                time.sleep(0.1)
+            dialog.destroy()
+            debug_print(f"{friendly_name} process ended or dialog closed. Closing Y1 Helper.")
+            self.after(500, self.quit)
+        except Exception as e:
+            debug_print(f"Error waiting for {friendly_name}: {e}")
+            messagebox.showerror(f"{friendly_name} Error", f"Error while waiting for {friendly_name}: {e}")
+
+    def download_and_run_patch(self, patch_asset):
+        """Download and run patch with fallback methods and robust process handling."""
+        try:
+            progress_dialog = self.create_progress_dialog("Downloading Patch")
+            progress_dialog.progress_bar.start()
+            def update_progress(message):
+                try:
+                    if progress_dialog and hasattr(progress_dialog, 'status_label'):
+                        progress_dialog.status_label.config(text=message)
+                        progress_dialog.update()
+                    debug_print(f"Patch Download Progress: {message}")
+                except Exception as e:
+                    debug_print(f"Progress update failed: {e}")
+            update_progress("Downloading patch...")
+            if patch_asset.get('browser_download_url'):
+                download_url = patch_asset['browser_download_url']
+                file_name = patch_asset.get('name', 'patch.exe')
+            else:
+                file_name = patch_asset.get('name', 'patch.exe')
+                if file_name == 'patch.zip':
+                    download_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/patch.zip"
+                else:
+                    download_url = f"https://github.com/team-slide/y1-helper/releases/latest/download/{file_name}"
+            debug_print(f"Downloading from: {download_url}")
+            temp_file = os.path.join(tempfile.gettempdir(), file_name)
+            response = self._make_github_request_with_retries(download_url, stream=True)
+            if response.status_code != 200:
+                debug_print(f"Failed to download patch: HTTP {response.status_code}")
+                progress_dialog.destroy()
+                messagebox.showerror("Download Failed", f"Failed to download patch: HTTP {response.status_code}")
+                return
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            with open(temp_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            update_progress(f"Downloading {file_name}... {progress:.1f}%")
+                        else:
+                            update_progress(f"Downloading {file_name}... {downloaded_size} bytes")
+            progress_dialog.destroy()
+            debug_print(f"Patch downloaded successfully: {temp_file}")
+            if file_name.endswith('.zip'):
+                update_progress("Extracting patch files...")
+                patch_dir = os.path.join(self.base_dir, 'patch')
+                os.makedirs(patch_dir, exist_ok=True)
+                with zipfile.ZipFile(temp_file, 'r') as zip_ref:
+                    zip_ref.extractall(patch_dir)
+                os.remove(temp_file)
+                messagebox.showinfo("Patch Applied", "Patch files have been downloaded and will be applied on next restart.")
+            else:
+                self._run_update_exe_and_wait(temp_file, "Patch Installer")
+        except Exception as e:
+            debug_print(f"Error downloading/running patch: {e}")
+            if 'progress_dialog' in locals():
+                progress_dialog.destroy()
+            messagebox.showerror("Patch Error", f"Failed to download or run patch: {e}")
+
+    def download_and_run_installer(self, installer_asset):
+        """Download and run installer.exe with robust process handling."""
+        try:
+            progress_dialog = self.create_progress_dialog("Downloading Installer")
+            progress_dialog.progress_bar.start()
+            def update_progress(message):
+                try:
+                    if progress_dialog and hasattr(progress_dialog, 'status_label'):
+                        progress_dialog.status_label.config(text=message)
+                        progress_dialog.update()
+                    debug_print(f"Installer Download Progress: {message}")
+                except Exception as e:
+                    debug_print(f"Progress update failed: {e}")
+            update_progress("Downloading installer...")
+            if installer_asset.get('browser_download_url'):
+                download_url = installer_asset['browser_download_url']
+                file_name = installer_asset.get('name', 'installer.exe')
+            else:
+                file_name = installer_asset.get('name', 'installer.exe')
+                download_url = f"https://github.com/team-slide/y1-helper/releases/latest/download/{file_name}"
+            debug_print(f"Downloading from: {download_url}")
+            temp_file = os.path.join(tempfile.gettempdir(), file_name)
+            response = self._make_github_request_with_retries(download_url, stream=True)
+            if response.status_code != 200:
+                debug_print(f"Failed to download installer: HTTP {response.status_code}")
+                progress_dialog.destroy()
+                messagebox.showerror("Download Failed", f"Failed to download installer: HTTP {response.status_code}")
+                return
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            with open(temp_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            update_progress(f"Downloading {file_name}... {progress:.1f}%")
+                        else:
+                            update_progress(f"Downloading {file_name}... {downloaded_size} bytes")
+            progress_dialog.destroy()
+            debug_print(f"Installer downloaded successfully: {temp_file}")
+            self._run_update_exe_and_wait(temp_file, "Installer")
+        except Exception as e:
+            debug_print(f"Error downloading and running installer: {e}")
+            if 'progress_dialog' in locals():
+                progress_dialog.destroy()
+            messagebox.showerror("Installer Failed", f"Failed to download or run installer: {e}")
+    
+    def check_and_show_team_slide_update(self):
+        """Check for team-slide updates and show prompt if available"""
+        try:
+            update_info = self.check_for_team_slide_updates()
+            if update_info:
+                self.show_team_slide_update_prompt(update_info)
+        except Exception as e:
+            debug_print(f"Error checking for team-slide updates: {e}")
+    
+    def show_patch_status_message(self):
+        """Show status message if patches were applied"""
+        try:
+            patch_dir = os.path.join(self.base_dir, 'patch')
+            if not os.path.exists(patch_dir):
+                return
+            
+            # Check if patch directory has contents
+            patch_files = []
+            for item in os.listdir(patch_dir):
+                item_path = os.path.join(patch_dir, item)
+                if os.path.isfile(item_path):
+                    patch_files.append(item)
+                elif os.path.isdir(item_path):
+                    for root, dirs, files in os.walk(item_path):
+                        for file in files:
+                            rel_path = os.path.relpath(os.path.join(root, file), patch_dir)
+                            patch_files.append(rel_path)
+            
+            if patch_files:
+                # Show status message
+                status_message = f"Patches applied automatically ({len(patch_files)} files). Changes will take effect on next restart."
+                self.status_var.set(status_message)
+                
+                # Also show in a temporary message box
+                messagebox.showinfo("Patches Applied", 
+                    f"Patches have been applied automatically ({len(patch_files)} files).\n\n"
+                    "The changes will take effect when you restart Y1 Helper.")
+                
+        except Exception as e:
+            debug_print(f"Error showing patch status: {e}")
     
     def download_app(self, app_info):
         """Download app from GitHub releases with progress"""
@@ -1207,6 +2185,16 @@ class Y1HelperApp(tk.Tk):
         )
         self.screenshot_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
+        # Update Available button (hidden by default, shown when update is available)
+        self.update_btn = ttk.Button(
+            row1_frame,
+            text="🔄 Update Available",
+            command=self.check_and_show_update,
+            style="TButton"
+        )
+        self.update_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.update_btn.pack_forget()  # Hidden by default
+        
         # Row 2 - Navigation controls
         row2_frame = ttk.Frame(main_controls_frame)
         row2_frame.pack(fill=tk.X, pady=(6, 0))
@@ -1341,6 +2329,11 @@ class Y1HelperApp(tk.Tk):
         self._add_tooltip(self.set_time_btn, (
             "Set Time: Synchronize the device's time with your computer's current time. "
             "This ensures the device has the correct date and time for proper operation."
+        ))
+        
+        self._add_tooltip(self.update_btn, (
+            "Update Available: A newer version of Y1 Helper is available for download. "
+            "Click to download and install the latest version with bug fixes and improvements."
         ))
         
         self._add_tooltip(self.install_firmware_btn, (
@@ -3758,6 +4751,72 @@ class Y1HelperApp(tk.Tk):
         # Global key release handling for cursor control
         self.bind_all("<KeyRelease>", self.on_key_release)
         debug_print("Key bindings set up complete")
+        
+        # Initialize update system
+        self.initialize_update_system()
+    
+    def initialize_update_system(self):
+        """Initialize the update system with background checks and UI elements"""
+        debug_print("Initializing update system...")
+        
+        # Show patch status if patches were applied
+        if self.patches_applied:
+            self.show_patch_status_message()
+        
+        # Schedule background update check
+        self.after(5000, self.background_update_check)  # Check after 5 seconds
+        
+        # Schedule periodic update checks
+        self.after(self.update_check_interval, self.periodic_update_check)
+        
+        debug_print("Update system initialized")
+    
+    def background_update_check(self):
+        """Background update check that runs once at startup"""
+        try:
+            debug_print("Running background update check...")
+            update_info = self.check_for_team_slide_updates()
+            
+            if update_info:
+                self.update_available = True
+                self.update_info = update_info
+                debug_print(f"Update available: {update_info['version']}")
+                
+                # Show update prompt dialog
+                self.after(1000, lambda: self.show_team_slide_update_prompt(update_info))
+                
+                # Show update button in UI
+                self.after(2000, self.show_update_button_if_needed)
+            else:
+                debug_print("No updates available")
+                
+        except Exception as e:
+            debug_print(f"Background update check failed: {e}")
+    
+    def periodic_update_check(self):
+        """Periodic update check that runs every 5 minutes"""
+        try:
+            debug_print("Running periodic update check...")
+            update_info = self.check_for_team_slide_updates()
+            
+            if update_info and not self.update_available:
+                self.update_available = True
+                self.update_info = update_info
+                debug_print(f"New update available: {update_info['version']}")
+                
+                # Show update prompt dialog
+                self.show_team_slide_update_prompt(update_info)
+                
+                # Show update button in UI
+                self.show_update_button_if_needed
+            
+            # Schedule next check
+            self.after(self.update_check_interval, self.periodic_update_check)
+            
+        except Exception as e:
+            debug_print(f"Periodic update check failed: {e}")
+            # Schedule next check even if this one failed
+            self.after(self.update_check_interval, self.periodic_update_check)
 
     def _destroy_splash(self):
         if hasattr(self, '_splash') and self._splash.winfo_exists():
@@ -3916,21 +4975,22 @@ class Y1HelperApp(tk.Tk):
                             zip_path = os.path.join(firmware_dir, 'rom.zip')
                             dialog.after(0, status_label.config, {"text": "Downloading rom.zip..."})
                             
-                            with requests.get(download_url, stream=True) as response:
-                                response.raise_for_status()
-                                file_size = int(response.headers.get('content-length', 0))
-                                downloaded = 0
-                                progress_bar.config(mode='determinate', maximum=file_size)
-                                with open(zip_path, 'wb') as f:
-                                    for chunk in response.iter_content(chunk_size=8192):
-                                        if not chunk:
-                                            break
-                                        f.write(chunk)
-                                        downloaded += len(chunk)
-                                        percent = (downloaded / file_size) * 100 if file_size else 0
-                                        dialog.after(0, status_label.config, {"text": f"Downloading rom.zip... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
-                                        dialog.after(0, progress_bar.step, (len(chunk),))
-                                dialog.after(0, lambda: progress_bar.config(value=0))
+                            # Use comprehensive retry mechanism for file download
+                            response = self._make_github_request_with_retries(download_url, stream=True)
+                            response.raise_for_status()
+                            file_size = int(response.headers.get('content-length', 0))
+                            downloaded = 0
+                            progress_bar.config(mode='determinate', maximum=file_size)
+                            with open(zip_path, 'wb') as f:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    if not chunk:
+                                        break
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    percent = (downloaded / file_size) * 100 if file_size else 0
+                                    dialog.after(0, status_label.config, {"text": f"Downloading rom.zip... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                    dialog.after(0, progress_bar.step, (len(chunk),))
+                            dialog.after(0, lambda: progress_bar.config(value=0))
                             
                             # Extract rom.zip
                             dialog.after(0, status_label.config, {"text": "Extracting rom.zip..."})
@@ -3974,21 +5034,23 @@ class Y1HelperApp(tk.Tk):
                                     download_url = asset['browser_download_url']
                                     dest_path = os.path.join(firmware_dir, name)
                                     dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
-                                    with requests.get(download_url, stream=True) as response:
-                                        response.raise_for_status()
-                                        file_size = int(response.headers.get('content-length', 0))
-                                        downloaded = 0
-                                        progress_bar.config(mode='determinate', maximum=file_size)
-                                        with open(dest_path, 'wb') as f:
-                                            for chunk in response.iter_content(chunk_size=8192):
-                                                if not chunk:
-                                                    break
-                                                f.write(chunk)
-                                                downloaded += len(chunk)
-                                                percent = (downloaded / file_size) * 100 if file_size else 0
-                                                dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
-                                                dialog.after(0, progress_bar.step, (len(chunk),))
-                                        dialog.after(0, lambda: progress_bar.config(value=0))
+                                    
+                                    # Use comprehensive retry mechanism for file download
+                                    response = self._make_github_request_with_retries(download_url, stream=True)
+                                    response.raise_for_status()
+                                    file_size = int(response.headers.get('content-length', 0))
+                                    downloaded = 0
+                                    progress_bar.config(mode='determinate', maximum=file_size)
+                                    with open(dest_path, 'wb') as f:
+                                        for chunk in response.iter_content(chunk_size=8192):
+                                            if not chunk:
+                                                break
+                                            f.write(chunk)
+                                            downloaded += len(chunk)
+                                            percent = (downloaded / file_size) * 100 if file_size else 0
+                                            dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                            dialog.after(0, progress_bar.step, (len(chunk),))
+                                    dialog.after(0, lambda: progress_bar.config(value=0))
                                     downloaded_files[name] = dest_path
                     else:
                         # Direct URL to a single file (legacy/local)
@@ -3996,21 +5058,23 @@ class Y1HelperApp(tk.Tk):
                         if name.endswith('.img') or name.endswith('.bin'):
                             dest_path = os.path.join(firmware_dir, name)
                             dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
-                            with requests.get(repo_url, stream=True) as response:
-                                response.raise_for_status()
-                                file_size = int(response.headers.get('content-length', 0))
-                                downloaded = 0
-                                progress_bar.config(mode='determinate', maximum=file_size)
-                                with open(dest_path, 'wb') as f:
-                                    for chunk in response.iter_content(chunk_size=8192):
-                                        if not chunk:
-                                            break
-                                        f.write(chunk)
-                                        downloaded += len(chunk)
-                                        percent = (downloaded / file_size) * 100 if file_size else 0
-                                        dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
-                                        dialog.after(0, progress_bar.step, (len(chunk),))
-                                dialog.after(0, lambda: progress_bar.config(value=0))
+                            
+                            # Use comprehensive retry mechanism for file download
+                            response = self._make_github_request_with_retries(repo_url, stream=True)
+                            response.raise_for_status()
+                            file_size = int(response.headers.get('content-length', 0))
+                            downloaded = 0
+                            progress_bar.config(mode='determinate', maximum=file_size)
+                            with open(dest_path, 'wb') as f:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    if not chunk:
+                                        break
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    percent = (downloaded / file_size) * 100 if file_size else 0
+                                    dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                    dialog.after(0, progress_bar.step, (len(chunk),))
+                            dialog.after(0, lambda: progress_bar.config(value=0))
                             downloaded_files[name] = dest_path
                     # Check for system.img
                     debug_print(f"Checking for system.img in downloaded_files: {list(downloaded_files.keys())}")
@@ -4960,29 +6024,23 @@ Permissions Breakdown:
         ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=10)
         
     def parse_permissions(self, permissions):
-        """Parse and explain file permissions"""
-        if len(permissions) != 10:
-            return "Invalid permissions format"
-            
-        perms = permissions[1:]  # Remove file type
-        owner = perms[:3]
-        group = perms[3:6]
-        other = perms[6:9]
-        
         def explain_perms(perms):
             result = []
             if perms[0] == 'r': result.append("read")
             if perms[1] == 'w': result.append("write")
             if perms[2] == 'x': result.append("execute")
             return ', '.join(result) if result else "none"
-            
-        return f"""Owner: {explain_perms(owner)}
-Group: {explain_perms(group)}
-Others: {explain_perms(other)}"""
+        return f"""Owner: {explain_perms(permissions[1:4])}
+Group: {explain_perms(permissions[4:7])}
+Others: {explain_perms(permissions[7:10])}"""
 
-if __name__ == "__main__":
+def main():
+    """Main function to launch the Y1 Helper application"""
     debug_print("Starting Y1 Helper application")
     app = Y1HelperApp()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
     debug_print("Entering main loop")
     app.mainloop()
+
+if __name__ == "__main__":
+    main()

@@ -2,6 +2,9 @@
 assets/
 build/
 
+# Exclude installer.exe but allow patch.exe
+build/install.exe
+
 # Exclude old version archives
 .old/
 __pycache__/
