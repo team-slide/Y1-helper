@@ -19,6 +19,8 @@ from pathlib import Path
 from datetime import datetime
 import argparse
 import tkinter.scrolledtext as scrolledtext
+import configparser
+import random
 
 try:
     import tkinter as tk
@@ -35,6 +37,105 @@ class Y1Launcher:
         self.ignored_patterns = []
         self.progress_window = None
         self.patch_limits = {"added": 15, "changed": 15}  # Limits for patching vs exe update
+        self.api_tokens = []
+        self.config_loaded = False
+        
+        # Load config and tokens
+        self.load_config_and_tokens()
+    
+    def download_and_extract_config(self):
+        """Download config.zip from GitHub and extract config.ini"""
+        try:
+            config_url = "https://github.com/team-slide/Y1-helper/raw/refs/tags/0.7.0/config.zip"
+            config_zip_path = os.path.join(self.base_dir, "config.zip")
+            config_ini_path = os.path.join(self.base_dir, "config.ini")
+            
+            print("Downloading config.zip...")
+            
+            # Download config.zip
+            with urllib.request.urlopen(config_url) as response:
+                with open(config_zip_path, 'wb') as f:
+                    shutil.copyfileobj(response, f)
+            
+            print("Extracting config.ini from config.zip...")
+            
+            # Extract config.ini from the zip
+            with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
+                zip_ref.extract('config.ini', self.base_dir)
+            
+            # Clean up the zip file
+            os.remove(config_zip_path)
+            
+            print("Config.ini extracted successfully")
+            return True
+            
+        except Exception as e:
+            print(f"Error downloading/extracting config: {e}")
+            return False
+    
+    def load_config_and_tokens(self):
+        """Load config.ini and extract API tokens"""
+        try:
+            config_path = os.path.join(self.base_dir, "config.ini")
+            
+            # Try to download config if it doesn't exist
+            if not os.path.exists(config_path):
+                print("Config.ini not found, attempting to download...")
+                if not self.download_and_extract_config():
+                    print("Failed to download config.ini, using default settings")
+                    return
+            
+            # Load config
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            
+            # Extract API tokens
+            self.api_tokens = []
+            
+            # Check for api_keys section (new format)
+            if 'api_keys' in config:
+                for key, value in config['api_keys'].items():
+                    if key.startswith('key_') and value.strip():
+                        self.api_tokens.append(value.strip())
+            
+            # Check for legacy token
+            if 'github' in config and 'token' in config['github']:
+                legacy_token = config['github']['token'].strip()
+                if legacy_token and legacy_token not in self.api_tokens:
+                    self.api_tokens.append(legacy_token)
+            
+            # Check for individual api_key entries (api_key0 - api_key1000)
+            for i in range(1001):  # 0 to 1000
+                key_name = f'api_key{i}'
+                if key_name in config.get('api_keys', {}):
+                    token = config['api_keys'][key_name].strip()
+                    if token and token not in self.api_tokens:
+                        self.api_tokens.append(token)
+            
+            print(f"Loaded {len(self.api_tokens)} API tokens")
+            self.config_loaded = True
+            
+        except Exception as e:
+            print(f"Error loading config: {e}")
+            self.config_loaded = False
+    
+    def get_random_token(self):
+        """Get a random API token from the loaded tokens"""
+        if self.api_tokens:
+            return random.choice(self.api_tokens)
+        return None
+    
+    def create_github_request(self, url):
+        """Create a urllib request with GitHub API headers"""
+        token = self.get_random_token()
+        headers = {
+            'User-Agent': 'Y1-Helper-Launcher/0.7.0'
+        }
+        
+        if token:
+            headers['Authorization'] = f'token {token}'
+        
+        return urllib.request.Request(url, headers=headers)
         
     def get_branch_from_file(self):
         """Get branch from branch.txt file, default to master if not found"""
@@ -284,7 +385,8 @@ class Y1Launcher:
         """Get list of files from GitHub repository (root only)"""
         try:
             api_url = f"https://api.github.com/repos/{self.github_repo}/git/trees/{self.github_branch}?recursive=1"
-            with urllib.request.urlopen(api_url) as response:
+            request = self.create_github_request(api_url)
+            with urllib.request.urlopen(request) as response:
                 data = json.loads(response.read().decode('utf-8'))
             files = []
             py_files = []
@@ -333,7 +435,8 @@ class Y1Launcher:
                 api_url = f"https://api.github.com/repos/{self.github_repo}/releases?per_page=100&page={page}"
                 print(f"Fetching releases page {page}...")
                 
-                with urllib.request.urlopen(api_url) as response:
+                request = self.create_github_request(api_url)
+                with urllib.request.urlopen(request) as response:
                     releases_data = json.loads(response.read().decode('utf-8'))
                 
                 if not releases_data:  # No more releases
@@ -433,7 +536,8 @@ class Y1Launcher:
             
             # Get the latest release
             api_url = f"https://api.github.com/repos/{self.github_repo}/releases/latest"
-            with urllib.request.urlopen(api_url) as response:
+            request = self.create_github_request(api_url)
+            with urllib.request.urlopen(request) as response:
                 release_data = json.loads(response.read().decode('utf-8'))
             
             assets = release_data.get('assets', [])
@@ -565,7 +669,8 @@ class Y1Launcher:
             # GitHub API URL for file content
             api_url = f"https://api.github.com/repos/{self.github_repo}/contents/{file_path}?ref={self.github_branch}"
             
-            with urllib.request.urlopen(api_url) as response:
+            request = self.create_github_request(api_url)
+            with urllib.request.urlopen(request) as response:
                 data = json.loads(response.read().decode('utf-8'))
             
             if 'content' in data:
@@ -609,6 +714,10 @@ class Y1Launcher:
             print(f"Exe file found at: {local_exe_path}")
             print(f"File size: {os.path.getsize(local_exe_path)} bytes")
             
+            # Check if file is actually an executable
+            if not local_exe_path.lower().endswith('.exe'):
+                print(f"Warning: File {local_exe_path} does not have .exe extension")
+            
             self.update_progress(50, 100, f"Running {exe_file['path']} for user installation...")
             
             # Run the exe file as a detached process with proper error handling
@@ -617,6 +726,7 @@ class Y1Launcher:
             startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
             try:
+                print(f"Attempting to launch exe with command: {[local_exe_path]}")
                 process = subprocess.Popen(
                     [local_exe_path],
                     startupinfo=startupinfo,
@@ -625,16 +735,27 @@ class Y1Launcher:
                 
                 print(f"Launched {exe_file['path']} with PID: {process.pid}")
                 
+                # Give the process a moment to start
+                time.sleep(0.5)
+                
+                # Check if process is still running
+                if process.poll() is None:
+                    print(f"Exe process is running successfully (PID: {process.pid})")
+                else:
+                    print(f"Warning: Exe process exited immediately with code: {process.returncode}")
+                
                 # Close the launcher window immediately
                 if self.progress_window and self.progress_window.winfo_exists():
                     self.progress_window.destroy()
                 
                 # Exit the launcher process
+                print("Exiting launcher after successful exe launch")
                 sys.exit(0)
                 
             except subprocess.SubprocessError as e:
-                print(f"Subprocess error: {e}")
+                print(f"Subprocess error with DETACHED_PROCESS: {e}")
                 # Try alternative method without DETACHED_PROCESS
+                print("Trying alternative launch method...")
                 process = subprocess.Popen(
                     [local_exe_path],
                     startupinfo=startupinfo,
@@ -642,11 +763,21 @@ class Y1Launcher:
                 )
                 print(f"Launched {exe_file['path']} with PID: {process.pid} (alternative method)")
                 
+                # Give the process a moment to start
+                time.sleep(0.5)
+                
+                # Check if process is still running
+                if process.poll() is None:
+                    print(f"Exe process is running successfully (PID: {process.pid})")
+                else:
+                    print(f"Warning: Exe process exited immediately with code: {process.returncode}")
+                
                 # Close the launcher window immediately
                 if self.progress_window and self.progress_window.winfo_exists():
                     self.progress_window.destroy()
                 
                 # Exit the launcher process
+                print("Exiting launcher after successful exe launch (alternative method)")
                 sys.exit(0)
             
         except Exception as e:
@@ -697,6 +828,10 @@ class Y1Launcher:
             print(f"Exe file found at: {local_exe_path}")
             print(f"File size: {os.path.getsize(local_exe_path)} bytes")
             
+            # Check if file is actually an executable
+            if not local_exe_path.lower().endswith('.exe'):
+                print(f"Warning: File {local_exe_path} does not have .exe extension")
+            
             self.update_progress(50, 100, f"Running {asset_name} for installation...")
             
             # Run the exe file as a detached process with proper error handling
@@ -705,6 +840,7 @@ class Y1Launcher:
             startupinfo.wShowWindow = 1  # SW_SHOWNORMAL = 1
             
             try:
+                print(f"Attempting to launch exe with command: {[local_exe_path]}")
                 process = subprocess.Popen(
                     [local_exe_path],
                     startupinfo=startupinfo,
@@ -713,16 +849,27 @@ class Y1Launcher:
                 
                 print(f"Launched {asset_name} with PID: {process.pid}")
                 
+                # Give the process a moment to start
+                time.sleep(0.5)
+                
+                # Check if process is still running
+                if process.poll() is None:
+                    print(f"Exe process is running successfully (PID: {process.pid})")
+                else:
+                    print(f"Warning: Exe process exited immediately with code: {process.returncode}")
+                
                 # Close the launcher window immediately
                 if self.progress_window and self.progress_window.winfo_exists():
                     self.progress_window.destroy()
                 
                 # Exit the launcher process
+                print("Exiting launcher after successful exe launch")
                 sys.exit(0)
                 
             except subprocess.SubprocessError as e:
-                print(f"Subprocess error: {e}")
+                print(f"Subprocess error with DETACHED_PROCESS: {e}")
                 # Try alternative method without DETACHED_PROCESS
+                print("Trying alternative launch method...")
                 process = subprocess.Popen(
                     [local_exe_path],
                     startupinfo=startupinfo,
@@ -730,11 +877,21 @@ class Y1Launcher:
                 )
                 print(f"Launched {asset_name} with PID: {process.pid} (alternative method)")
                 
+                # Give the process a moment to start
+                time.sleep(0.5)
+                
+                # Check if process is still running
+                if process.poll() is None:
+                    print(f"Exe process is running successfully (PID: {process.pid})")
+                else:
+                    print(f"Warning: Exe process exited immediately with code: {process.returncode}")
+                
                 # Close the launcher window immediately
                 if self.progress_window and self.progress_window.winfo_exists():
                     self.progress_window.destroy()
                 
                 # Exit the launcher process
+                print("Exiting launcher after successful exe launch (alternative method)")
                 sys.exit(0)
             
         except Exception as e:
@@ -797,18 +954,28 @@ class Y1Launcher:
         """Check for updates and download if needed (root files only, exe-only release support)"""
         try:
             self.update_progress(0, 100, f"Checking for updates from branch: {self.github_branch}")
+            
+            # Refresh config.ini from config.zip
+            self.update_progress(5, 100, "Refreshing config.ini...")
+            if self.download_and_extract_config():
+                # Reload tokens after config refresh
+                self.load_config_and_tokens()
+                self.update_progress(10, 100, "Config refreshed successfully")
+            else:
+                self.update_progress(10, 100, "Config refresh skipped")
+            
             self.parse_gitignore()
             
             # First, check for exe-only releases that require update
-            self.update_progress(10, 100, "Checking all releases for exe requirements...")
+            self.update_progress(15, 100, "Checking all releases for exe requirements...")
             release_info = self.check_releases_for_exe_requirement()
             
             if release_info and release_info['type'] == 'exe_required':
                 # An exe-only release is required for update
-                self.update_progress(20, 100, f"Exe update required: {release_info['release_tag']}")
-                self.update_progress(25, 100, f"Release: {release_info['release_name'] or release_info['release_tag']}")
-                self.update_progress(30, 100, f"Version: {release_info['current_version']} -> {release_info['release_version']}")
-                self.update_progress(35, 100, f"Reason: {release_info['reason']}")
+                self.update_progress(25, 100, f"Exe update required: {release_info['release_tag']}")
+                self.update_progress(30, 100, f"Release: {release_info['release_name'] or release_info['release_tag']}")
+                self.update_progress(35, 100, f"Version: {release_info['current_version']} -> {release_info['release_version']}")
+                self.update_progress(40, 100, f"Reason: {release_info['reason']}")
                 
                 # Archive current version before running exe
                 archive_dir = self.archive_current_version()
@@ -821,24 +988,24 @@ class Y1Launcher:
                 return False
             elif release_info and release_info['type'] == 'exe_required_incompatible':
                 # Exe-only release required but version is incompatible
-                self.update_progress(20, 100, f"Exe update required but version incompatible")
-                self.update_progress(25, 100, f"Current: {release_info['current_version']} -> Release: {release_info['release_version']}")
-                self.update_progress(30, 100, f"Reason: {release_info['reason']}")
-                self.update_progress(35, 100, "Proceeding with normal patch updates...")
+                self.update_progress(25, 100, f"Exe update required but version incompatible")
+                self.update_progress(30, 100, f"Current: {release_info['current_version']} -> Release: {release_info['release_version']}")
+                self.update_progress(35, 100, f"Reason: {release_info['reason']}")
+                self.update_progress(40, 100, "Proceeding with normal patch updates...")
                 print(f"Version incompatible for exe update: {release_info['reason']}")
             elif release_info and release_info['type'] == 'no_exe_required':
                 # No exe-only releases required - can patch normally
-                self.update_progress(20, 100, f"No exe updates required")
-                self.update_progress(25, 100, f"Current: {release_info['current_version']}")
-                self.update_progress(30, 100, f"Reason: {release_info['reason']}")
-                self.update_progress(35, 100, "Proceeding with normal patch updates...")
+                self.update_progress(25, 100, f"No exe updates required")
+                self.update_progress(30, 100, f"Current: {release_info['current_version']}")
+                self.update_progress(35, 100, f"Reason: {release_info['reason']}")
+                self.update_progress(40, 100, "Proceeding with normal patch updates...")
                 print(f"No exe updates required: {release_info['reason']}")
             
             # If not an exe-only release, proceed with normal repository file checking
             archive_dir = self.archive_current_version()
             if not archive_dir:
                 print("Warning: Failed to archive current version")
-            self.update_progress(30, 100, "Fetching repository information...")
+            self.update_progress(45, 100, "Fetching repository information...")
             github_files = self.get_github_files()
             if not github_files:
                 self.update_progress(100, 100, "No files found in repository")
@@ -846,12 +1013,12 @@ class Y1Launcher:
             
             # Check for exe-only in repository files (legacy support)
             if len(self.exe_files) == 1 and len(github_files) == 1 and self.exe_files[0]['path'].endswith('.exe'):
-                self.update_progress(70, 100, f"Detected exe-only release in repository: {self.exe_files[0]['path']}")
+                self.update_progress(75, 100, f"Detected exe-only release in repository: {self.exe_files[0]['path']}")
                 success = self.download_and_run_exe(self.exe_files[0])
                 # If we get here, the exe launch failed
                 return False
             
-            self.update_progress(40, 100, "Scanning local files...")
+            self.update_progress(50, 100, "Scanning local files...")
             local_files = self.get_local_files()
             github_lookup = {f['path']: f for f in github_files}
             local_lookup = {f['path']: f for f in local_files}
@@ -885,7 +1052,7 @@ class Y1Launcher:
             elif strategy == "exe":
                 if self.exe_files:
                     exe_file = self.exe_files[0]
-                    self.update_progress(70, 100, f"Using exe update: {exe_file['path']}")
+                    self.update_progress(75, 100, f"Using exe update: {exe_file['path']}")
                     success = self.download_and_run_exe(exe_file)
                     # If we get here, the exe launch failed
                     return False
@@ -947,15 +1114,22 @@ class Y1Launcher:
                 print(f"Update completed with result: {result}")
                 
                 # Handle result
-                if result:
-                    # Patch update completed, launch y1_helper.py
+                if result is True:
+                    # Patch update completed successfully, launch y1_helper.py
                     print("Patch update completed, launching y1_helper.py...")
                     self.update_progress(100, 100, "Patch update completed! Launching Y1 Helper...")
                     time.sleep(1)  # Brief delay to show completion
                     self.launch_y1_helper()
-                else:
-                    print("Update failed, launching y1_helper.py anyway...")
+                elif result is False:
+                    # Update failed or exe was launched (launcher should have exited)
+                    print("Update failed or exe was launched, launching y1_helper.py...")
                     self.update_progress(100, 100, "No updates needed. Launching Y1 Helper...")
+                    time.sleep(1)
+                    self.launch_y1_helper()
+                else:
+                    # Unexpected result
+                    print(f"Unexpected update result: {result}")
+                    self.update_progress(100, 100, "Update completed. Launching Y1 Helper...")
                     time.sleep(1)
                     self.launch_y1_helper()
             
@@ -994,7 +1168,9 @@ def main():
         # --- Start update/patching in a thread ---
         def update_thread():
             result = launcher.check_and_update()
-            if result:
+            if result is True:
+                launcher.launch_y1_helper()
+            elif result is False:
                 launcher.launch_y1_helper()
             else:
                 launcher.launch_y1_helper()

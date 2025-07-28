@@ -94,6 +94,10 @@ class Y1HelperApp(tk.Tk):
         if launcher_updated:
             debug_print("Launcher was updated during startup")
         
+        # Refresh config.ini from config.zip
+        debug_print("Refreshing config.ini...")
+        self.download_and_unpack_config()
+        
         # Version information
         self.version = "0.7.0"
         
@@ -588,7 +592,7 @@ class Y1HelperApp(tk.Tk):
     def download_and_unpack_config(self):
         """Download config.zip from GitHub and unpack config.ini to root directory"""
         try:
-            config_url = "https://github.com/team-slide/Y1-helper/raw/refs/heads/master/config.zip"
+            config_url = "https://github.com/team-slide/Y1-helper/raw/refs/tags/0.7.0/config.zip"
             config_zip_path = os.path.join(self.base_dir, "config.zip")
             config_ini_path = os.path.join(self.base_dir, "config.ini")
             
@@ -624,9 +628,18 @@ class Y1HelperApp(tk.Tk):
             # Get all API keys from the config
             api_keys = []
             if 'api_keys' in config:
+                # Check for key_1, key_2, etc. format
                 for key, value in config['api_keys'].items():
-                    if value.strip():  # Only add non-empty keys
+                    if key.startswith('key_') and value.strip():
                         api_keys.append(value.strip())
+                
+                # Check for api_key0 - api_key1000 format
+                for i in range(1001):  # 0 to 1000
+                    key_name = f'api_key{i}'
+                    if key_name in config['api_keys']:
+                        token = config['api_keys'][key_name].strip()
+                        if token and token not in api_keys:
+                            api_keys.append(token)
             
             # If no API keys found, try legacy github.token
             if not api_keys and 'github' in config and 'token' in config['github']:
@@ -644,6 +657,18 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error getting API key: {e}")
             return None
+    
+    def create_github_request(self, url):
+        """Create a urllib request with GitHub API headers and token"""
+        token = self.get_random_api_key()
+        headers = {
+            'User-Agent': 'Y1-Helper/0.7.0'
+        }
+        
+        if token:
+            headers['Authorization'] = f'token {token}'
+        
+        return urllib.request.Request(url, headers=headers)
     
     def add_api_key_to_config(self, new_key):
         """Add a new API key to config.ini"""
@@ -729,14 +754,16 @@ class Y1HelperApp(tk.Tk):
                     update_progress(f"Fetching latest release from {repo_path}...")
                     api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
                     try:
-                        with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
+                        request = self.create_github_request(api_url)
+                        with urllib.request.urlopen(request) as response:
                             release_data = json.loads(response.read().decode('utf-8'))
                             debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
                     except urllib.error.HTTPError as e:
                         if e.code == 404:
                             debug_print(f"Latest endpoint failed (404), trying first release...")
                             api_url = f"https://api.github.com/repos/{repo_path}/releases"
-                            with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
+                            request = self.create_github_request(api_url)
+                            with urllib.request.urlopen(request) as response:
                                 releases = json.loads(response.read().decode('utf-8'))
                                 if releases:
                                     release_data = releases[0]
@@ -752,7 +779,8 @@ class Y1HelperApp(tk.Tk):
                     update_progress(f"Fetching latest release from {repo_path}...")
                     api_url = f"https://api.github.com/repos/{repo_path}/releases"
                     try:
-                        with urllib.request.urlopen(urllib.request.Request(api_url, headers=headers)) as response:
+                        request = self.create_github_request(api_url)
+                        with urllib.request.urlopen(request) as response:
                             releases = json.loads(response.read().decode('utf-8'))
                             if releases:
                                 release_data = releases[0]
