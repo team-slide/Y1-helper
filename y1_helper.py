@@ -24,6 +24,8 @@ from tkinter.scrolledtext import ScrolledText
 import inspect
 import builtins
 import datetime
+import webbrowser
+import psutil
 
 # Add this near the top, after imports
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +36,9 @@ BACKUP_API_KEYS = [
     "11BUHMFQQ0S0BJlidk1hVe_j081TB15LMr84UOTp5cCSGoPMD7reL8naZAnsywrX8NZ56RY55IqPqeaqUf",
     "1BUHMFQQ0kI3jUezJIefF_c0sYzNSc98CFYiWytkpCZdLRGwDU49k87i6d1UZ6sMHMMLEYYYQmqhCxWOR",
     "11BUHMFQQ0Jd3WX8SZ7QAg_3eekBXeJC6ZmHZUTjDtGUx6KEuV9SaJdLlCTNnD58jpW2K6SZ2ANQRCnBHE",
-    "11BUHMFQQ0Klynt0Ddzg30_1zvtZUvI6Tbw3ApczAAHhXTxeYDzoDc7ffLehm6Tzu4ACZPZG64Tt9YWKlf"
+    "11BUHMFQQ07ICpSRb0UXv4_SYOAPW11eNx9uu2FhuwWp4urbXJcS3LHmNOtEKjsu1X3YJM2UWTuDuCldBs",
+    "11BUHMFQQ0Klynt0Ddzg30_1zvtZUvI6Tbw3ApczAAHhXTxeYDzoDc7ffLehm6Tzu4ACZPZG64Tt9YWKlf",
+    "11BUHMFQQ07NN2czv5nxhh_a16N4Y99uDi9Znr4tnewdjL1aPjC3eK27iDoTHrubrZCNOTDHQ3mKI9QpEJ"
 ]
 
 # This comment proves the patcher worked for Ryan
@@ -182,7 +186,7 @@ class Y1HelperApp(tk.Tk):
         self.device_connected = False
 
         self.firmware_installation_in_progress = False  # Track if firmware installation is in progress
-        self.firmware_manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
+        self.firmware_manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
         self.prepare_prompt_refused = False  # Track if user refused the initial prepare prompt
         self.prepare_prompt_shown = False  # Track if prepare prompt has been shown for current connection
         
@@ -287,6 +291,9 @@ class Y1HelperApp(tk.Tk):
         # Check for team-slide updates and show patch status
         self.after(3000, self.check_and_show_team_slide_update)  # Check for team-slide updates after 3 seconds
         self.after(1000, self.show_patch_status_message)  # Show patch status after 1 second
+        
+        # Check for updates at startup and show dialog if newer version available
+        self.after(2000, self.startup_update_check)  # Check for updates after 2 seconds
         
         debug_print("Y1HelperApp initialization complete")
     
@@ -458,6 +465,40 @@ class Y1HelperApp(tk.Tk):
         self.update_widget_colors()
         
         debug_print("Theme colors applied with modern styling")
+        
+        # Apply menu colors after theme is set
+        if hasattr(self, 'apply_menu_colors'):
+            self.apply_menu_colors()
+        
+        # Update pill colors if it exists
+        if hasattr(self, 'update_pill'):
+            if self.is_dark_mode:
+                self.update_pill.configure(bg="#0078D4", fg="white")  # Windows blue, white text
+            else:
+                self.update_pill.configure(bg="#0078D4", fg="white")  # Windows blue, white text
+    
+    def apply_dialog_theme(self, dialog):
+        """Apply theme colors to a dialog window"""
+        try:
+            # Apply background color to dialog
+            dialog.configure(bg=self.bg_color)
+            
+            # Apply Windows 11 title bar theming if on Windows
+            if platform.system() == "Windows":
+                try:
+                    hwnd = dialog.winfo_id()
+                    if hwnd:
+                        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+                        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                            ctypes.byref(ctypes.c_bool(self.is_dark_mode)), ctypes.sizeof(ctypes.c_bool)
+                        )
+                except Exception as e:
+                    debug_print(f"Could not apply Windows 11 title bar theme to dialog: {e}")
+            
+            debug_print(f"Applied {'dark' if self.is_dark_mode else 'light'} theme to dialog")
+        except Exception as e:
+            debug_print(f"Failed to apply dialog theme: {e}")
     
     def update_widget_colors(self):
         """Update colors of all existing widgets"""
@@ -510,6 +551,9 @@ class Y1HelperApp(tk.Tk):
         dialog.transient(self)
         dialog.grab_set()
         
+        # Apply theme colors to dialog
+        self.apply_dialog_theme(dialog)
+        
         # Center dialog
         dialog.update_idletasks()
         x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
@@ -531,6 +575,13 @@ class Y1HelperApp(tk.Tk):
         listbox = tk.Listbox(listbox_frame, font=("Segoe UI", 10))
         scrollbar = ttk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=listbox.yview)
         listbox.configure(yscrollcommand=scrollbar.set)
+        
+        # Apply theme colors to listbox (only if theme colors are available)
+        try:
+            if hasattr(self, 'bg_color') and hasattr(self, 'fg_color') and hasattr(self, 'accent_color'):
+                listbox.configure(bg=self.bg_color, fg=self.fg_color, selectbackground=self.accent_color, selectforeground=self.fg_color)
+        except Exception as e:
+            debug_print(f"Could not apply theme to listbox: {e}")
         
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -593,9 +644,80 @@ class Y1HelperApp(tk.Tk):
         ttk.Button(button_frame, text="Install", command=on_select).pack(side=tk.RIGHT, padx=(5, 0))
         ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
         
-        # Wait for dialog to close
         dialog.wait_window()
         return selected_app
+
+
+
+    def show_app_selection_dialog_with_error(self, error_message):
+        """Show app selection dialog with error message inline"""
+        dialog = tk.Toplevel(self)
+        dialog.title("Select App")
+        dialog.geometry("400x300")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Apply theme colors to dialog
+        self.apply_dialog_theme(dialog)
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (300 // 2)
+        dialog.geometry(f"400x300+{x}+{y}")
+        
+        # Create frame
+        frame = ttk.Frame(dialog, padding="10")
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Title label
+        title_label = ttk.Label(frame, text="Select an app to install:", font=("Segoe UI", 12, "bold"))
+        title_label.pack(pady=(0, 10))
+        
+        # Create listbox with scrollbar
+        listbox_frame = ttk.Frame(frame)
+        listbox_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        listbox = tk.Listbox(listbox_frame, font=("Segoe UI", 10))
+        scrollbar = ttk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        
+        # Apply theme colors to listbox (only if theme colors are available)
+        try:
+            if hasattr(self, 'bg_color') and hasattr(self, 'fg_color') and hasattr(self, 'accent_color'):
+                listbox.configure(bg=self.bg_color, fg=self.fg_color, selectbackground=self.accent_color, selectforeground=self.fg_color)
+        except Exception as e:
+            debug_print(f"Could not apply theme to listbox: {e}")
+        
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Show error message in listbox
+        listbox.insert(tk.END, error_message)
+        listbox.itemconfig(0, fg='red')  # Make error message red
+        
+        # Disable selection for error message
+        def on_select(event):
+            if listbox.curselection() and listbox.curselection()[0] == 0:
+                listbox.selection_clear(0, tk.END)
+        
+        listbox.bind('<<ListboxSelect>>', on_select)
+        
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        # Disable install button when error is shown
+        install_btn = ttk.Button(button_frame, text="Install", command=lambda: None, state='disabled')
+        install_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        
+        def on_cancel():
+            dialog.destroy()
+        
+        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
+        
+        dialog.wait_window()
+        return None
     
     def get_config_path(self):
         """Get config.ini path - try root first, then assets as fallback"""
@@ -621,18 +743,25 @@ class Y1HelperApp(tk.Tk):
             
             debug_print("Downloading config.zip...")
             
-            # Download config.zip
-            urllib.request.urlretrieve(config_url, config_zip_path)
+            # Download config.zip using robust retry mechanism
+            response = self._make_github_request_with_retries(config_url)
             
-            # Extract config.ini from the zip
-            with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
-                zip_ref.extract("config.ini", self.base_dir)
-            
-            # Clean up the zip file
-            os.remove(config_zip_path)
-            
-            debug_print("Config.ini extracted successfully")
-            
+            if response.status_code == 200:
+                # Save the content to file
+                with open(config_zip_path, 'wb') as f:
+                    f.write(response.content)
+                
+                # Extract config.ini from the zip
+                with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
+                    zip_ref.extract("config.ini", self.base_dir)
+                
+                # Clean up the zip file
+                os.remove(config_zip_path)
+                
+                debug_print("Config.ini extracted successfully")
+            else:
+                debug_print(f"Failed to download config.zip: HTTP {response.status_code}")
+                
         except Exception as e:
             debug_print(f"Failed to download/unpack config.zip: {e}")
             # Continue without config.ini if download fails
@@ -786,9 +915,9 @@ class Y1HelperApp(tk.Tk):
         return urllib.request.Request(url, headers=headers)
     
     def handle_rate_limit_error(self, response, url):
-        """Handle rate limit errors and provide fallback options"""
-        if response.status == 403:  # Rate limit exceeded
-            debug_print(f"Rate limit exceeded for {url}")
+        """Handle rate limit and authorization errors and provide fallback options"""
+        if response.status in [401, 403]:  # Unauthorized or rate limit exceeded
+            debug_print(f"Authentication/rate limit error ({response.status}) for {url}")
             
             # Check if we have API keys available
             if self.has_api_keys_available():
@@ -803,7 +932,7 @@ class Y1HelperApp(tk.Tk):
                 }
                 return urllib.request.Request(url, headers=headers)
         
-        return None  # Not a rate limit error
+        return None  # Not an authentication/rate limit error
     
     def add_api_key_to_config(self, new_key):
         """Add a new API key to config.ini"""
@@ -908,81 +1037,151 @@ class Y1HelperApp(tk.Tk):
             # Return backup keys as fallback
             return BACKUP_API_KEYS.copy()
     
+    def _generate_github_fallback_urls(self, original_url):
+        """Generate multiple fallback URLs for GitHub content access"""
+        fallback_urls = [original_url]  # Start with original URL
+        
+        # If it's a raw.githubusercontent.com URL, generate fallbacks
+        if 'raw.githubusercontent.com' in original_url:
+            # Parse the URL to extract components
+            try:
+                # Example: https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml
+                parts = original_url.replace('https://raw.githubusercontent.com/', '').split('/')
+                if len(parts) >= 4:
+                    owner = parts[0]
+                    repo = parts[1]
+                    branch = parts[2]
+                    file_path = '/'.join(parts[3:])
+                    
+                    # Generate different branch variations
+                    branch_variations = [
+                        branch,
+                        branch.replace('refs/heads/', ''),
+                        'main',
+                        'master',
+                        'develop'
+                    ]
+                    
+                    # Generate different URL patterns
+                    for branch_var in branch_variations:
+                        # Standard raw.githubusercontent.com
+                        fallback_urls.append(f"https://raw.githubusercontent.com/{owner}/{repo}/{branch_var}/{file_path}")
+                        
+                        # Alternative: GitHub API content endpoint
+                        fallback_urls.append(f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={branch_var}")
+                        
+                        # Alternative: Direct GitHub web interface (for text files)
+                        if file_path.endswith(('.xml', '.txt', '.md', '.json', '.ini', '.cfg')):
+                            fallback_urls.append(f"https://github.com/{owner}/{repo}/blob/{branch_var}/{file_path}?raw=true")
+                    
+                    # Remove duplicates while preserving order
+                    seen = set()
+                    unique_urls = []
+                    for url in fallback_urls:
+                        if url not in seen:
+                            seen.add(url)
+                            unique_urls.append(url)
+                    
+                    return unique_urls
+                    
+            except Exception as e:
+                debug_print(f"Error generating fallback URLs: {e}")
+        
+        # If it's a GitHub API URL, generate fallbacks
+        elif 'api.github.com' in original_url:
+            # For API URLs, try different authentication methods but keep the same URL
+            return [original_url]
+        
+        # For other URLs, return as is
+        return fallback_urls
+
     def _make_github_request_with_retries(self, url, method='GET', stream=False, **kwargs):
         """
-        Make a GitHub request with comprehensive retry logic.
+        Make a GitHub request with comprehensive retry logic and URL fallbacks.
         
         Priority order:
         1. All config.ini API keys (in order found)
         2. All backup API keys (in order)
         3. Unauthenticated request (final fallback)
         
+        For each authentication method, tries multiple URL variations.
+        
         Returns: requests.Response object
         Raises: requests.RequestException if all attempts fail
         """
+        # Generate fallback URLs
+        fallback_urls = self._generate_github_fallback_urls(url)
         all_keys = self.get_all_api_keys()
         tried_tokens = set()
         
-        debug_print(f"Making GitHub request to: {url}")
+        debug_print(f"Making GitHub request with {len(fallback_urls)} URL variations")
         debug_print(f"Available tokens: {len(all_keys)} (config + backup)")
         
-        # Try each API key in order
-        for token in all_keys:
-            if token in tried_tokens:
-                continue
-                
-            tried_tokens.add(token)
-            debug_print(f"Trying token: {token[:10]}... (attempt {len(tried_tokens)})")
+        # Try each URL with each authentication method
+        for fallback_url in fallback_urls:
+            debug_print(f"Trying URL: {fallback_url}")
             
+            # Try each API key in order
+            for token in all_keys:
+                if token in tried_tokens:
+                    continue
+                    
+                tried_tokens.add(token)
+                debug_print(f"Trying token: {token[:10]}... (attempt {len(tried_tokens)})")
+                
+                headers = {
+                    'User-Agent': 'Y1-Helper/0.7.0',
+                    'Authorization': f'token {token}'
+                }
+                
+                try:
+                    response = requests.request(
+                        method=method,
+                        url=fallback_url,
+                        headers=headers,
+                        stream=stream,
+                        timeout=30,
+                        **kwargs
+                    )
+                    
+                    # Check for authentication/authorization errors
+                    if response.status_code in [401, 403]:
+                        debug_print(f"Token failed with status {response.status_code}: {token[:10]}...")
+                        continue
+                    
+                    # Success!
+                    debug_print(f"Request successful with token: {token[:10]}... (status: {response.status_code})")
+                    return response
+                    
+                except requests.RequestException as e:
+                    debug_print(f"Request failed with token {token[:10]}...: {e}")
+                    continue
+            
+            # If all authenticated requests failed for this URL, try unauthenticated
+            debug_print(f"All authenticated requests failed for {fallback_url}, trying unauthenticated")
             headers = {
-                'User-Agent': 'Y1-Helper/0.7.0',
-                'Authorization': f'token {token}'
+                'User-Agent': 'Y1-Helper/0.7.0'
             }
             
             try:
                 response = requests.request(
                     method=method,
-                    url=url,
+                    url=fallback_url,
                     headers=headers,
                     stream=stream,
                     timeout=30,
                     **kwargs
                 )
-                
-                # Check for authentication/authorization errors
-                if response.status_code in [401, 403]:
-                    debug_print(f"Token failed with status {response.status_code}: {token[:10]}...")
-                    continue
-                
-                # Success!
-                debug_print(f"Request successful with token: {token[:10]}... (status: {response.status_code})")
+                debug_print(f"Unauthenticated request successful for {fallback_url} (status: {response.status_code})")
                 return response
                 
             except requests.RequestException as e:
-                debug_print(f"Request failed with token {token[:10]}...: {e}")
+                debug_print(f"Unauthenticated request also failed for {fallback_url}: {e}")
                 continue
         
-        # If all authenticated requests failed, try unauthenticated
-        debug_print("All authenticated requests failed, trying unauthenticated request")
-        headers = {
-            'User-Agent': 'Y1-Helper/0.7.0'
-        }
-        
-        try:
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                stream=stream,
-                timeout=30,
-                **kwargs
-            )
-            debug_print(f"Unauthenticated request successful (status: {response.status_code})")
-            return response
-            
-        except requests.RequestException as e:
-            debug_print(f"Unauthenticated request also failed: {e}")
-            raise e
+        # All attempts failed
+        debug_print("All GitHub request attempts failed")
+        raise Exception("Failed to make GitHub request after all retries")
     
     def update_config_background(self):
         """Update config.ini in background every 5 minutes"""
@@ -1301,18 +1500,27 @@ class Y1HelperApp(tk.Tk):
             # Method 1: GitHub API (primary method)
             update_info = self._check_updates_via_api()
             if update_info:
+                # Check if version matches latest (no update needed)
+                if update_info.get('version') == self.version:
+                    self._cleanup_old_installer_files()
                 return update_info
             
             # Method 2: Fallback to releases page scraping
             debug_print("API method failed, trying releases page fallback...")
             update_info = self._check_updates_via_releases_page()
             if update_info:
+                # Check if version matches latest (no update needed)
+                if update_info.get('version') == self.version:
+                    self._cleanup_old_installer_files()
                 return update_info
             
             # Method 3: Fallback to master branch checking
             debug_print("Releases page failed, trying master branch fallback...")
             update_info = self._check_updates_via_master_branch()
             if update_info:
+                # Check if version matches latest (no update needed)
+                if update_info.get('version') == self.version:
+                    self._cleanup_old_installer_files()
                 return update_info
             
             debug_print("All update check methods failed")
@@ -1321,6 +1529,61 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error checking for team-slide updates: {e}")
             return None
+    
+    def _cleanup_old_update_files(self):
+        """Delete old installer.exe and patch.exe files from the project directory (not subdirectories)."""
+        try:
+            debug_print("Cleaning up old update files...")
+            files_to_remove = ['installer.exe', 'patch.exe']
+            removed_count = 0
+            
+            for filename in files_to_remove:
+                file_path = os.path.join(self.base_dir, filename)
+                if os.path.isfile(file_path):
+                    try:
+                        os.remove(file_path)
+                        debug_print(f"Removed old update file: {filename}")
+                        removed_count += 1
+                    except Exception as e:
+                        debug_print(f"Failed to remove {filename}: {e}")
+            
+            if removed_count > 0:
+                debug_print(f"Cleaned up {removed_count} old update file(s)")
+            else:
+                debug_print("No old update files found to clean up")
+                
+        except Exception as e:
+            debug_print(f"Error during cleanup: {e}")
+    
+    def _cleanup_old_installer_files(self):
+        """Clean up installer/patch.exe files when version matches latest release"""
+        try:
+            current_version = self.version
+            if not current_version:
+                return
+            
+            # Check if we're up to date by comparing with latest release
+            update_info = self.check_for_team_slide_updates()
+            if not update_info:
+                return
+            
+            latest_version = update_info.get('version')
+            if not latest_version:
+                return
+            
+            # If versions match, clean up installer files
+            if self.compare_versions(current_version, latest_version) == 0:
+                debug_print(f"Version {current_version} matches latest {latest_version}, cleaning up installer files")
+                for file in os.listdir(self.base_dir):
+                    if file.endswith('.exe') and file in ['patch.exe', 'installer.exe']:
+                        file_path = os.path.join(self.base_dir, file)
+                        try:
+                            os.remove(file_path)
+                            debug_print(f"Removed installer file (up to date): {file}")
+                        except Exception as e:
+                            debug_print(f"Failed to remove {file}: {e}")
+        except Exception as e:
+            debug_print(f"Error cleaning up installer files: {e}")
     
     def _check_updates_via_api(self):
         """Check for updates using GitHub API"""
@@ -1350,36 +1613,33 @@ class Y1HelperApp(tk.Tk):
             
             debug_print(f"Current version: {self.version}, Latest version: {latest_version}")
             
-            # Compare versions
-            if self.compare_versions(latest_version, self.version) > 0:
-                debug_print(f"Newer version available: {latest_version}")
-                
-                # Check for patch.exe or installer.exe
-                assets = release_data.get('assets', [])
-                patch_asset = None
-                installer_asset = None
-                
-                for asset in assets:
-                    asset_name = asset.get('name', '').lower()
-                    if asset_name == 'patch.exe':
-                        patch_asset = asset
-                        debug_print("Found patch.exe in release")
-                    elif asset_name == 'installer.exe':
-                        installer_asset = asset
-                        debug_print("Found installer.exe in release")
-                
-                return {
-                    'version': latest_version,
-                    'tag_name': release_data.get('tag_name', ''),
-                    'body': release_data.get('body', ''),
-                    'assets': assets,
-                    'patch_asset': patch_asset,
-                    'installer_asset': installer_asset,
-                    'html_url': release_data.get('html_url', ''),
-                    'method': 'api'
-                }
+            # Always return the latest release info, regardless of version comparison
+            debug_print(f"Latest version found: {latest_version}")
             
-            return None
+            # Check for patch.exe or installer.exe
+            assets = release_data.get('assets', [])
+            patch_asset = None
+            installer_asset = None
+            
+            for asset in assets:
+                asset_name = asset.get('name', '').lower()
+                if asset_name == 'patch.exe':
+                    patch_asset = asset
+                    debug_print("Found patch.exe in release")
+                elif asset_name == 'installer.exe':
+                    installer_asset = asset
+                    debug_print("Found installer.exe in release")
+            
+            return {
+                'version': latest_version,
+                'tag_name': release_data.get('tag_name', ''),
+                'body': release_data.get('body', ''),
+                'assets': assets,
+                'patch_asset': patch_asset,
+                'installer_asset': installer_asset,
+                'html_url': release_data.get('html_url', ''),
+                'method': 'api'
+            }
             
         except Exception as e:
             debug_print(f"Error checking updates via API: {e}")
@@ -1414,26 +1674,25 @@ class Y1HelperApp(tk.Tk):
             latest_version = max(tags, key=lambda v: self.compare_versions(v, "0.0.0"))
             debug_print(f"Found latest version in releases page: {latest_version}")
             
-            # Compare versions
-            if self.compare_versions(latest_version, self.version) > 0:
-                debug_print(f"Newer version available: {latest_version}")
-                
-                # Check for patch.exe or installer.exe in the page
-                patch_found = 'patch.exe' in content.lower()
-                installer_found = 'installer.exe' in content.lower()
-                
-                debug_print(f"Found in releases page - patch.exe: {patch_found}, installer.exe: {installer_found}")
-                
-                return {
-                    'version': latest_version,
-                    'tag_name': f"v{latest_version}",
-                    'body': f"Update to version {latest_version}",
-                    'assets': [],
-                    'patch_asset': {'name': 'patch.exe'} if patch_found else None,
-                    'installer_asset': {'name': 'installer.exe'} if installer_found else None,
-                    'html_url': f"https://github.com/team-slide/y1-helper/releases/tag/v{latest_version}",
-                    'method': 'releases_page'
-                }
+            # Always return the latest release info, regardless of version comparison
+            debug_print(f"Latest version found: {latest_version}")
+            
+            # Check for patch.exe or installer.exe in the page
+            patch_found = 'patch.exe' in content.lower()
+            installer_found = 'installer.exe' in content.lower()
+            
+            debug_print(f"Found in releases page - patch.exe: {patch_found}, installer.exe: {installer_found}")
+            
+            return {
+                'version': latest_version,
+                'tag_name': f"v{latest_version}",
+                'body': f"Update to version {latest_version}",
+                'assets': [],
+                'patch_asset': {'name': 'patch.exe'} if patch_found else None,
+                'installer_asset': {'name': 'installer.exe'} if installer_found else None,
+                'html_url': f"https://github.com/team-slide/y1-helper/releases/tag/v{latest_version}",
+                'method': 'releases_page'
+            }
             
             return None
             
@@ -1457,34 +1716,31 @@ class Y1HelperApp(tk.Tk):
             latest_version = response.text.strip()
             debug_print(f"Master branch version: {latest_version}")
             
-            # Compare versions
-            if self.compare_versions(latest_version, self.version) > 0:
-                debug_print(f"Newer version available in master: {latest_version}")
-                
-                # Check for patch.zip or installer.exe in master
-                patch_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/patch.zip"
-                installer_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/installer.exe"
-                
-                patch_response = self._make_github_request_with_retries(patch_url, method='HEAD')
-                installer_response = self._make_github_request_with_retries(installer_url, method='HEAD')
-                
-                patch_available = patch_response.status_code == 200
-                installer_available = installer_response.status_code == 200
-                
-                debug_print(f"Master branch - patch.zip: {patch_available}, installer.exe: {installer_available}")
-                
-                return {
-                    'version': latest_version,
-                    'tag_name': f"v{latest_version}",
-                    'body': f"Update to version {latest_version} from master branch",
-                    'assets': [],
-                    'patch_asset': {'name': 'patch.zip', 'browser_download_url': patch_url} if patch_available else None,
-                    'installer_asset': {'name': 'installer.exe', 'browser_download_url': installer_url} if installer_available else None,
-                    'html_url': "https://github.com/team-slide/y1-helper",
-                    'method': 'master_branch'
-                }
+            # Always return the latest release info, regardless of version comparison
+            debug_print(f"Latest version found in master: {latest_version}")
             
-            return None
+            # Check for patch.zip or installer.exe in master
+            patch_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/patch.zip"
+            installer_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/installer.exe"
+            
+            patch_response = self._make_github_request_with_retries(patch_url, method='HEAD')
+            installer_response = self._make_github_request_with_retries(installer_url, method='HEAD')
+            
+            patch_available = patch_response.status_code == 200
+            installer_available = installer_response.status_code == 200
+            
+            debug_print(f"Master branch - patch.zip: {patch_available}, installer.exe: {installer_available}")
+            
+            return {
+                'version': latest_version,
+                'tag_name': f"v{latest_version}",
+                'body': f"Update to version {latest_version} from master branch",
+                'assets': [],
+                'patch_asset': {'name': 'patch.zip', 'browser_download_url': patch_url} if patch_available else None,
+                'installer_asset': {'name': 'installer.exe', 'browser_download_url': installer_url} if installer_available else None,
+                'html_url': "https://github.com/team-slide/y1-helper",
+                'method': 'master_branch'
+            }
             
         except Exception as e:
             debug_print(f"Error checking updates via master branch: {e}")
@@ -1592,44 +1848,24 @@ class Y1HelperApp(tk.Tk):
             messagebox.showerror("Update Failed", f"Update failed: {e}")
 
     def _run_update_exe_and_wait(self, exe_path, friendly_name):
-        """Launch the update exe and wait for it to start, showing a modal dialog and handling UAC/errors robustly."""
+        """Launch the update exe and close Y1 Helper immediately."""
         import subprocess
-        import tkinter as tk
         from tkinter import messagebox
-        import time
         try:
             debug_print(f"Launching {friendly_name}: {exe_path}")
-            # Start the process
+            # Start the process and close Y1 Helper immediately
             try:
-                proc = subprocess.Popen([exe_path], shell=True)
+                subprocess.Popen([exe_path], shell=True)
+                debug_print(f"{friendly_name} launched successfully. Closing Y1 Helper immediately.")
+                self.quit()
             except Exception as e:
                 debug_print(f"Failed to launch {friendly_name}: {e}")
                 messagebox.showerror(f"{friendly_name} Launch Failed", f"Failed to launch {friendly_name}: {e}")
                 return
-            # Show modal dialog while waiting
-            dialog = tk.Toplevel(self)
-            dialog.title(f"{friendly_name} Running...")
-            dialog.geometry("400x120")
-            dialog.transient(self)
-            dialog.grab_set()
-            label = tk.Label(dialog, text=f"{friendly_name} is running. Please complete the update in the new window.\n\nY1 Helper will close automatically when the update process finishes.", wraplength=380, justify=tk.CENTER)
-            label.pack(pady=20, padx=10)
-            cancel_btn = tk.Button(dialog, text="Cancel and Close Y1 Helper", command=dialog.destroy)
-            cancel_btn.pack(pady=(0, 15))
-            # Poll for process exit or dialog close
-            for _ in range(600):  # Wait up to 60 seconds
-                if proc.poll() is not None:
-                    break
-                if not dialog.winfo_exists():
-                    break
-                dialog.update()
-                time.sleep(0.1)
-            dialog.destroy()
-            debug_print(f"{friendly_name} process ended or dialog closed. Closing Y1 Helper.")
-            self.after(500, self.quit)
         except Exception as e:
-            debug_print(f"Error waiting for {friendly_name}: {e}")
-            messagebox.showerror(f"{friendly_name} Error", f"Error while waiting for {friendly_name}: {e}")
+            debug_print(f"Error launching {friendly_name}: {e}")
+            messagebox.showerror(f"{friendly_name} Error", f"Error while launching {friendly_name}: {e}")
+            self.quit()
 
     def download_and_run_patch(self, patch_asset):
         """Download and run patch with fallback methods and robust process handling."""
@@ -1819,43 +2055,27 @@ class Y1HelperApp(tk.Tk):
                     update_progress(f"Fetching latest release from {repo_path}...")
                     api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
                     try:
-                        request = self.create_github_request(api_url)
-                        try:
-                            with urllib.request.urlopen(request) as response:
-                                release_data = json.loads(response.read().decode('utf-8'))
-                                debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
-                        except urllib.error.HTTPError as e:
-                            # Handle rate limit errors
-                            fallback_request = self.handle_rate_limit_error(e, api_url)
-                            if fallback_request:
-                                with urllib.request.urlopen(fallback_request) as response:
-                                    release_data = json.loads(response.read().decode('utf-8'))
-                                    debug_print(f"Latest release data (fallback): {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
-                            else:
-                                raise e
-                    except urllib.error.HTTPError as e:
-                        if e.code == 404:
+                        # Use comprehensive GitHub API authentication with retries
+                        response = self._make_github_request_with_retries(api_url)
+                        release_data = json.loads(response.text)
+                        debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                    except Exception as e:
+                        if hasattr(e, 'code') and e.code == 404:
                             debug_print(f"Latest endpoint failed (404), trying first release...")
                             api_url = f"https://api.github.com/repos/{repo_path}/releases"
-                            request = self.create_github_request(api_url)
                             try:
-                                with urllib.request.urlopen(request) as response:
-                                    releases = json.loads(response.read().decode('utf-8'))
-                            except urllib.error.HTTPError as e:
-                                # Handle rate limit errors
-                                fallback_request = self.handle_rate_limit_error(e, api_url)
-                                if fallback_request:
-                                    with urllib.request.urlopen(fallback_request) as response:
-                                        releases = json.loads(response.read().decode('utf-8'))
-                                else:
-                                    raise e
+                                # Use comprehensive GitHub API authentication with retries
+                                response = self._make_github_request_with_retries(api_url)
+                                releases = json.loads(response.text)
                                 if releases:
                                     release_data = releases[0]
                                     debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
                                 else:
                                     raise Exception(f"No releases found for {repo_path}")
+                            except Exception as fallback_error:
+                                raise Exception(f"GitHub API error: {fallback_error}")
                         else:
-                            raise Exception(f"GitHub API error: {e.code} - {e.reason}")
+                            raise Exception(f"GitHub API error: {e}")
                 elif '/releases/' in repo_url or repo_url.rstrip('/').endswith('/releases'):
                     # Handle /releases/ or /releases
                     repo_path = repo_url.replace('https://github.com/', '').split('/releases')[0]
@@ -1863,30 +2083,16 @@ class Y1HelperApp(tk.Tk):
                     update_progress(f"Fetching latest release from {repo_path}...")
                     api_url = f"https://api.github.com/repos/{repo_path}/releases"
                     try:
-                        request = self.create_github_request(api_url)
-                        try:
-                            with urllib.request.urlopen(request) as response:
-                                releases = json.loads(response.read().decode('utf-8'))
-                                if releases:
-                                    release_data = releases[0]
-                                    debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
-                                else:
-                                    raise Exception(f"No releases found for {repo_path}")
-                        except urllib.error.HTTPError as e:
-                            # Handle rate limit errors
-                            fallback_request = self.handle_rate_limit_error(e, api_url)
-                            if fallback_request:
-                                with urllib.request.urlopen(fallback_request) as response:
-                                    releases = json.loads(response.read().decode('utf-8'))
-                                    if releases:
-                                        release_data = releases[0]
-                                        debug_print(f"First release data (fallback): {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
-                                    else:
-                                        raise Exception(f"No releases found for {repo_path}")
-                            else:
-                                raise e
-                    except urllib.error.HTTPError as e:
-                        raise Exception(f"GitHub API error: {e.code} - {e.reason}")
+                        # Use comprehensive GitHub API authentication with retries
+                        response = self._make_github_request_with_retries(api_url)
+                        releases = json.loads(response.text)
+                        if releases:
+                            release_data = releases[0]
+                            debug_print(f"First release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
+                        else:
+                            raise Exception(f"No releases found for {repo_path}")
+                    except Exception as e:
+                        raise Exception(f"GitHub API error: {e}")
                 else:
                     raise Exception("Unsupported GitHub releases URL format. Please use a /releases or /releases/latest link.")
             
@@ -1913,24 +2119,25 @@ class Y1HelperApp(tk.Tk):
             update_progress(f"Downloading {app_info['name']}...")
             debug_print(f"Downloading {app_info['name']} from: {download_url}")
             
-            with urllib.request.urlopen(download_url) as response:
-                # Get file size for progress
-                file_size = int(response.headers.get('content-length', 0))
-                downloaded = 0
-                
-                with open(download_path, 'wb') as f:
-                    while True:
-                        chunk = response.read(8192)  # 8KB chunks
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        if file_size > 0:
-                            percent = (downloaded / file_size) * 100
-                            update_progress(f"Downloading {app_info['name']}... {percent:.1f}%")
-                        else:
-                            update_progress(f"Downloading {app_info['name']}... {downloaded:,} bytes")
+            # Use comprehensive retry mechanism for APK download
+            response = self._make_github_request_with_retries(download_url, stream=True)
+            response.raise_for_status()
+            # Get file size for progress
+            file_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            
+            with open(download_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    if file_size > 0:
+                        percent = (downloaded / file_size) * 100
+                        update_progress(f"Downloading {app_info['name']}... {percent:.1f}%")
+                    else:
+                        update_progress(f"Downloading {app_info['name']}... {downloaded:,} bytes")
             
             update_progress("Download complete!")
             
@@ -2073,8 +2280,24 @@ class Y1HelperApp(tk.Tk):
                 self.device_menu.configure(**menu_config)
             if hasattr(self, 'apps_menu'):
                 self.apps_menu.configure(**menu_config)
+            if hasattr(self, 'debug_menu'):
+                self.debug_menu.configure(**menu_config)
+            if hasattr(self, 'help_menu'):
+                self.help_menu.configure(**menu_config)
             if hasattr(self, 'context_menu'):
                 self.context_menu.configure(**menu_config)
+            
+            # Apply to menubar and all its children
+            if hasattr(self, 'menubar'):
+                self.menubar.configure(**menu_config)
+                # Apply to all cascade menus
+                for i in range(self.menubar.index('end') + 1):
+                    try:
+                        menu = self.menubar.entrycget(i, 'menu')
+                        if menu:
+                            menu.configure(**menu_config)
+                    except:
+                        pass
             
             debug_print("Menu colors applied")
         except Exception as e:
@@ -2194,6 +2417,22 @@ class Y1HelperApp(tk.Tk):
         )
         self.update_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         self.update_btn.pack_forget()  # Hidden by default
+        
+        # Clickable Update Pill (blue background, white text, bold)
+        self.update_pill = tk.Label(
+            row1_frame,
+            text="v*.** now available",
+            bg="#0078D4",  # Windows blue
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            padx=8,
+            pady=2,
+            cursor="hand2"
+        )
+        self.update_pill.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.update_pill.pack_forget()  # Hidden by default
+        self.update_pill.bind("<Button-1>", self.show_update_choice_dialog)
         
         # Row 2 - Navigation controls
         row2_frame = ttk.Frame(main_controls_frame)
@@ -2405,19 +2644,10 @@ class Y1HelperApp(tk.Tk):
         self.nav_bar_height = 0  # No virtual nav bar
         
         # Context menu with modern styling
-        self.context_menu = Menu(self, tearoff=0, 
-                                bg=self.menu_bg if hasattr(self, 'menu_bg') else "#ffffff",
-                                fg=self.menu_fg if hasattr(self, 'menu_fg') else "#000000",
-                                activebackground=self.menu_select_bg if hasattr(self, 'menu_select_bg') else "#0078d4",
-                                activeforeground=self.menu_select_fg if hasattr(self, 'menu_select_fg') else "#ffffff",
-                                relief="flat", bd=0)
+        self.context_menu = Menu(self, tearoff=0)
         self.context_menu.add_command(label="Go Home", command=self.go_home)
         self.context_menu.add_command(label="Open Settings", command=self.launch_settings)
         self.context_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
-        
-        # Apply theme colors to context menu
-        if hasattr(self, 'apply_menu_colors'):
-            self.apply_menu_colors()
         
         # Initially hide controls frame until device is connected
         self.hide_controls_frame()
@@ -2431,27 +2661,6 @@ class Y1HelperApp(tk.Tk):
         # Mouse wheel release bindings for cursor control
         self.screen_canvas.bind("<ButtonRelease-4>", self.on_mouse_wheel_release)  # Linux scroll up release
         self.screen_canvas.bind("<ButtonRelease-5>", self.on_mouse_wheel_release)  # Linux scroll down release
-        
-        # Initialize controls display
-        self.update_controls_display()
-        
-        # Navigation buttons (no virtual nav bar)
-        self.nav_bar_height = 0  # No virtual nav bar
-        
-        # Context menu with modern styling
-        self.context_menu = Menu(self, tearoff=0, 
-                                bg=self.menu_bg if hasattr(self, 'menu_bg') else "#ffffff",
-                                fg=self.menu_fg if hasattr(self, 'menu_fg') else "#000000",
-                                activebackground=self.menu_select_bg if hasattr(self, 'menu_select_bg') else "#0078d4",
-                                activeforeground=self.menu_select_fg if hasattr(self, 'menu_select_fg') else "#ffffff",
-                                relief="flat", bd=0)
-        self.context_menu.add_command(label="Go Home", command=self.go_home)
-        self.context_menu.add_command(label="Open Settings", command=self.launch_settings)
-        self.context_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
-        
-        # Apply theme colors to context menu
-        if hasattr(self, 'apply_menu_colors'):
-            self.apply_menu_colors()
         
         # Controls are always visible regardless of device connection
     
@@ -2603,6 +2812,7 @@ class Y1HelperApp(tk.Tk):
     def setup_menu(self):
         menubar = Menu(self)
         self.config(menu=menubar)
+        self.menubar = menubar  # Store reference for theme application
         device_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Device", menu=device_menu)
         self.device_menu = device_menu
@@ -2634,7 +2844,22 @@ class Y1HelperApp(tk.Tk):
         self.debug_menu.add_separator()
         self.debug_menu.add_command(label="Run Updater", command=self.run_updater)
         
-        # Apply theme colors
+        help_menu = Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Reinstall App", command=self.menu_reinstall_app)
+        help_menu.add_command(label="Update App", command=self.menu_update_app)
+        help_menu.add_separator()
+        help_menu.add_command(label="r/innioasis", command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
+        help_menu.add_command(label="Project Gallagher Discord", command=lambda: webbrowser.open_new_tab("https://discord.gg/nAeFsqDB"))
+        menubar.add_cascade(label="Help", menu=help_menu)
+        self.help_menu = help_menu  # Store reference for theme application
+        
+        # Store reference to help menu for dynamic label updates
+        self.help_menu_label = "Help"
+        
+        # Bind menu click event to handle update available clicks
+        self.bind("<<MenuSelect>>", self.on_menu_select)
+        
+        # Apply theme colors after all menus are created
         self.apply_menu_colors()
     
 
@@ -3235,6 +3460,9 @@ class Y1HelperApp(tk.Tk):
                 debug_print(f"Framebuffer data too small ({len(data)} bytes), showing sleeping.png")
                 self.show_sleeping_placeholder()
                 return
+            
+            # Filter out null bytes from the data
+            data = data.replace(b'\x00', b'\x01')  # Replace null bytes with 0x01 to prevent errors
             img_rgb = None
             expected_rgba = self.device_width * self.device_height * 4
             expected_rgb = self.device_width * self.device_height * 3
@@ -3271,7 +3499,10 @@ class Y1HelperApp(tk.Tk):
                         rgb_data = bytearray(expected_rgb)
                         for i in range(0, expected_rgb565, 2):
                             if i + 1 < len(data):
-                                pixel = (data[i + 1] << 8) | data[i]
+                                # Ensure we don't have null bytes in the pixel data
+                                byte1 = data[i] if data[i] != 0 else 1
+                                byte2 = data[i + 1] if data[i + 1] != 0 else 1
+                                pixel = (byte2 << 8) | byte1
                                 r = ((pixel >> 11) & 0x1F) << 3
                                 g = ((pixel >> 5) & 0x3F) << 2
                                 b = (pixel & 0x1F) << 3
@@ -3284,12 +3515,16 @@ class Y1HelperApp(tk.Tk):
                         img_rgb = img
                     elif swap_rb:
                         arr = np.frombuffer(data[:expected_size], dtype=np.uint8)
+                        # Filter out any null values
+                        arr = np.where(arr == 0, 1, arr)
                         arr = arr.reshape((self.device_height, self.device_width, int(expected_size // (self.device_width * self.device_height))))
                         arr = arr[..., [2, 1, 0, 3]] if arr.shape[2] == 4 else arr[..., [2, 1, 0]]
                         img = Image.fromarray(arr)
                         img_rgb = img.convert('RGB')
                     else:
-                        img = Image.frombytes(pil_format, (self.device_width, self.device_height), data[:expected_size])
+                        # Ensure the data doesn't contain null bytes
+                        clean_data = data[:expected_size].replace(b'\x00', b'\x01')
+                        img = Image.frombytes(pil_format, (self.device_width, self.device_height), clean_data)
                         img_rgb = img.convert('RGB') if pil_format == 'RGBA' else img
                     break
                 except Exception as e:
@@ -3342,41 +3577,15 @@ class Y1HelperApp(tk.Tk):
             if hasattr(self, 'current_photo'):
                 del self.current_photo
             self.screen_canvas.config(height=self.display_height)
-            from PIL import Image, ImageDraw
-            pil_img = None
-            try:
-                pil_img = Image.frombytes('RGB', (self.display_width, self.display_height), photo._PhotoImage__photo.convert('RGB').tobytes())
-            except Exception:
-                pil_img = None
-            if pil_img is not None:
-                draw = ImageDraw.Draw(pil_img, 'RGBA')
-                nav_height = self.nav_bar_height
-                nav_y = self.display_height - nav_height
-                draw.rectangle([0, nav_y, self.display_width, self.display_height], fill=(0,0,0,255))
-                btn_radius = nav_height // 2 - 2
-                spacing = self.display_width // 4
-                # Home button (right): left-pointing triangle
-                hx = self.display_width - spacing
-                hy = nav_y + nav_height // 2
-                draw.polygon([
-                    (hx+btn_radius, hy),
-                    (hx-btn_radius, hy-btn_radius),
-                    (hx-btn_radius, hy+btn_radius)
-                ], fill=(255,255,255,220))
-                # Back button (left): circle
-                bx = spacing
-                by = nav_y + nav_height // 2
-                draw.ellipse([
-                    (bx-btn_radius, by-btn_radius),
-                    (bx+btn_radius, by+btn_radius)
-                ], outline=(255,255,255,220), width=3)
-                from PIL import ImageTk
-                photo = ImageTk.PhotoImage(pil_img)
+            
+            # Use the provided photo directly - it's already a PhotoImage
+            # Just display it as is without trying to modify it
             self.current_photo = photo
             self.screen_canvas.delete("all")
             self.screen_canvas.create_image(0, 0, anchor=tk.NW, image=self.current_photo)
+            
         except Exception as e:
-            print(f"Display update error: {e}")
+            debug_print(f"Display update error: {e}")
     
 
     def show_sleeping_placeholder(self):
@@ -3594,6 +3803,9 @@ class Y1HelperApp(tk.Tk):
             import numpy as np
             arr = np.array(img)
             
+            # Filter out any null values that might cause issues
+            arr = np.nan_to_num(arr, nan=0.0, posinf=255.0, neginf=0.0)
+            
             # Convert to RGB if needed
             if len(arr.shape) == 3:
                 # Calculate mean luminance across all pixels
@@ -3751,12 +3963,13 @@ class Y1HelperApp(tk.Tk):
             self.status_var.set("Fetching app manifest...")
             
             # Download and parse manifest
-            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
+            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
             debug_print(f"Downloading manifest from: {manifest_url}")
             
             update_progress("Downloading app manifest...")
-            with urllib.request.urlopen(manifest_url) as response:
-                manifest_content = response.read().decode('utf-8')
+            # Use comprehensive retry mechanism for manifest download
+            response = self._make_github_request_with_retries(manifest_url)
+            manifest_content = response.text
             
             # Parse manifest to find app repositories
             update_progress("Parsing app manifest...")
@@ -3770,7 +3983,8 @@ class Y1HelperApp(tk.Tk):
                     debug_print(f"Error destroying progress dialog: {e}")
             
             if not app_options:
-                messagebox.showerror("No Apps Found", "There are currently no apps available on Slidia Installer. This will change in the future, come back soon!")
+                # Show error message inline in the app selection dialog
+                self.show_app_selection_dialog_with_error("Error Loading App Listing from Slidia")
                 return
             
             # Show app selection dialog
@@ -4823,7 +5037,6 @@ class Y1HelperApp(tk.Tk):
             self._splash.destroy()
 
     def show_firmware_progress_modal(self, title="Firmware Flash Progress"):
-        import tkinter as tk
         dialog = tk.Toplevel(self)
         dialog.title(title)
         dialog.geometry("600x180")
@@ -4846,14 +5059,16 @@ class Y1HelperApp(tk.Tk):
             firmware_info = {'url': local_file}
             self._download_and_flash_selected_firmware(firmware_info)
         else:
-            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
+            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
             debug_print(f"Downloading manifest from: {manifest_url}")
             try:
-                with urllib.request.urlopen(manifest_url) as response:
-                    manifest_content = response.read().decode('utf-8')
+                # Use comprehensive retry mechanism for manifest download
+                response = self._make_github_request_with_retries(manifest_url)
+                manifest_content = response.text
                 firmware_options = self.parse_firmware_manifest(manifest_content)
                 if not firmware_options:
-                    messagebox.showerror("No Firmware Found", "No firmware options found in the manifest.")
+                    # Show error message inline in the firmware selection dialog
+                    self.show_firmware_selection_dialog_with_error("Error Loading Firmware Listing from Slidia")
                     return
                 selected_firmware = self.show_firmware_selection_dialog(firmware_options)
                 if not selected_firmware:
@@ -4865,7 +5080,6 @@ class Y1HelperApp(tk.Tk):
 
     def browse_firmware_file(self):
         from tkinter import messagebox
-        import tkinter as tk
         file_path = filedialog.askopenfilename(
             title="Select Firmware File",
             filetypes=[("Firmware files", "*.img"), ("All files", "*.")]
@@ -4911,7 +5125,6 @@ class Y1HelperApp(tk.Tk):
         ]
         try:
             import threading
-            import tkinter as tk
             import requests
             import shutil
             firmware_dir = os.path.join(assets_dir, "rom")
@@ -4947,19 +5160,9 @@ class Y1HelperApp(tk.Tk):
                             repo_path = repo_url.replace('https://github.com/', '').replace('/releases/', '').replace('/releases', '')
                             api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
                         
-                        # Use proper GitHub API authentication
-                        try:
-                            request = self.create_github_request(api_url)
-                            with urllib.request.urlopen(request) as response:
-                                release_data = json.loads(response.read().decode('utf-8'))
-                        except urllib.error.HTTPError as e:
-                            # Handle rate limit errors
-                            fallback_request = self.handle_rate_limit_error(e, api_url)
-                            if fallback_request:
-                                with urllib.request.urlopen(fallback_request) as response:
-                                    release_data = json.loads(response.read().decode('utf-8'))
-                            else:
-                                raise e
+                        # Use comprehensive GitHub API authentication with retries
+                        response = self._make_github_request_with_retries(api_url)
+                        release_data = json.loads(response.text)
                         assets = release_data.get('assets', [])
                         
                         # Check if rom.zip is available
@@ -5108,7 +5311,6 @@ class Y1HelperApp(tk.Tk):
             self.is_flashing_firmware = False
 
     def _flash_with_modal(self, dialog, status_label, ok_button, firmware_path, progress_bar=None):
-        import tkinter as tk
         import subprocess
         import threading
         try:
@@ -5253,6 +5455,9 @@ class Y1HelperApp(tk.Tk):
         dialog.grab_set()
         dialog.resizable(False, False)
         
+        # Apply theme colors to dialog
+        self.apply_dialog_theme(dialog)
+        
         # Center dialog
         dialog.update_idletasks()
         x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
@@ -5306,8 +5511,8 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error parsing manifest: {e}")
             return []
 
-    def show_firmware_selection_dialog(self, firmware_options):
-        import tkinter as tk
+    def show_firmware_selection_dialog_with_error(self, error_message):
+        """Show firmware selection dialog with error message inline"""
         from tkinter import filedialog
         dialog = tk.Toplevel(self)
         dialog.title("Select Firmware")
@@ -5315,29 +5520,39 @@ class Y1HelperApp(tk.Tk):
         dialog.transient(self)
         dialog.grab_set()
         dialog.resizable(False, False)
+        
+        # Apply theme colors to dialog
+        self.apply_dialog_theme(dialog)
+        
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
         label = ttk.Label(frame, text="Select a firmware to install:", font=("Segoe UI", 11))
         label.pack(pady=(0, 10))
         listbox = tk.Listbox(frame, font=("Segoe UI", 10))
         listbox.pack(fill=tk.BOTH, expand=True)
-        for i, fw in enumerate(firmware_options):
-            listbox.insert(tk.END, fw.get('name', f"Firmware {i+1}"))
-        selected = [None]
-        def confirm_and_close():
-            idx = listbox.curselection()
-            if not idx:
-                return
-            selected[0] = firmware_options[idx[0]]
-            dialog.destroy()
-        def on_double_click(event):
-            confirm_and_close()
-        def on_enter(event):
-            confirm_and_close()
-        listbox.bind('<Double-Button-1>', on_double_click)
-        listbox.bind('<Return>', on_enter)
-        install_btn = ttk.Button(frame, text="Install", command=confirm_and_close)
+        
+        # Apply theme colors to listbox (only if theme colors are available)
+        try:
+            if hasattr(self, 'bg_color') and hasattr(self, 'fg_color') and hasattr(self, 'accent_color'):
+                listbox.configure(bg=self.bg_color, fg=self.fg_color, selectbackground=self.accent_color, selectforeground=self.fg_color)
+        except Exception as e:
+            debug_print(f"Could not apply theme to listbox: {e}")
+        
+        # Show error message in listbox
+        listbox.insert(tk.END, error_message)
+        listbox.itemconfig(0, fg='red')  # Make error message red
+        
+        # Disable selection for error message
+        def on_select(event):
+            if listbox.curselection() and listbox.curselection()[0] == 0:
+                listbox.selection_clear(0, tk.END)
+        
+        listbox.bind('<<ListboxSelect>>', on_select)
+        
+        # Disable install button when error is shown
+        install_btn = ttk.Button(frame, text="Install", command=lambda: None, state='disabled')
         install_btn.pack(pady=(10, 0))
+        
         def browse_and_install():
             dialog.destroy()
             file_path = filedialog.askopenfilename(
@@ -5360,6 +5575,84 @@ class Y1HelperApp(tk.Tk):
             self.install_firmware(local_file=file_path)
         browse_btn = ttk.Button(frame, text="Browse Firmware (.img)", command=browse_and_install)
         browse_btn.pack(pady=(5, 0))
+        
+        # Add close button
+        close_btn = ttk.Button(frame, text="Close", command=dialog.destroy)
+        close_btn.pack(pady=(5, 0))
+
+    def show_firmware_selection_dialog(self, firmware_options):
+        """Show firmware selection dialog with actual firmware options"""
+        from tkinter import filedialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Select Firmware")
+        dialog.geometry("400x300")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        
+        # Apply theme colors to dialog
+        self.apply_dialog_theme(dialog)
+        
+        frame = ttk.Frame(dialog, padding="10")
+        frame.pack(fill=tk.BOTH, expand=True)
+        label = ttk.Label(frame, text="Select a firmware to install:", font=("Segoe UI", 11))
+        label.pack(pady=(0, 10))
+        listbox = tk.Listbox(frame, font=("Segoe UI", 10))
+        listbox.pack(fill=tk.BOTH, expand=True)
+        
+        # Apply theme colors to listbox (only if theme colors are available)
+        try:
+            if hasattr(self, 'bg_color') and hasattr(self, 'fg_color') and hasattr(self, 'accent_color'):
+                listbox.configure(bg=self.bg_color, fg=self.fg_color, selectbackground=self.accent_color, selectforeground=self.fg_color)
+        except Exception as e:
+            debug_print(f"Could not apply theme to listbox: {e}")
+        
+        for i, fw in enumerate(firmware_options):
+            listbox.insert(tk.END, fw.get('name', f"Firmware {i+1}"))
+        
+        selected = [None]
+        def confirm_and_close():
+            idx = listbox.curselection()
+            if not idx:
+                return
+            selected[0] = firmware_options[idx[0]]
+            dialog.destroy()
+        
+        def on_double_click(event):
+            confirm_and_close()
+        
+        def on_enter(event):
+            confirm_and_close()
+        
+        listbox.bind('<Double-Button-1>', on_double_click)
+        listbox.bind('<Return>', on_enter)
+        
+        install_btn = ttk.Button(frame, text="Install", command=confirm_and_close)
+        install_btn.pack(pady=(10, 0))
+        
+        def browse_and_install():
+            dialog.destroy()
+            file_path = filedialog.askopenfilename(
+                title="Select Firmware File",
+                filetypes=[("Firmware files", "*.img"), ("All files", "*.")]
+            )
+            if not file_path:
+                return
+            root = self if isinstance(self, tk.Tk) else tk.Tk()
+            popup = tk.Toplevel(root)
+            popup.title("Unplug Device")
+            popup.geometry("400x120")
+            popup.transient(root)
+            popup.grab_set()
+            msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+            msg.pack(pady=(20, 10), padx=10)
+            btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+            btn.pack(pady=(0, 15))
+            popup.wait_window()
+            self.install_firmware(local_file=file_path)
+        
+        browse_btn = ttk.Button(frame, text="Browse Firmware (.img)", command=browse_and_install)
+        browse_btn.pack(pady=(5, 0))
         dialog.wait_window()
         if selected[0] is not None:
             root = self if isinstance(self, tk.Tk) else tk.Tk()
@@ -5374,6 +5667,391 @@ class Y1HelperApp(tk.Tk):
             btn.pack(pady=(0, 15))
             popup.wait_window()
             self._download_and_flash_selected_firmware(selected[0])
+
+    def menu_reinstall_app(self):
+        """Reinstall app with progress modal"""
+        try:
+            # Create progress dialog
+            progress_dialog = self.create_progress_dialog("Reinstalling App")
+            progress_dialog.progress_bar.start()
+            
+            def update_progress(message):
+                if progress_dialog and hasattr(progress_dialog, 'status_label'):
+                    progress_dialog.status_label.config(text=message)
+                    progress_dialog.update()
+            
+            def do_reinstall():
+                try:
+                    update_progress("Checking for latest installer...")
+                    update_info = self.check_for_team_slide_updates()
+                    
+                    if update_info and update_info.get('installer_asset'):
+                        update_progress("Downloading installer...")
+                        self.download_and_run_installer(update_info['installer_asset'])
+                    else:
+                        update_progress("No installer found")
+                        messagebox.showwarning("Reinstall", "No installer found for reinstall")
+                except Exception as e:
+                    update_progress(f"Error: {e}")
+                    messagebox.showerror("Reinstall Error", f"Failed to reinstall: {str(e)}")
+                finally:
+                    if progress_dialog:
+                        progress_dialog.destroy()
+            
+            # Run in background thread
+            import threading
+            threading.Thread(target=do_reinstall, daemon=True).start()
+            
+        except Exception as e:
+            debug_print(f"Error in menu_reinstall_app: {e}")
+            messagebox.showerror("Error", f"Failed to start reinstall: {str(e)}")
+
+    def menu_update_app(self):
+        """Update app with progress modal"""
+        try:
+            # Create progress dialog
+            progress_dialog = self.create_progress_dialog("Updating App")
+            progress_dialog.progress_bar.start()
+            
+            def update_progress(message):
+                if progress_dialog and hasattr(progress_dialog, 'status_label'):
+                    progress_dialog.status_label.config(text=message)
+                    progress_dialog.update()
+            
+            def do_update():
+                try:
+                    update_progress("Checking for latest patch...")
+                    update_info = self.check_for_team_slide_updates()
+                    
+                    if update_info and update_info.get('patch_asset'):
+                        update_progress("Downloading patch...")
+                        self.download_and_run_patch(update_info['patch_asset'])
+                    else:
+                        update_progress("No patch found")
+                        messagebox.showwarning("Update", "No patch found for update")
+                except Exception as e:
+                    update_progress(f"Error: {e}")
+                    messagebox.showerror("Update Error", f"Failed to update: {str(e)}")
+                finally:
+                    if progress_dialog:
+                        progress_dialog.destroy()
+            
+            # Run in background thread
+            import threading
+            threading.Thread(target=do_update, daemon=True).start()
+            
+        except Exception as e:
+            debug_print(f"Error in menu_update_app: {e}")
+            messagebox.showerror("Error", f"Failed to start update: {str(e)}")
+
+    def download_and_run_installer_from_latest(self):
+        """Always fetch the latest release from GitHub and run installer.exe if present."""
+        try:
+            debug_print("Fetching latest release for installer...")
+            # Use the same fallback logic as check_for_team_slide_updates, but ignore version check
+            update_info = self._check_updates_via_api()
+            if not update_info:
+                debug_print("API method failed, trying releases page fallback...")
+                update_info = self._check_updates_via_releases_page()
+            if not update_info:
+                debug_print("Releases page failed, trying master branch fallback...")
+                update_info = self._check_updates_via_master_branch()
+            if update_info and update_info.get('installer_asset'):
+                self.download_and_run_installer(update_info['installer_asset'])
+            else:
+                messagebox.showwarning("Reinstall", "No installer.exe found in the latest release.")
+        except Exception as e:
+            debug_print(f"Error in download_and_run_installer_from_latest: {e}")
+            messagebox.showerror("Reinstall Error", f"Failed to fetch installer: {str(e)}")
+
+    def download_and_run_patch_from_latest(self):
+        """Always fetch the latest release from GitHub and run patch.exe if present."""
+        try:
+            debug_print("Fetching latest release for patch...")
+            # Use the same fallback logic as check_for_team_slide_updates, but ignore version check
+            update_info = self._check_updates_via_api()
+            if not update_info:
+                debug_print("API method failed, trying releases page fallback...")
+                update_info = self._check_updates_via_releases_page()
+            if not update_info:
+                debug_print("Releases page failed, trying master branch fallback...")
+                update_info = self._check_updates_via_master_branch()
+            if update_info and update_info.get('patch_asset'):
+                self.download_and_run_patch(update_info['patch_asset'])
+            else:
+                messagebox.showwarning("Update", "No patch.exe found in the latest release.")
+        except Exception as e:
+            debug_print(f"Error in download_and_run_patch_from_latest: {e}")
+            messagebox.showerror("Update Error", f"Failed to fetch patch: {str(e)}")
+
+    def _run_update_exe_and_wait(self, exe_path, friendly_name):
+        import subprocess
+        try:
+            # Kill all y1_helper processes first
+            self.kill_all_y1_helper_processes()
+            
+            # Launch the update executable
+            subprocess.Popen([exe_path], shell=True)
+            
+            # Force quit this process immediately
+            import os
+            os._exit(0)  # Force exit without cleanup
+        except Exception as e:
+            debug_print(f"Error in _run_update_exe_and_wait: {e}")
+            import os
+            os._exit(0)  # Force exit even on error
+
+    def kill_all_y1_helper_processes(self):
+        import psutil, os
+        current_pid = os.getpid()
+        killed_count = 0
+        
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.pid == current_pid:
+                    continue  # Skip current process for now
+                    
+                if 'python' in proc.info['name'].lower():
+                    cmdline = proc.info['cmdline']
+                    if cmdline and any('y1_helper.py' in arg for arg in cmdline):
+                        debug_print(f"Terminating y1_helper process: PID {proc.pid}")
+                        proc.terminate()
+                        killed_count += 1
+                        
+                        # Wait a bit for graceful termination
+                        try:
+                            proc.wait(timeout=2)
+                        except psutil.TimeoutExpired:
+                            debug_print(f"Force killing process: PID {proc.pid}")
+                            proc.kill()
+                            
+            except Exception as e:
+                debug_print(f"Error killing process {proc.pid}: {e}")
+                continue
+        
+        debug_print(f"Killed {killed_count} y1_helper processes")
+        
+        # Now terminate the current process
+        debug_print(f"Terminating current process: PID {current_pid}")
+        return killed_count
+
+    def startup_update_check(self):
+        """Check for updates at startup and show pill/menu indicator if available"""
+        try:
+            debug_print("Running startup update check...")
+            
+            # Check for updates using all methods
+            update_info = self._check_updates_via_api()
+            if not update_info:
+                update_info = self._check_updates_via_releases_page()
+            if not update_info:
+                update_info = self._check_updates_via_master_branch()
+            
+            if update_info:
+                # Compare versions to see if it's actually newer
+                if self.compare_versions(update_info['version'], self.version) > 0:
+                    debug_print(f"Newer version available at startup: {update_info['version']}")
+                    self.update_info = update_info
+                    self.update_available = True
+                    
+                    # Show update pill and update menu label instead of dialog
+                    self.after(2000, self.show_update_pill_if_needed)
+                else:
+                    debug_print("No newer version available at startup")
+            else:
+                debug_print("No update information available at startup")
+                
+        except Exception as e:
+            debug_print(f"Error in startup_update_check: {e}")
+
+    def show_startup_update_dialog(self, update_info):
+        """Show startup update dialog asking if user wants to update"""
+        try:
+            # Create startup dialog
+            dialog = tk.Toplevel(self)
+            dialog.title("Update Available")
+            dialog.geometry("450x300")
+            dialog.transient(self)
+            dialog.grab_set()
+            
+            # Apply theme colors to dialog
+            self.apply_dialog_theme(dialog)
+            
+            # Center dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (450 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (300 // 2)
+            dialog.geometry(f"450x300+{x}+{y}")
+            
+            # Create frame
+            frame = ttk.Frame(dialog, padding="20")
+            frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            title_label = ttk.Label(frame, text="Update Available!", 
+                                   font=("Segoe UI", 16, "bold"))
+            title_label.pack(pady=(0, 10))
+            
+            # Version info
+            version_label = ttk.Label(frame, 
+                                     text=f"A newer version (v{update_info['version']}) is available!\n"
+                                          f"Current version: v{self.version}",
+                                     font=("Segoe UI", 11))
+            version_label.pack(pady=(0, 20))
+            
+            # Description
+            desc_label = ttk.Label(frame, text="Would you like to update now?", 
+                                  font=("Segoe UI", 10))
+            desc_label.pack(pady=(0, 20))
+            
+            # Buttons frame
+            buttons_frame = ttk.Frame(frame)
+            buttons_frame.pack(fill=tk.X, pady=(0, 20))
+            
+            def update_now():
+                dialog.destroy()
+                self.show_update_choice_dialog()
+            
+            def later():
+                dialog.destroy()
+                # Show the update pill instead
+                self.show_update_pill_if_needed()
+            
+            # Update Now button
+            update_btn = ttk.Button(buttons_frame, text="🔄 Update Now", 
+                                   command=update_now, style="TButton")
+            update_btn.pack(fill=tk.X, pady=(0, 10))
+            
+            # Later button
+            later_btn = ttk.Button(buttons_frame, text="Later", command=later)
+            later_btn.pack(fill=tk.X)
+            
+        except Exception as e:
+            debug_print(f"Error in show_startup_update_dialog: {e}")
+            messagebox.showerror("Update Error", f"Failed to show startup update dialog: {str(e)}")
+
+    def show_update_pill_if_needed(self):
+        """Show the update pill if update is available"""
+        try:
+            if hasattr(self, 'update_info') and self.update_info:
+                debug_print("Showing update pill")
+                self.update_pill.config(text=f"v{self.update_info['version']} now available")
+                self.update_pill.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+                
+                # Update Help menu label to show "Update Available" in bold
+                self.help_menu_label = "Update Available"
+                self.menubar.entryconfig("Help", label=f"**{self.help_menu_label}**")
+        except Exception as e:
+            debug_print(f"Error in show_update_pill_if_needed: {e}")
+
+    def on_menu_select(self, event):
+        """Handle menu selection events, specifically for update available clicks"""
+        try:
+            # Get the currently selected menu item
+            menu_index = self.menubar.index("@%s,%s" % (event.x, event.y))
+            if menu_index is not None:
+                menu_label = self.menubar.entrycget(menu_index, "label")
+                
+                # Check if Help menu is clicked and shows "Update Available"
+                if "Update Available" in menu_label and hasattr(self, 'update_info') and self.update_info:
+                    debug_print("Update Available menu clicked, showing update dialog")
+                    self.show_update_choice_dialog()
+        except Exception as e:
+            debug_print(f"Error in on_menu_select: {e}")
+
+    def show_update_choice_dialog(self, event=None):
+        """Show dialog to choose between quick update (patch) or full update (installer)"""
+        try:
+            if not hasattr(self, 'update_info') or not self.update_info:
+                # Fetch latest release info
+                update_info = self._check_updates_via_api()
+                if not update_info:
+                    update_info = self._check_updates_via_releases_page()
+                if not update_info:
+                    update_info = self._check_updates_via_master_branch()
+                
+                if not update_info:
+                    messagebox.showinfo("Update", "No update information available.")
+                    return
+                
+                self.update_info = update_info
+            
+            # Create choice dialog
+            dialog = tk.Toplevel(self)
+            dialog.title("Update Available")
+            dialog.geometry("400x250")
+            dialog.transient(self)
+            dialog.grab_set()
+            
+            # Apply theme colors to dialog
+            self.apply_dialog_theme(dialog)
+            
+            # Center dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (250 // 2)
+            dialog.geometry(f"400x250+{x}+{y}")
+            
+            # Create frame
+            frame = ttk.Frame(dialog, padding="20")
+            frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            title_label = ttk.Label(frame, text=f"Update to v{self.update_info['version']} Available", 
+                                   font=("Segoe UI", 14, "bold"))
+            title_label.pack(pady=(0, 20))
+            
+            # Description
+            desc_label = ttk.Label(frame, text="Choose your update method:", 
+                                  font=("Segoe UI", 10))
+            desc_label.pack(pady=(0, 20))
+            
+            # Buttons frame
+            buttons_frame = ttk.Frame(frame)
+            buttons_frame.pack(fill=tk.X, pady=(0, 20))
+            
+            def quick_update():
+                if self.update_info.get('patch_asset'):
+                    dialog.destroy()
+                    self.download_and_run_patch(self.update_info['patch_asset'])
+                else:
+                    messagebox.showwarning("Quick Update", "No patch.exe available for quick update.")
+            
+            def full_update():
+                if self.update_info.get('installer_asset'):
+                    dialog.destroy()
+                    self.download_and_run_installer(self.update_info['installer_asset'])
+                else:
+                    messagebox.showwarning("Full Update", "No installer.exe available for full update.")
+            
+            def cancel():
+                dialog.destroy()
+            
+            # Quick Update button (patch)
+            if self.update_info.get('patch_asset'):
+                quick_btn = ttk.Button(buttons_frame, text="🔄 Quick Update (Patch)", 
+                                      command=quick_update, style="TButton")
+                quick_btn.pack(fill=tk.X, pady=(0, 10))
+            
+            # Full Update button (installer)
+            if self.update_info.get('installer_asset'):
+                full_btn = ttk.Button(buttons_frame, text="⚡ Full Update (Installer)", 
+                                     command=full_update, style="TButton")
+                full_btn.pack(fill=tk.X, pady=(0, 10))
+            
+            # Cancel button
+            cancel_btn = ttk.Button(buttons_frame, text="Cancel", command=cancel)
+            cancel_btn.pack(fill=tk.X)
+            
+        except Exception as e:
+            debug_print(f"Error in show_update_choice_dialog: {e}")
+            messagebox.showerror("Update Error", f"Failed to show update dialog: {str(e)}")
+
+    def show_team_slide_update_prompt(self, update_info):
+        if self.update_prompt_shown:
+            return
+        self.update_prompt_shown = True
+        # ... existing code ...
 
 class FileExplorerDialog:
     """Comprehensive file explorer dialog for Y1 device with full file management"""
@@ -5398,6 +6076,10 @@ class FileExplorerDialog:
         self.dialog.title("Y1 Device File Explorer")
         self.dialog.geometry("800x600")
         self.dialog.resizable(True, True)
+        
+        # Apply theme colors to dialog
+        if hasattr(self.parent, 'apply_dialog_theme'):
+            self.parent.apply_dialog_theme(self.dialog)
         
         # Center the dialog
         self.dialog.transient(self.parent)
@@ -5998,49 +6680,38 @@ class FileExplorerDialog:
         dialog.transient(self.dialog)
         dialog.grab_set()
         
+        # Apply theme colors to dialog
+        if hasattr(self.parent, 'apply_dialog_theme'):
+            self.parent.apply_dialog_theme(dialog)
+        
         # Create text widget with properties
         text_widget = tk.Text(dialog, wrap=tk.WORD, padx=10, pady=10)
         text_widget.pack(fill=tk.BOTH, expand=True)
         
-        properties_text = f"""Properties for: {name}
-
+        # Apply theme colors to text widget
+        if hasattr(self.parent, 'bg_color') and hasattr(self.parent, 'fg_color'):
+            text_widget.configure(bg=self.parent.bg_color, fg=self.parent.fg_color)
+        
+        # Add properties to text widget
+        properties_text = f"""Name: {name}
 Path: {path}
 Permissions: {permissions}
-Owner: {owner}:{group}
+Owner: {owner}
+Group: {group}
 Size: {size}
-Modified: {date}
+Date: {date}
 
-Detailed Information:
-{stat_info}
-
-Permissions Breakdown:
-{self.parse_permissions(permissions)}
-"""
+Additional Info:
+{stat_info}"""
         
         text_widget.insert(tk.END, properties_text)
         text_widget.config(state=tk.DISABLED)
         
-        # Close button
-        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=10)
-        
-    def parse_permissions(self, permissions):
-        def explain_perms(perms):
-            result = []
-            if perms[0] == 'r': result.append("read")
-            if perms[1] == 'w': result.append("write")
-            if perms[2] == 'x': result.append("execute")
-            return ', '.join(result) if result else "none"
-        return f"""Owner: {explain_perms(permissions[1:4])}
-Group: {explain_perms(permissions[4:7])}
-Others: {explain_perms(permissions[7:10])}"""
-
-def main():
-    """Main function to launch the Y1 Helper application"""
-    debug_print("Starting Y1 Helper application")
-    app = Y1HelperApp()
-    app.protocol("WM_DELETE_WINDOW", app.on_closing)
-    debug_print("Entering main loop")
-    app.mainloop()
+        # Add close button
+        close_button = ttk.Button(dialog, text="Close", command=dialog.destroy)
+        close_button.pack(pady=10)
 
 if __name__ == "__main__":
-    main()
+    app = Y1HelperApp()
+    app.mainloop()
+
