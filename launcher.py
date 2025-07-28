@@ -97,7 +97,10 @@ class Y1Launcher:
                 try:
                     for key, value in config['api_keys'].items():
                         if isinstance(value, str) and key.startswith('key_') and value.strip():
-                            self.api_tokens.append(value.strip())
+                            token = value.strip()
+                            if token.startswith('github_pat_'):
+                                token = token[11:]  # Remove 'github_pat_' prefix
+                            self.api_tokens.append(token)
                 except Exception as e:
                     print(f"Error processing api_keys section: {e}")
             
@@ -106,6 +109,8 @@ class Y1Launcher:
                 try:
                     legacy_token = config['github']['token'].strip()
                     if legacy_token and legacy_token not in self.api_tokens:
+                        if legacy_token.startswith('github_pat_'):
+                            legacy_token = legacy_token[11:]  # Remove 'github_pat_' prefix
                         self.api_tokens.append(legacy_token)
                 except Exception as e:
                     print(f"Error processing legacy token: {e}")
@@ -118,6 +123,8 @@ class Y1Launcher:
                         if key_name in config['api_keys']:
                             token = config['api_keys'][key_name].strip()
                             if token and token not in self.api_tokens:
+                                if token.startswith('github_pat_'):
+                                    token = token[11:]  # Remove 'github_pat_' prefix
                                 self.api_tokens.append(token)
                 except Exception as e:
                     print(f"Error processing api_key entries: {e}")
@@ -428,13 +435,23 @@ class Y1Launcher:
                 with urllib.request.urlopen(request) as response:
                     data = json.loads(response.read().decode('utf-8'))
             except urllib.error.HTTPError as e:
-                # Handle rate limit errors
-                fallback_request = self.handle_rate_limit_error(e, api_url)
-                if fallback_request:
+                if e.code == 401:
+                    # Handle 401 Unauthorized by falling back to unauthenticated request
+                    print(f"401 Unauthorized for GitHub files, falling back to unauthenticated request")
+                    headers = {
+                        'User-Agent': 'Y1-Helper-Launcher/0.7.0'
+                    }
+                    fallback_request = urllib.request.Request(api_url, headers=headers)
                     with urllib.request.urlopen(fallback_request) as response:
                         data = json.loads(response.read().decode('utf-8'))
                 else:
-                    raise e
+                    # Handle rate limit errors
+                    fallback_request = self.handle_rate_limit_error(e, api_url)
+                    if fallback_request:
+                        with urllib.request.urlopen(fallback_request) as response:
+                            data = json.loads(response.read().decode('utf-8'))
+                    else:
+                        raise e
             files = []
             py_files = []
             exe_files = []
@@ -487,13 +504,23 @@ class Y1Launcher:
                     with urllib.request.urlopen(request) as response:
                         releases_data = json.loads(response.read().decode('utf-8'))
                 except urllib.error.HTTPError as e:
-                    # Handle rate limit errors
-                    fallback_request = self.handle_rate_limit_error(e, api_url)
-                    if fallback_request:
+                    if e.code == 401:
+                        # Handle 401 Unauthorized by falling back to unauthenticated request
+                        print(f"401 Unauthorized for releases page {page}, falling back to unauthenticated request")
+                        headers = {
+                            'User-Agent': 'Y1-Helper-Launcher/0.7.0'
+                        }
+                        fallback_request = urllib.request.Request(api_url, headers=headers)
                         with urllib.request.urlopen(fallback_request) as response:
                             releases_data = json.loads(response.read().decode('utf-8'))
                     else:
-                        raise e
+                        # Handle rate limit errors
+                        fallback_request = self.handle_rate_limit_error(e, api_url)
+                        if fallback_request:
+                            with urllib.request.urlopen(fallback_request) as response:
+                                releases_data = json.loads(response.read().decode('utf-8'))
+                        else:
+                            raise e
                 
                 if not releases_data:  # No more releases
                     break
@@ -726,8 +753,27 @@ class Y1Launcher:
             api_url = f"https://api.github.com/repos/{self.github_repo}/contents/{file_path}?ref={self.github_branch}"
             
             request = self.create_github_request(api_url)
-            with urllib.request.urlopen(request) as response:
-                data = json.loads(response.read().decode('utf-8'))
+            try:
+                with urllib.request.urlopen(request) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+            except urllib.error.HTTPError as e:
+                if e.code == 401:
+                    # Handle 401 Unauthorized by falling back to unauthenticated request
+                    print(f"401 Unauthorized for {file_path}, falling back to unauthenticated request")
+                    headers = {
+                        'User-Agent': 'Y1-Helper-Launcher/0.7.0'
+                    }
+                    fallback_request = urllib.request.Request(api_url, headers=headers)
+                    with urllib.request.urlopen(fallback_request) as response:
+                        data = json.loads(response.read().decode('utf-8'))
+                else:
+                    # Handle rate limit errors
+                    fallback_request = self.handle_rate_limit_error(e, api_url)
+                    if fallback_request:
+                        with urllib.request.urlopen(fallback_request) as response:
+                            data = json.loads(response.read().decode('utf-8'))
+                    else:
+                        raise e
             
             if 'content' in data:
                 import base64
