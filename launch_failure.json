@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": 1753664032.9694598,
+    "exit_code": 1,
+    "version": "0.7.0",
+    "branch": "master"
+  },
+  {
+    "timestamp": 1753664373.0043054,
+    "exit_code": 1,
+    "version": "0.7.0",
+    "branch": "master"
+  }
+]
