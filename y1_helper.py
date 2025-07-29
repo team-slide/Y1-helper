@@ -3371,16 +3371,25 @@ class Y1HelperApp(tk.Tk):
         """Download and run patch with fallback methods and robust process handling."""
         try:
             progress_dialog = self.create_progress_dialog("Downloading Patch")
-            progress_dialog.progress_bar.start()
-            def update_progress(message):
+            start_time = time.time()
+            
+            def update_progress(status, detail="", progress=None, speed_info=""):
                 try:
                     if progress_dialog and hasattr(progress_dialog, 'status_label'):
-                        progress_dialog.status_label.config(text=message)
+                        progress_dialog.status_label.config(text=status)
+                        if detail:
+                            progress_dialog.detail_label.config(text=detail)
+                        if progress is not None:
+                            progress_dialog.progress_bar.config(value=progress)
+                        if speed_info:
+                            progress_dialog.speed_label.config(text=speed_info)
                         progress_dialog.update()
-                    debug_print(f"Patch Download Progress: {message}")
+                    debug_print(f"Patch Download Progress: {status} - {detail}")
                 except Exception as e:
                     debug_print(f"Progress update failed: {e}")
-            update_progress("Downloading patch...")
+            
+            update_progress("Preparing to download patch...", "Connecting to server...")
+            
             if patch_asset.get('browser_download_url'):
                 download_url = patch_asset['browser_download_url']
                 file_name = patch_asset.get('name', 'patch.exe')
@@ -3390,30 +3399,80 @@ class Y1HelperApp(tk.Tk):
                     download_url = "https://raw.githubusercontent.com/team-slide/y1-helper/master/patch.zip"
                 else:
                     download_url = f"https://github.com/team-slide/y1-helper/releases/latest/download/{file_name}"
+            
             debug_print(f"Downloading from: {download_url}")
             temp_file = os.path.join(tempfile.gettempdir(), file_name)
+            
+            update_progress("Connecting to download server...", f"URL: {download_url}")
+            
             response = self._make_github_request_with_retries(download_url, stream=True)
             if response.status_code != 200:
                 debug_print(f"Failed to download patch: HTTP {response.status_code}")
                 progress_dialog.destroy()
                 messagebox.showerror("Download Failed", f"Failed to download patch: HTTP {response.status_code}")
                 return
+            
             total_size = int(response.headers.get('content-length', 0))
             downloaded_size = 0
+            last_update_time = time.time()
+            last_downloaded_size = 0
+            
+            update_progress("Downloading patch file...", f"File: {file_name}", 0)
+            
             with open(temp_file, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
-                        if total_size > 0:
-                            progress = (downloaded_size / total_size) * 100
-                            update_progress(f"Downloading {file_name}... {progress:.1f}%")
-                        else:
-                            update_progress(f"Downloading {file_name}... {downloaded_size} bytes")
+                        current_time = time.time()
+                        
+                        # Update progress every 100ms or when significant progress made
+                        if current_time - last_update_time >= 0.1 or downloaded_size - last_downloaded_size >= 1024*1024:  # 1MB
+                            if total_size > 0:
+                                progress = (downloaded_size / total_size) * 100
+                                downloaded_mb = downloaded_size / (1024*1024)
+                                total_mb = total_size / (1024*1024)
+                                
+                                # Calculate speed
+                                elapsed = current_time - start_time
+                                if elapsed > 0:
+                                    speed_mbps = (downloaded_size / (1024*1024)) / elapsed
+                                    eta_seconds = (total_size - downloaded_size) / (downloaded_size / elapsed) if downloaded_size > 0 else 0
+                                    
+                                    if eta_seconds > 60:
+                                        eta_text = f"{eta_seconds/60:.1f} minutes remaining"
+                                    elif eta_seconds > 0:
+                                        eta_text = f"{eta_seconds:.1f} seconds remaining"
+                                    else:
+                                        eta_text = "Calculating..."
+                                    
+                                    speed_info = f"Speed: {speed_mbps:.1f} MB/s • {eta_text}"
+                                else:
+                                    speed_info = "Calculating speed..."
+                                
+                                update_progress(
+                                    f"Downloading {file_name}...",
+                                    f"{downloaded_mb:.1f} MB / {total_mb:.1f} MB ({progress:.1f}%)",
+                                    progress,
+                                    speed_info
+                                )
+                            else:
+                                downloaded_mb = downloaded_size / (1024*1024)
+                                update_progress(
+                                    f"Downloading {file_name}...",
+                                    f"{downloaded_mb:.1f} MB downloaded",
+                                    None,
+                                    "Size unknown"
+                                )
+                            
+                            last_update_time = current_time
+                            last_downloaded_size = downloaded_size
+            
             progress_dialog.destroy()
             debug_print(f"Patch downloaded successfully: {temp_file}")
+            
             if file_name.endswith('.zip'):
-                update_progress("Extracting patch files...")
+                update_progress("Extracting patch files...", "Unpacking downloaded archive...")
                 patch_dir = os.path.join(self.base_dir, 'patch')
                 os.makedirs(patch_dir, exist_ok=True)
                 with zipfile.ZipFile(temp_file, 'r') as zip_ref:
@@ -3422,6 +3481,7 @@ class Y1HelperApp(tk.Tk):
                 messagebox.showinfo("Patch Applied", "Patch files have been downloaded and will be applied on next restart.")
             else:
                 self._run_update_exe_and_wait(temp_file, "Patch Installer")
+                
         except Exception as e:
             debug_print(f"Error downloading/running patch: {e}")
             if 'progress_dialog' in locals():
@@ -3432,45 +3492,104 @@ class Y1HelperApp(tk.Tk):
         """Download and run installer.exe with robust process handling."""
         try:
             progress_dialog = self.create_progress_dialog("Downloading Installer")
-            progress_dialog.progress_bar.start()
-            def update_progress(message):
+            start_time = time.time()
+            
+            def update_progress(status, detail="", progress=None, speed_info=""):
                 try:
                     if progress_dialog and hasattr(progress_dialog, 'status_label'):
-                        progress_dialog.status_label.config(text=message)
+                        progress_dialog.status_label.config(text=status)
+                        if detail:
+                            progress_dialog.detail_label.config(text=detail)
+                        if progress is not None:
+                            progress_dialog.progress_bar.config(value=progress)
+                        if speed_info:
+                            progress_dialog.speed_label.config(text=speed_info)
                         progress_dialog.update()
-                    debug_print(f"Installer Download Progress: {message}")
+                    debug_print(f"Installer Download Progress: {status} - {detail}")
                 except Exception as e:
                     debug_print(f"Progress update failed: {e}")
-            update_progress("Downloading installer...")
+            
+            update_progress("Preparing to download installer...", "Connecting to server...")
+            
             if installer_asset.get('browser_download_url'):
                 download_url = installer_asset['browser_download_url']
                 file_name = installer_asset.get('name', 'installer.exe')
             else:
                 file_name = installer_asset.get('name', 'installer.exe')
                 download_url = f"https://github.com/team-slide/y1-helper/releases/latest/download/{file_name}"
+            
             debug_print(f"Downloading from: {download_url}")
             temp_file = os.path.join(tempfile.gettempdir(), file_name)
+            
+            update_progress("Connecting to download server...", f"URL: {download_url}")
+            
             response = self._make_github_request_with_retries(download_url, stream=True)
             if response.status_code != 200:
                 debug_print(f"Failed to download installer: HTTP {response.status_code}")
                 progress_dialog.destroy()
                 messagebox.showerror("Download Failed", f"Failed to download installer: HTTP {response.status_code}")
                 return
+            
             total_size = int(response.headers.get('content-length', 0))
             downloaded_size = 0
+            last_update_time = time.time()
+            last_downloaded_size = 0
+            
+            update_progress("Downloading installer file...", f"File: {file_name}", 0)
+            
             with open(temp_file, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
-                        if total_size > 0:
-                            progress = (downloaded_size / total_size) * 100
-                            update_progress(f"Downloading {file_name}... {progress:.1f}%")
-                        else:
-                            update_progress(f"Downloading {file_name}... {downloaded_size} bytes")
+                        current_time = time.time()
+                        
+                        # Update progress every 100ms or when significant progress made
+                        if current_time - last_update_time >= 0.1 or downloaded_size - last_downloaded_size >= 1024*1024:  # 1MB
+                            if total_size > 0:
+                                progress = (downloaded_size / total_size) * 100
+                                downloaded_mb = downloaded_size / (1024*1024)
+                                total_mb = total_size / (1024*1024)
+                                
+                                # Calculate speed
+                                elapsed = current_time - start_time
+                                if elapsed > 0:
+                                    speed_mbps = (downloaded_size / (1024*1024)) / elapsed
+                                    eta_seconds = (total_size - downloaded_size) / (downloaded_size / elapsed) if downloaded_size > 0 else 0
+                                    
+                                    if eta_seconds > 60:
+                                        eta_text = f"{eta_seconds/60:.1f} minutes remaining"
+                                    elif eta_seconds > 0:
+                                        eta_text = f"{eta_seconds:.1f} seconds remaining"
+                                    else:
+                                        eta_text = "Calculating..."
+                                    
+                                    speed_info = f"Speed: {speed_mbps:.1f} MB/s • {eta_text}"
+                                else:
+                                    speed_info = "Calculating speed..."
+                                
+                                update_progress(
+                                    f"Downloading {file_name}...",
+                                    f"{downloaded_mb:.1f} MB / {total_mb:.1f} MB ({progress:.1f}%)",
+                                    progress,
+                                    speed_info
+                                )
+                            else:
+                                downloaded_mb = downloaded_size / (1024*1024)
+                                update_progress(
+                                    f"Downloading {file_name}...",
+                                    f"{downloaded_mb:.1f} MB downloaded",
+                                    None,
+                                    "Size unknown"
+                                )
+                            
+                            last_update_time = current_time
+                            last_downloaded_size = downloaded_size
+            
             progress_dialog.destroy()
             debug_print(f"Installer downloaded successfully: {temp_file}")
             self._run_update_exe_and_wait(temp_file, "Installer")
+            
         except Exception as e:
             debug_print(f"Error downloading and running installer: {e}")
             if 'progress_dialog' in locals():
@@ -7561,10 +7680,10 @@ class Y1HelperApp(tk.Tk):
             dialog.after(0, ok_button.config, {"state": tk.NORMAL})
 
     def create_progress_dialog(self, title="Progress"):
-        """Create a progress dialog with status and progress bar"""
+        """Create a compact progress dialog with detailed status and progress bar"""
         dialog = tk.Toplevel(self)
         dialog.title(title)
-        dialog.geometry("400x150")
+        dialog.geometry("450x180")
         dialog.transient(self)
         dialog.grab_set()
         dialog.resizable(False, False)
@@ -7574,25 +7693,35 @@ class Y1HelperApp(tk.Tk):
         
         # Center dialog
         dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (150 // 2)
-        dialog.geometry(f"400x150+{x}+{y}")
+        x = (dialog.winfo_screenwidth() // 2) - (450 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (180 // 2)
+        dialog.geometry(f"450x180+{x}+{y}")
         
         # Create frame
         frame = ttk.Frame(dialog, padding="20")
         frame.pack(fill=tk.BOTH, expand=True)
         
-        # Status label
-        status_label = ttk.Label(frame, text="Initializing...", font=("Segoe UI", 10))
-        status_label.pack(pady=(0, 15))
+        # Main status label
+        status_label = ttk.Label(frame, text="Initializing...", font=("Segoe UI", 10, "bold"))
+        status_label.pack(pady=(0, 8))
+        
+        # Detailed progress label
+        detail_label = ttk.Label(frame, text="", font=("Segoe UI", 9))
+        detail_label.pack(pady=(0, 12))
         
         # Progress bar
-        progress_bar = ttk.Progressbar(frame, mode='indeterminate', length=300)
-        progress_bar.pack(pady=(0, 10))
+        progress_bar = ttk.Progressbar(frame, mode='determinate', length=350)
+        progress_bar.pack(pady=(0, 8))
+        
+        # Speed/ETA label
+        speed_label = ttk.Label(frame, text="", font=("Segoe UI", 8))
+        speed_label.pack(pady=(0, 5))
         
         # Store references
         dialog.status_label = status_label
+        dialog.detail_label = detail_label
         dialog.progress_bar = progress_bar
+        dialog.speed_label = speed_label
         
         return dialog
 
