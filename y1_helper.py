@@ -162,11 +162,11 @@ class Y1HelperApp(tk.Tk):
         # Version information
         self.version = "0.8.0"
         
+        # Backup current y1_helper.py to .old directory at launch
+        self.backup_current_version()
+        
         # Write version.txt file
         self.write_version_file()
-        
-        # Create versioned backup of y1_helper.py at launch
-        self.create_versioned_backup()
         
         # Clean up any existing system.img from previous sessions
         system_img_path = os.path.join(assets_dir, "system.img")
@@ -352,37 +352,42 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Failed to write version file: {e}")
     
-    def create_versioned_backup(self):
-        """Create a versioned backup of y1_helper.py in .old directory"""
+    def backup_current_version(self):
+        """Backup current y1_helper.py to .old directory with version subfolder"""
         try:
             # Create .old directory if it doesn't exist
             old_dir = os.path.join(self.base_dir, ".old")
-            if not os.path.exists(old_dir):
-                os.makedirs(old_dir)
-                debug_print("Created .old directory")
+            os.makedirs(old_dir, exist_ok=True)
             
-            # Create version subdirectory
-            version_dir = os.path.join(old_dir, self.version)
-            if not os.path.exists(version_dir):
-                os.makedirs(version_dir)
-                debug_print(f"Created version directory: {self.version}")
+            # Create version subfolder
+            version_folder = f"v{self.version}"
+            version_dir = os.path.join(old_dir, version_folder)
+            os.makedirs(version_dir, exist_ok=True)
             
-            # Check if backup already exists for this version
-            backup_path = os.path.join(version_dir, "y1_helper.py")
-            if os.path.exists(backup_path):
-                debug_print(f"Backup already exists for version {self.version}")
-                return
+            # Source file (current y1_helper.py)
+            source_file = os.path.join(self.base_dir, "y1_helper.py")
             
-            # Copy current y1_helper.py to versioned backup
-            current_file = os.path.join(self.base_dir, "y1_helper.py")
-            if os.path.exists(current_file):
-                shutil.copy2(current_file, backup_path)
-                debug_print(f"Created versioned backup: {backup_path}")
+            # Destination file
+            dest_file = os.path.join(version_dir, "y1_helper.py")
+            
+            # Check if destination file exists and compare modification times
+            if os.path.exists(dest_file):
+                source_mtime = os.path.getmtime(source_file)
+                dest_mtime = os.path.getmtime(dest_file)
+                
+                # Only overwrite if source is newer
+                if source_mtime > dest_mtime:
+                    shutil.copy2(source_file, dest_file)
+                    debug_print(f"Updated backup of y1_helper.py to {version_dir} (source was newer)")
+                else:
+                    debug_print(f"Backup already exists and is up to date: {version_dir}")
             else:
-                debug_print("Current y1_helper.py not found, skipping backup")
+                # File doesn't exist, create backup
+                shutil.copy2(source_file, dest_file)
+                debug_print(f"Created backup of y1_helper.py to {version_dir}")
                 
         except Exception as e:
-            debug_print(f"Error creating versioned backup: {e}")
+            debug_print(f"Failed to backup current version: {e}")
     
     def initialize_cache(self):
         """Initialize the cache system and clean up .old directory"""
