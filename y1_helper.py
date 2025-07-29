@@ -28,6 +28,9 @@ import webbrowser
 import psutil
 import traceback
 
+# Y1 Helper, created by Ryan Specter, Gemini, Claude, GPT, Grok and Cursor IDE for Project Gallagher, Innioasis Y1 Custom Firmware Project
+
+
 # Add this near the top, after imports
 base_dir = os.path.dirname(os.path.abspath(__file__))
 assets_dir = os.path.join(base_dir, 'assets')
@@ -70,29 +73,27 @@ def check_and_update_launcher():
         debug_print(f"Error updating launcher: {e}")
         return False
 
-def debug_print(message):
-    """Print debug messages with timestamp"""
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[DEBUG {timestamp}] {message}")
+# Global debug flag - set to True when Ctrl+D is pressed
+DEBUG_MODE = False
 
-# Patch debug_print to suppress output if flashing is active and not flashing-related
-if not hasattr(builtins, '_original_debug_print'):
-    builtins._original_debug_print = debug_print
-    def debug_print(message):
-        import inspect
-        frame = inspect.currentframe().f_back
-        self_obj = frame.f_locals.get('self', None)
-        if self_obj and hasattr(self_obj, 'is_flashing_firmware') and getattr(self_obj, 'is_flashing_firmware', False):
-            # Allow only if called from _flash_with_modal or _download_and_flash_selected_firmware
-            stack = inspect.stack()
-            allowed = any(
-                fn.function in ('_flash_with_modal', '_download_and_flash_selected_firmware')
-                for fn in stack
-            )
-            if not allowed:
-                return
-        builtins._original_debug_print(message)
-    globals()['debug_print'] = debug_print
+def debug_print(message):
+    """Print debug messages with timestamp only if debug mode is enabled, except for flash_tool.exe output"""
+    # Always show flash_tool.exe output regardless of debug mode
+    if "flash_tool.exe" in message or "Flash tool" in message:
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[DEBUG {timestamp}] {message}")
+    elif DEBUG_MODE:
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[DEBUG {timestamp}] {message}")
+
+def toggle_debug_mode():
+    """Toggle debug mode on/off"""
+    global DEBUG_MODE
+    DEBUG_MODE = not DEBUG_MODE
+    if DEBUG_MODE:
+        print("[DEBUG] Debug mode enabled - all debug output will be shown")
+    else:
+        print("[DEBUG] Debug mode disabled - debug output suppressed")
 
 class Y1HelperApp(tk.Tk):
     def __init__(self):
@@ -185,7 +186,7 @@ class Y1HelperApp(tk.Tk):
             except Exception as e:
                 debug_print(f'Failed to copy/delete new.xml: {e}')
         
-        self.title(f"Y1 Helper v{self.version}")
+        self.title(f"Y1 Helper v{self.version} - created by Ryan Specter - u/respectyarn")
         self.geometry("520x800")  # Increased height for update status visibility
         self.resizable(False, False)
         
@@ -657,7 +658,7 @@ class Y1HelperApp(tk.Tk):
             if self.rate_limit_exceeded:
                 self.title(f"Y1 Helper v{self.version} - Installer Features Temporarily Unavailable")
             else:
-                self.title(f"Y1 Helper v{self.version}")
+                self.title(f"Y1 Helper v{self.version} - created by Ryan Specter - u/respectyarn")
         except Exception as e:
             debug_print(f"Error updating title: {e}")
     
@@ -5976,6 +5977,9 @@ class Y1HelperApp(tk.Tk):
             keycode = 88
             direction = "previous"
             debug_print("Sending previous track key")
+        elif key == 'd' and event.state & 0x4:  # Ctrl+D
+            toggle_debug_mode()
+            return  # Don't send any key to device
         else:
             debug_print(f"Unrecognized key: {key}")
             return
