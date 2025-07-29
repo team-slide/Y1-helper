@@ -5,7 +5,7 @@ import threading
 import time
 import os
 import struct
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 import json
 import numpy as np
 import platform
@@ -26,6 +26,7 @@ import builtins
 import datetime
 import webbrowser
 import psutil
+import traceback
 
 # Add this near the top, after imports
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -101,6 +102,53 @@ class Y1HelperApp(tk.Tk):
         # Base directory (for config file access)
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         
+        # Initialize cache system
+        self.cache_dir = os.path.join(self.base_dir, ".cache")
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_index_file = os.path.join(self.cache_dir, "index.xml")
+        self.cache_manifest_file = os.path.join(self.cache_dir, "slidia_manifest.xml")
+        self.cache_last_update_file = os.path.join(self.cache_dir, "last_update.txt")
+        
+        # Clean up old cache files to prevent over-reliance on cached data
+        self.cleanup_cache_directory()
+        
+        # Pre-populate ROM directory with all required files from assets (except system.img)
+        self.pre_populate_rom_directory()
+        
+        # Cache settings - reduced to prevent over-reliance on cached data
+        self.cache_expiry_hours = 6  # Cache expires after 6 hours (reduced from 24)
+        self.manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
+        
+        # Initialize API rate limiting
+        self.api_rate_limits = {
+            'unauthenticated': {'calls': 0, 'reset_time': datetime.datetime.now() + datetime.timedelta(hours=1)},
+            'authenticated': {}  # Will store per-token limits
+        }
+        self.max_unauthenticated_calls = 40
+        self.max_authenticated_calls = 100
+        self.rate_limit_exceeded = False
+        
+        # API call optimization and startup tracking
+        self.last_api_check_time = None
+        self.startup_timestamp = datetime.datetime.now()
+        self.api_check_cooldown_minutes = 2  # Prevent API calls if app restarted within 2 minutes (reduced from 5)
+        self.cache_refresh_interval_minutes = 15  # Cache refresh interval when app is running (reduced from 30)
+        self.last_cache_refresh_time = None
+        self.user_triggered_cache_refresh = False
+        
+        # Apps menu interaction tracking
+        self.apps_menu_active = False
+        self.apps_menu_last_interaction = None  # Track if user manually triggered cache refresh
+        
+        # Initialize cache at startup
+        self.initialize_cache()
+        
+        # Load rate limit state from file if it exists
+        self.load_rate_limit_state()
+        
+        # Load startup tracking from file
+        self.load_startup_tracking()
+        
         # Check for and apply launcher updates
         launcher_updated = check_and_update_launcher()
         if launcher_updated:
@@ -111,7 +159,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.7.0"
+        self.version = "0.8.0"
         
         # Write version.txt file
         self.write_version_file()
@@ -124,16 +172,6 @@ class Y1HelperApp(tk.Tk):
                 debug_print("Cleaned up existing system.img from previous session")
             except Exception as e:
                 debug_print(f"Failed to clean up system.img: {e}")
-        # Clear assets/rom on launch
-        rom_dir = os.path.join(assets_dir, "rom")
-        if os.path.exists(rom_dir):
-            for f in os.listdir(rom_dir):
-                try:
-                    os.remove(os.path.join(rom_dir, f))
-                except Exception as e:
-                    debug_print(f"Failed to remove {f} from rom/: {e}")
-        else:
-            os.makedirs(rom_dir, exist_ok=True)
         
         # At launch: copy new.xml to assets/install_rom.xml if it exists, then delete new.xml
         new_xml_path = os.path.join(self.base_dir, 'new.xml')
@@ -186,10 +224,9 @@ class Y1HelperApp(tk.Tk):
         self.device_connected = False
 
         self.firmware_installation_in_progress = False  # Track if firmware installation is in progress
-        self.firmware_manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
+        self.firmware_manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
         self.prepare_prompt_refused = False  # Track if user refused the initial prepare prompt
         self.prepare_prompt_shown = False  # Track if prepare prompt has been shown for current connection
-        self.update_prompt_shown = False  # Track if update prompt has been shown
         
         # Essential UI variables
         self.status_var = tk.StringVar(value="Ready")
@@ -199,7 +236,7 @@ class Y1HelperApp(tk.Tk):
         self.rgb_profile_var = tk.StringVar(value="BGRA8888")
         
         # Update system variables
-        self.update_check_interval = 300000  # 5 minutes in milliseconds
+        self.update_check_interval = 1800000  # 30 minutes in milliseconds (increased for efficiency)
         self.last_update_check = 0
         self.update_available = False
         self.update_info = None
@@ -254,6 +291,9 @@ class Y1HelperApp(tk.Tk):
         # Add a flag to the class
         self.is_flashing_firmware = False
         
+        # Update system variables
+        self.update_prompt_shown = False
+        
         debug_print("Setting up UI components")
         # Initialize UI
         self.setup_ui()
@@ -287,7 +327,7 @@ class Y1HelperApp(tk.Tk):
         self.update_config_background()
         
         # Check for updates in background after a short delay
-        self.after(5000, self.show_update_button_if_needed)  # Check for updates after 5 seconds
+        self.after(5000, self.show_update_pill_if_needed)  # Check for updates after 5 seconds
         
         # Check for team-slide updates and show patch status
         self.after(3000, self.check_and_show_team_slide_update)  # Check for team-slide updates after 3 seconds
@@ -307,6 +347,975 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Version file written: {version_file_path}")
         except Exception as e:
             debug_print(f"Failed to write version file: {e}")
+    
+    def initialize_cache(self):
+        """Initialize the cache system and clean up .old directory"""
+        try:
+            debug_print("Initializing cache system...")
+            
+            # Clean up .old directory (keep only y1_helper.py files)
+            self.cleanup_old_directory()
+            
+            # Create cache directory if it doesn't exist
+            os.makedirs(self.cache_dir, exist_ok=True)
+            
+            # Initialize cache if it doesn't exist or is expired
+            if not self.is_cache_valid():
+                self.update_cache()
+            else:
+                debug_print("Cache is valid, using existing cache")
+                
+        except Exception as e:
+            debug_print(f"Cache initialization failed: {e}")
+    
+    def cleanup_old_directory(self):
+        """Clean up .old directory to keep only y1_helper.py files"""
+        
+    def pre_populate_rom_directory(self):
+        """Replace ROM directory files with originals from assets and delete system.img at app startup"""
+        try:
+            debug_print("Replacing ROM directory files with originals from assets at startup...")
+            
+            # Ensure ROM directory exists
+            rom_dir = os.path.join(self.base_dir, "assets", "rom")
+            assets_dir = os.path.join(self.base_dir, "assets")
+            
+            os.makedirs(rom_dir, exist_ok=True)
+            
+            # Delete system.img if it exists (must come from downloaded ROM)
+            system_img_path = os.path.join(rom_dir, "system.img")
+            if os.path.exists(system_img_path):
+                os.remove(system_img_path)
+                debug_print("Deleted existing system.img from ROM directory")
+            
+            # Replace files with originals from assets (only if they exist in assets)
+            replaced_count = 0
+            
+            # List of files that should be in rom directory (based on current ideal structure)
+            rom_files = [
+                "boot.img", "cache.img", "DA_PL.bin", "DA_PL_CRYPTO20.bin",
+                "DA_SWSEC.bin", "DA_SWSEC_CRYPTO20.bin", "EBR1", "EBR2",
+                "kernel", "kernel_g368_nyx.bin", "lk.bin", "logo.bin",
+                "MBR", "MT6572_Android_scatter.txt", "MTK_AllInOne_DA.bin",
+                "preloader_g368_nyx.bin", "recovery.img", "secro.img", "userdata.img"
+            ]
+            
+            for file_name in rom_files:
+                src_path = os.path.join(assets_dir, file_name)
+                dest_path = os.path.join(rom_dir, file_name)
+                
+                if os.path.exists(src_path):
+                    # Always copy from assets to replace any existing file
+                    try:
+                        shutil.copy2(src_path, dest_path)
+                        replaced_count += 1
+                        debug_print(f"Replaced {file_name} with original from assets")
+                    except Exception as e:
+                        debug_print(f"Failed to replace {file_name}: {e}")
+                else:
+                    debug_print(f"File {file_name} not found in assets directory")
+            
+            debug_print(f"ROM directory startup cleanup completed: {replaced_count} files replaced with originals")
+            
+        except Exception as e:
+            debug_print(f"Error during ROM directory startup cleanup: {e}")
+    
+    def clear_rom_directory_for_firmware(self):
+        """Replace ROM directory files with originals from assets and delete system.img before firmware download"""
+        try:
+            rom_dir = os.path.join(self.base_dir, "assets", "rom")
+            assets_dir = os.path.join(self.base_dir, "assets")
+            
+            # Ensure ROM directory exists
+            os.makedirs(rom_dir, exist_ok=True)
+            
+            debug_print(f"Replacing ROM directory files with originals from assets: {rom_dir}")
+            
+            # Delete system.img if it exists (must come from downloaded ROM)
+            system_img_path = os.path.join(rom_dir, "system.img")
+            if os.path.exists(system_img_path):
+                os.remove(system_img_path)
+                debug_print("Deleted existing system.img from ROM directory")
+            
+            # Replace files with originals from assets (only if they exist in assets)
+            replaced_count = 0
+            
+            # List of files that should be in rom directory (based on current ideal structure)
+            rom_files = [
+                "boot.img", "cache.img", "DA_PL.bin", "DA_PL_CRYPTO20.bin",
+                "DA_SWSEC.bin", "DA_SWSEC_CRYPTO20.bin", "EBR1", "EBR2",
+                "kernel", "kernel_g368_nyx.bin", "lk.bin", "logo.bin",
+                "MBR", "MT6572_Android_scatter.txt", "MTK_AllInOne_DA.bin",
+                "preloader_g368_nyx.bin", "recovery.img", "secro.img", "userdata.img"
+            ]
+            
+            for file_name in rom_files:
+                src_path = os.path.join(assets_dir, file_name)
+                dest_path = os.path.join(rom_dir, file_name)
+                
+                if os.path.exists(src_path):
+                    # Always copy from assets to replace any existing file
+                    try:
+                        shutil.copy2(src_path, dest_path)
+                        replaced_count += 1
+                        debug_print(f"Replaced {file_name} with original from assets")
+                    except Exception as e:
+                        debug_print(f"Failed to replace {file_name}: {e}")
+                else:
+                    debug_print(f"File {file_name} not found in assets directory")
+            
+            debug_print(f"ROM directory cleanup completed: {replaced_count} files replaced with originals")
+                
+        except Exception as e:
+            debug_print(f"Error replacing ROM directory files: {e}")
+    
+    def _get_required_rom_files(self):
+        """Get list of required ROM files based on install_rom.xml reference"""
+        # This list is based on what install_rom.xml contains - the app doesn't parse the XML
+        return [
+            "preloader_g368_nyx.bin",
+            "MBR",
+            "EBR1", 
+            "EBR2",
+            "lk.bin",
+            "boot.img",
+            "recovery.img",
+            "secro.img",
+            "logo.bin",
+            "system.img",
+            "cache.img",
+            "userdata.img",
+            "MTK_AllInOne_DA.bin",
+            "MT6572_Android_scatter.txt"
+        ]
+    
+    def cleanup_cache_directory(self):
+        """Clean up old cache files to prevent accumulation and over-reliance on cached data"""
+        try:
+            debug_print("Cleaning up cache directory...")
+            
+            # Clean up old working tokens (older than 2 hours)
+            working_tokens_file = os.path.join(self.cache_dir, "working_tokens.json")
+            if os.path.exists(working_tokens_file):
+                try:
+                    with open(working_tokens_file, 'r') as f:
+                        data = json.load(f)
+                        cache_time = datetime.datetime.fromisoformat(data.get('cache_time', '1970-01-01T00:00:00'))
+                        if datetime.datetime.now() - cache_time > datetime.timedelta(hours=2):
+                            os.remove(working_tokens_file)
+                            debug_print("Removed old working tokens cache (older than 2 hours)")
+                except Exception as e:
+                    debug_print(f"Error cleaning up working tokens: {e}")
+            
+            # Clean up old rate limit state (older than 1 hour)
+            rate_limit_file = os.path.join(self.cache_dir, "rate_limits.json")
+            if os.path.exists(rate_limit_file):
+                try:
+                    file_time = datetime.datetime.fromtimestamp(os.path.getmtime(rate_limit_file))
+                    if datetime.datetime.now() - file_time > datetime.timedelta(hours=1):
+                        os.remove(rate_limit_file)
+                        debug_print("Removed old rate limit cache (older than 1 hour)")
+                except Exception as e:
+                    debug_print(f"Error cleaning up rate limit cache: {e}")
+            
+            # Clean up old startup tracking (older than 1 day)
+            startup_tracking_file = os.path.join(self.cache_dir, "startup_tracking.json")
+            if os.path.exists(startup_tracking_file):
+                try:
+                    file_time = datetime.datetime.fromtimestamp(os.path.getmtime(startup_tracking_file))
+                    if datetime.datetime.now() - file_time > datetime.timedelta(days=1):
+                        os.remove(startup_tracking_file)
+                        debug_print("Removed old startup tracking cache (older than 1 day)")
+                except Exception as e:
+                    debug_print(f"Error cleaning up startup tracking cache: {e}")
+            
+            debug_print("Cache cleanup completed")
+            
+        except Exception as e:
+            debug_print(f"Error during cache cleanup: {e}")
+        try:
+            old_dir = os.path.join(self.base_dir, ".old")
+            if not os.path.exists(old_dir):
+                return
+                
+            debug_print("Cleaning up .old directory...")
+            removed_count = 0
+            
+            for root, dirs, files in os.walk(old_dir):
+                for file in files:
+                    if file != "y1_helper.py":
+                        file_path = os.path.join(root, file)
+                        try:
+                            os.remove(file_path)
+                            removed_count += 1
+                            debug_print(f"Removed non-y1_helper.py file: {file_path}")
+                        except Exception as e:
+                            debug_print(f"Failed to remove {file_path}: {e}")
+                            
+            if removed_count > 0:
+                debug_print(f"Cleaned up {removed_count} non-y1_helper.py files from .old directory")
+                
+        except Exception as e:
+            debug_print(f"Error cleaning up .old directory: {e}")
+    
+    def is_cache_valid(self):
+        """Check if cache is still valid (not expired)"""
+        try:
+            if not os.path.exists(self.cache_last_update_file):
+                return False
+                
+            with open(self.cache_last_update_file, 'r') as f:
+                last_update_str = f.read().strip()
+                
+            if not last_update_str:
+                return False
+                
+            last_update = datetime.fromisoformat(last_update_str)
+            expiry_time = last_update + timedelta(hours=self.cache_expiry_hours)
+            
+            return datetime.datetime.now() < expiry_time
+            
+        except Exception as e:
+            debug_print(f"Error checking cache validity: {e}")
+            return False
+    
+    def update_cache(self):
+        """Update the cache with latest manifest and release data"""
+        try:
+            debug_print("Updating cache...")
+            
+            # Download latest manifest
+            manifest_content = self.download_manifest_with_fallback()
+            if manifest_content:
+                # Save manifest to cache
+                with open(self.cache_manifest_file, 'w', encoding='utf-8') as f:
+                    f.write(manifest_content)
+                
+                # Parse manifest and build comprehensive index with release URLs
+                self.build_cache_index_with_releases(manifest_content)
+                
+                # Update last update timestamp
+                with open(self.cache_last_update_file, 'w') as f:
+                    f.write(datetime.datetime.now().isoformat())
+                    
+                debug_print("Cache updated successfully")
+            else:
+                debug_print("Failed to download manifest for cache update")
+                
+        except Exception as e:
+            debug_print(f"Error updating cache: {e}")
+    
+    def check_rate_limits(self, token=None):
+        """Check if we can make an API call based on rate limits"""
+        try:
+            now = datetime.datetime.now()
+            
+            # Check unauthenticated limits
+            if not token:
+                unauthenticated = self.api_rate_limits['unauthenticated']
+                if now > unauthenticated['reset_time']:
+                    # Reset counter
+                    unauthenticated['calls'] = 0
+                    unauthenticated['reset_time'] = now + datetime.timedelta(hours=1)
+                
+                if unauthenticated['calls'] >= self.max_unauthenticated_calls:
+                    self.rate_limit_exceeded = True
+                    self.update_title_for_rate_limit()
+                    debug_print("Unauthenticated API rate limit exceeded")
+                    return False
+                
+                unauthenticated['calls'] += 1
+                return True
+            
+            # Check authenticated limits
+            if token not in self.api_rate_limits['authenticated']:
+                self.api_rate_limits['authenticated'][token] = {
+                    'calls': 0, 
+                    'reset_time': now + datetime.timedelta(hours=1)
+                }
+            
+            token_limits = self.api_rate_limits['authenticated'][token]
+            if now > token_limits['reset_time']:
+                # Reset counter
+                token_limits['calls'] = 0
+                token_limits['reset_time'] = now + datetime.timedelta(hours=1)
+            
+            if token_limits['calls'] >= self.max_authenticated_calls:
+                debug_print(f"Authenticated API rate limit exceeded for token: {token[:10]}...")
+                return False
+            
+            token_limits['calls'] += 1
+            return True
+            
+        except Exception as e:
+            debug_print(f"Error checking rate limits: {e}")
+            return True  # Allow call if rate limit check fails
+    
+    def update_title_for_rate_limit(self):
+        """Update title bar to show rate limit status"""
+        try:
+            if self.rate_limit_exceeded:
+                self.title(f"Y1 Helper v{self.version} - Installer Features Temporarily Unavailable")
+            else:
+                self.title(f"Y1 Helper v{self.version}")
+        except Exception as e:
+            debug_print(f"Error updating title: {e}")
+    
+    def save_rate_limit_state(self):
+        """Save rate limit state to file for persistence between sessions"""
+        try:
+            rate_limit_file = os.path.join(self.cache_dir, "rate_limits.json")
+            state = {
+                'unauthenticated': self.api_rate_limits['unauthenticated'],
+                'authenticated': self.api_rate_limits['authenticated'],
+                'rate_limit_exceeded': self.rate_limit_exceeded
+            }
+            
+            # Convert datetime objects to strings for JSON serialization
+            for key in state['unauthenticated']:
+                if isinstance(state['unauthenticated'][key], datetime.datetime):
+                    state['unauthenticated'][key] = state['unauthenticated'][key].isoformat()
+            
+            for token in state['authenticated']:
+                for key in state['authenticated'][token]:
+                    if isinstance(state['authenticated'][token][key], datetime.datetime):
+                        state['authenticated'][token][key] = state['authenticated'][token][key].isoformat()
+            
+            with open(rate_limit_file, 'w') as f:
+                json.dump(state, f, indent=2)
+                
+        except Exception as e:
+            debug_print(f"Error saving rate limit state: {e}")
+    
+    def load_rate_limit_state(self):
+        """Load rate limit state from file"""
+        try:
+            rate_limit_file = os.path.join(self.cache_dir, "rate_limits.json")
+            if os.path.exists(rate_limit_file):
+                with open(rate_limit_file, 'r') as f:
+                    state = json.load(f)
+                
+                # Convert string timestamps back to datetime objects
+                for key in state['unauthenticated']:
+                    if key == 'reset_time':
+                        state['unauthenticated'][key] = datetime.datetime.fromisoformat(state['unauthenticated'][key])
+                
+                for token in state['authenticated']:
+                    for key in state['authenticated'][token]:
+                        if key == 'reset_time':
+                            state['authenticated'][token][key] = datetime.datetime.fromisoformat(state['authenticated'][token][key])
+                
+                self.api_rate_limits = state
+                self.rate_limit_exceeded = state.get('rate_limit_exceeded', False)
+                self.update_title_for_rate_limit()
+                debug_print("Rate limit state loaded from file")
+                
+        except Exception as e:
+            debug_print(f"Error loading rate limit state: {e}")
+    
+    def save_startup_tracking(self):
+        """Save startup tracking information to file"""
+        try:
+            tracking_file = os.path.join(self.cache_dir, "startup_tracking.json")
+            tracking_data = {
+                'last_startup_time': self.startup_timestamp.isoformat(),
+                'last_api_check_time': self.last_api_check_time.isoformat() if self.last_api_check_time else None,
+                'last_cache_refresh_time': self.last_cache_refresh_time.isoformat() if self.last_cache_refresh_time else None
+            }
+            
+            with open(tracking_file, 'w') as f:
+                json.dump(tracking_data, f, indent=2)
+            
+            debug_print("Startup tracking saved")
+        except Exception as e:
+            debug_print(f"Error saving startup tracking: {e}")
+    
+    def load_startup_tracking(self):
+        """Load startup tracking information from file"""
+        try:
+            tracking_file = os.path.join(self.cache_dir, "startup_tracking.json")
+            if os.path.exists(tracking_file):
+                with open(tracking_file, 'r') as f:
+                    tracking_data = json.load(f)
+                
+                # Load last startup time
+                if tracking_data.get('last_startup_time'):
+                    try:
+                        last_startup = datetime.datetime.fromisoformat(tracking_data['last_startup_time'])
+                        time_since_last_startup = datetime.datetime.now() - last_startup
+                        debug_print(f"Time since last startup: {time_since_last_startup.total_seconds() / 60:.1f} minutes")
+                    except Exception as e:
+                        debug_print(f"Error parsing last startup time: {e}")
+                
+                # Load last API check time
+                if tracking_data.get('last_api_check_time'):
+                    try:
+                        self.last_api_check_time = datetime.datetime.fromisoformat(tracking_data['last_api_check_time'])
+                    except Exception as e:
+                        debug_print(f"Error parsing last API check time: {e}")
+                
+                # Load last cache refresh time
+                if tracking_data.get('last_cache_refresh_time'):
+                    try:
+                        self.last_cache_refresh_time = datetime.datetime.fromisoformat(tracking_data['last_cache_refresh_time'])
+                    except Exception as e:
+                        debug_print(f"Error parsing last cache refresh time: {e}")
+                
+                debug_print("Startup tracking loaded")
+        except Exception as e:
+            debug_print(f"Error loading startup tracking: {e}")
+    
+    def should_skip_api_checks(self):
+        """Check if API checks should be skipped due to recent startup"""
+        try:
+            if not self.last_api_check_time:
+                return False
+            
+            time_since_last_check = datetime.datetime.now() - self.last_api_check_time
+            minutes_since_check = time_since_last_check.total_seconds() / 60
+            
+            if minutes_since_check < self.api_check_cooldown_minutes:
+                debug_print(f"Skipping API checks - only {minutes_since_check:.1f} minutes since last check")
+                return True
+            
+            return False
+        except Exception as e:
+            debug_print(f"Error checking API check cooldown: {e}")
+            return False
+    
+    def should_refresh_cache(self):
+        """Check if cache should be refreshed based on time interval or user action"""
+        try:
+            # Always refresh if user triggered it
+            if self.user_triggered_cache_refresh:
+                self.user_triggered_cache_refresh = False
+                return True
+            
+            # Check if cache is expired
+            if not self.is_cache_valid():
+                debug_print("Cache expired, refresh needed")
+                return True
+            
+            # Check if enough time has passed since last refresh
+            if self.last_cache_refresh_time:
+                time_since_refresh = datetime.datetime.now() - self.last_cache_refresh_time
+                minutes_since_refresh = time_since_refresh.total_seconds() / 60
+                
+                if minutes_since_refresh >= self.cache_refresh_interval_minutes:
+                    debug_print(f"Cache refresh interval reached ({minutes_since_refresh:.1f} minutes)")
+                    return True
+            
+            return False
+        except Exception as e:
+            debug_print(f"Error checking cache refresh: {e}")
+            return False
+    
+    def fetch_config_from_github(self):
+        """Fetch config.ini from GitHub master branch to ensure fresh API keys"""
+        try:
+            # Check rate limits before making any API calls
+            if not self.check_rate_limits():
+                debug_print("Rate limit exceeded, skipping config fetch")
+                return False
+            
+            debug_print("Fetching config.ini from GitHub master branch...")
+            
+            # Try to get config.ini directly from master branch
+            config_urls = [
+                "https://raw.githubusercontent.com/team-slide/y1-helper/master/config.ini",
+                "https://raw.githubusercontent.com/team-slide/y1-helper/main/config.ini"
+            ]
+            
+            for config_url in config_urls:
+                try:
+                    # Use unauthenticated request to avoid consuming token quota
+                    response = requests.get(config_url, timeout=30)
+                    if response.status_code == 200:
+                        # Save the fetched config
+                        config_path = self.get_config_path()
+                        with open(config_path, 'w', encoding='utf-8') as f:
+                            f.write(response.text)
+                        debug_print(f"Successfully fetched config.ini from {config_url}")
+                        return True
+                except Exception as e:
+                    debug_print(f"Failed to fetch config from {config_url}: {e}")
+                    continue
+            
+            # Try config.zip as fallback
+            config_zip_urls = [
+                "https://raw.githubusercontent.com/team-slide/y1-helper/master/config.zip",
+                "https://raw.githubusercontent.com/team-slide/y1-helper/main/config.zip"
+            ]
+            
+            for zip_url in config_zip_urls:
+                try:
+                    response = requests.get(zip_url, timeout=30)
+                    if response.status_code == 200:
+                        # Save zip file temporarily
+                        temp_zip = os.path.join(self.cache_dir, "temp_config.zip")
+                        with open(temp_zip, 'wb') as f:
+                            f.write(response.content)
+                        
+                        # Extract config.ini
+                        with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+                            zip_ref.extractall(self.cache_dir)
+                        
+                        # Move config.ini to proper location
+                        extracted_config = os.path.join(self.cache_dir, "config.ini")
+                        config_path = self.get_config_path()
+                        if os.path.exists(extracted_config):
+                            shutil.move(extracted_config, config_path)
+                        
+                        # Clean up
+                        os.remove(temp_zip)
+                        debug_print(f"Successfully extracted config.ini from {zip_url}")
+                        return True
+                        
+                except Exception as e:
+                    debug_print(f"Failed to fetch config.zip from {zip_url}: {e}")
+                    continue
+            
+            debug_print("Failed to fetch config.ini from GitHub")
+            return False
+            
+        except Exception as e:
+            debug_print(f"Error fetching config from GitHub: {e}")
+            return False
+    
+    def download_manifest_with_fallback(self):
+        """Download manifest with multiple fallback methods"""
+        try:
+            # Method 1: Try authenticated GitHub API
+            debug_print("Attempting authenticated manifest download...")
+            response = self._make_github_request_with_retries(self.manifest_url)
+            if response and response.status_code == 200:
+                debug_print("Manifest downloaded via authenticated API")
+                return response.text
+            
+            # Method 2: Try unauthenticated request
+            debug_print("Attempting unauthenticated manifest download...")
+            response = requests.get(self.manifest_url, timeout=30)
+            if response.status_code == 200:
+                debug_print("Manifest downloaded via unauthenticated request")
+                return response.text
+            
+            # Method 3: Try alternative URLs
+            debug_print("Attempting alternative manifest URLs...")
+            alternative_urls = [
+                "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml",
+                "https://github.com/team-slide/slidia/raw/main/slidia_manifest.xml"
+            ]
+            
+            for url in alternative_urls:
+                try:
+                    response = requests.get(url, timeout=30)
+                    if response.status_code == 200:
+                        debug_print(f"Manifest downloaded via alternative URL: {url}")
+                        return response.text
+                except Exception as e:
+                    debug_print(f"Alternative URL {url} failed: {e}")
+                    continue
+            
+            debug_print("All manifest download methods failed")
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error downloading manifest: {e}")
+            return None
+    
+    def build_cache_index_with_releases(self, manifest_content):
+        """Build comprehensive cache index with individual file URLs from GitHub releases"""
+        try:
+            root = ET.fromstring(manifest_content)
+            
+            # Create index structure
+            index = ET.Element("cache_index")
+            index.set("last_updated", datetime.datetime.now().isoformat())
+            
+            # Process firmware packages
+            firmware_section = ET.SubElement(index, "firmware")
+            for package in root.findall('.//package[@handler="Firmware"]'):
+                firmware_entry = ET.SubElement(firmware_section, "entry")
+                firmware_entry.set("name", package.get('name', ''))
+                firmware_entry.set("repo", package.get('repo', ''))
+                firmware_entry.set("url", package.get('url', ''))
+                firmware_entry.set("handler", package.get('handler', ''))
+                
+                # Fetch complete release data with all file URLs
+                release_data = self._get_complete_release_data(package.get('repo', ''), 'firmware')
+                if release_data:
+                    firmware_entry.set("release_url", release_data.get('release_url', ''))
+                    firmware_entry.set("release_tag", release_data.get('tag_name', ''))
+                    
+                    # Add individual file URLs
+                    files_section = ET.SubElement(firmware_entry, "files")
+                    for file_info in release_data.get('files', []):
+                        file_entry = ET.SubElement(files_section, "file")
+                        file_entry.set("name", file_info.get('name', ''))
+                        file_entry.set("url", file_info.get('url', ''))
+                        file_entry.set("size", str(file_info.get('size', 0)))
+                        file_entry.set("type", file_info.get('type', ''))
+                        file_entry.set("download_count", str(file_info.get('download_count', 0)))
+                    
+                    debug_print(f"Added {len(release_data.get('files', []))} files for firmware {package.get('name', '')}")
+                else:
+                    debug_print(f"No release data found for firmware {package.get('name', '')}")
+            
+            # Process app packages
+            app_section = ET.SubElement(index, "apps")
+            for package in root.findall('.//package[@handler="App"]'):
+                app_entry = ET.SubElement(app_section, "entry")
+                app_entry.set("name", package.get('name', ''))
+                app_entry.set("repo", package.get('repo', ''))
+                app_entry.set("url", package.get('url', ''))
+                app_entry.set("handler", package.get('handler', ''))
+                
+                # Fetch complete release data with all file URLs
+                release_data = self._get_complete_release_data(package.get('repo', ''), 'app')
+                if release_data:
+                    app_entry.set("release_url", release_data.get('release_url', ''))
+                    app_entry.set("release_tag", release_data.get('tag_name', ''))
+                    
+                    # Add individual file URLs
+                    files_section = ET.SubElement(app_entry, "files")
+                    for file_info in release_data.get('files', []):
+                        file_entry = ET.SubElement(files_section, "file")
+                        file_entry.set("name", file_info.get('name', ''))
+                        file_entry.set("url", file_info.get('url', ''))
+                        file_entry.set("size", str(file_info.get('size', 0)))
+                        file_entry.set("type", file_info.get('type', ''))
+                        file_entry.set("download_count", str(file_info.get('download_count', 0)))
+                    
+                    debug_print(f"Added {len(release_data.get('files', []))} files for app {package.get('name', '')}")
+                else:
+                    debug_print(f"No release data found for app {package.get('name', '')}")
+            
+            # Save index
+            tree = ET.ElementTree(index)
+            tree.write(self.cache_index_file, encoding='utf-8', xml_declaration=True)
+            debug_print("Comprehensive cache index with file URLs built successfully")
+            
+        except Exception as e:
+            debug_print(f"Error building cache index: {e}")
+    
+    def _get_complete_release_data(self, repo_name, item_type):
+        """Get complete release data including all file URLs with minimal API calls"""
+        try:
+            if not repo_name:
+                return None
+            
+            # Try to get release data via API (single call for all data)
+            release_data = self._get_release_data_via_api(repo_name)
+            if release_data:
+                # Process files based on item type
+                processed_files = self._process_release_files(release_data.get('assets', []), item_type)
+                if processed_files:
+                    return {
+                        'release_url': f"https://github.com/{repo_name}/releases/latest",
+                        'tag_name': release_data.get('tag_name', ''),
+                        'files': processed_files
+                    }
+            
+            # Fallback to page scraping if API fails
+            release_data = self._get_release_data_via_page(repo_name, item_type)
+            if release_data:
+                return release_data
+            
+            debug_print(f"Could not get release data for {repo_name}")
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error getting release data for {repo_name}: {e}")
+            return None
+    
+    def _get_release_data_via_api(self, repo_name):
+        """Get release data via GitHub API with minimal calls"""
+        try:
+            # Single API call to get latest release with all assets
+            api_url = f"https://api.github.com/repos/{repo_name}/releases/latest"
+            response = self._make_github_request_with_retries(api_url)
+            
+            if response and response.status_code == 200:
+                return response.json()
+            
+            # Try unauthenticated API
+            response = requests.get(api_url, timeout=30)
+            if response.status_code == 200:
+                return response.json()
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"API method failed for {repo_name}: {e}")
+            return None
+    
+    def _process_release_files(self, assets, item_type):
+        """Process ALL release assets indiscriminately - let download logic decide what to use"""
+        try:
+            processed_files = []
+            
+            for asset in assets:
+                file_name = asset.get('name', '')
+                file_url = asset.get('browser_download_url', '')
+                file_size = asset.get('size', 0)
+                download_count = asset.get('download_count', 0)
+                
+                # Determine file type
+                file_type = self._determine_file_type(file_name.lower())
+                
+                # Store ALL files indiscriminately - let the download logic decide what to use
+                processed_files.append({
+                    'name': file_name,
+                    'url': file_url,
+                    'size': file_size,
+                    'type': file_type,
+                    'download_count': download_count
+                })
+            
+            # Sort files by download count (most popular first) and then by name
+            processed_files.sort(key=lambda x: (x.get('download_count', 0), x.get('name', '')), reverse=True)
+            
+            debug_print(f"Cached {len(processed_files)} files for {item_type} release")
+            return processed_files
+            
+        except Exception as e:
+            debug_print(f"Error processing release files: {e}")
+            return []
+    
+    def _determine_file_type(self, file_name):
+        """Determine file type based on filename"""
+        file_name = file_name.lower()
+        if file_name.endswith('.apk'):
+            return 'apk'
+        elif file_name.endswith('.img'):
+            return 'img'
+        elif file_name.endswith('.zip'):
+            return 'zip'
+        elif file_name.endswith('.bin'):
+            return 'bin'
+        elif file_name.endswith('.tar.gz'):
+            return 'tar.gz'
+        else:
+            return 'other'
+    
+    def _get_release_data_via_page(self, repo_name, item_type):
+        """Get release data by scraping the releases page as fallback"""
+        try:
+            releases_url = f"https://github.com/{repo_name}/releases"
+            response = requests.get(releases_url, timeout=30)
+            
+            if response.status_code == 200:
+                import re
+                
+                # Look for download links in the page
+                if item_type == 'app':
+                    # For apps, look for APK files
+                    download_pattern = r'href="([^"]*\.apk)"'
+                else:
+                    # For firmware, look for img, zip, bin, tar.gz files
+                    download_pattern = r'href="([^"]*\.(img|zip|bin|tar\.gz))"'
+                
+                matches = re.findall(download_pattern, response.text)
+                
+                if matches:
+                    files = []
+                    for match in matches:
+                        download_path = match[0] if isinstance(match, tuple) else match
+                        if download_path.startswith('/'):
+                            file_url = f"https://github.com{download_path}"
+                        elif download_path.startswith('http'):
+                            file_url = download_path
+                        else:
+                            continue
+                        
+                        # Extract filename from URL
+                        file_name = download_path.split('/')[-1]
+                        file_type = self._determine_file_type(file_name)
+                        
+                        files.append({
+                            'name': file_name,
+                            'url': file_url,
+                            'size': 0,  # Size not available from page scraping
+                            'type': file_type
+                        })
+                    
+                    if files:
+                        return {
+                            'release_url': releases_url,
+                            'tag_name': 'latest',
+                            'files': files
+                        }
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"Page scraping method failed for {repo_name}: {e}")
+            return None
+    
+    def _get_latest_release_url(self, repo_name):
+        """Get the latest release URL for a GitHub repository"""
+        try:
+            if not repo_name:
+                return None
+                
+            # Try multiple methods to get the latest release
+            release_url = self._get_latest_release_via_api(repo_name)
+            if release_url:
+                return release_url
+                
+            # Fallback to releases page scraping
+            release_url = self._get_latest_release_via_page(repo_name)
+            if release_url:
+                return release_url
+                
+            debug_print(f"Could not get release URL for {repo_name}")
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error getting release URL for {repo_name}: {e}")
+            return None
+    
+    def _get_latest_release_via_api(self, repo_name):
+        """Get latest release URL via GitHub API"""
+        try:
+            # Try authenticated API first
+            api_url = f"https://api.github.com/repos/{repo_name}/releases/latest"
+            response = self._make_github_request_with_retries(api_url)
+            
+            if response and response.status_code == 200:
+                release_data = response.json()
+                if 'assets' in release_data and release_data['assets']:
+                    # Get the first asset (usually the main file)
+                    asset = release_data['assets'][0]
+                    return asset.get('browser_download_url')
+                    
+            # Try unauthenticated API
+            response = requests.get(api_url, timeout=30)
+            if response.status_code == 200:
+                release_data = response.json()
+                if 'assets' in release_data and release_data['assets']:
+                    asset = release_data['assets'][0]
+                    return asset.get('browser_download_url')
+                    
+            return None
+            
+        except Exception as e:
+            debug_print(f"API method failed for {repo_name}: {e}")
+            return None
+    
+    def _get_latest_release_via_page(self, repo_name):
+        """Get latest release URL by scraping the releases page"""
+        try:
+            releases_url = f"https://github.com/{repo_name}/releases"
+            response = requests.get(releases_url, timeout=30)
+            
+            if response.status_code == 200:
+                # Look for download links in the page
+                import re
+                # Pattern to match download links for releases
+                download_pattern = r'href="([^"]*\.(apk|zip|tar\.gz|exe|dmg|deb|rpm))"'
+                matches = re.findall(download_pattern, response.text)
+                
+                if matches:
+                    # Get the first match and convert to full URL
+                    download_path = matches[0][0]
+                    if download_path.startswith('/'):
+                        return f"https://github.com{download_path}"
+                    elif download_path.startswith('http'):
+                        return download_path
+                        
+            return None
+            
+        except Exception as e:
+            debug_print(f"Page scraping method failed for {repo_name}: {e}")
+            return None
+    
+    def _get_cached_release_url(self, repo_name, item_type):
+        """Get cached release URL for a repository"""
+        try:
+            cached_index = self.get_cached_index()
+            if not cached_index:
+                return None
+                
+            # Look for the entry in the appropriate section
+            section = 'apps' if item_type == 'app' else 'firmware'
+            for entry in cached_index.findall(f'.//{section}/entry'):
+                if entry.get('repo') == repo_name:
+                    return entry.get('release_url')
+                    
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error getting cached release URL for {repo_name}: {e}")
+            return None
+    
+    def _get_cached_file_urls(self, repo_name, item_type):
+        """Get cached file URLs for a repository"""
+        try:
+            cached_index = self.get_cached_index()
+            if not cached_index:
+                return []
+                
+            # Look for the entry in the appropriate section
+            section = 'apps' if item_type == 'app' else 'firmware'
+            for entry in cached_index.findall(f'.//{section}/entry'):
+                if entry.get('repo') == repo_name:
+                    files = []
+                    for file_entry in entry.findall('.//files/file'):
+                        files.append({
+                            'name': file_entry.get('name', ''),
+                            'url': file_entry.get('url', ''),
+                            'size': int(file_entry.get('size', 0)),
+                            'type': file_entry.get('type', '')
+                        })
+                    return files
+                    
+            return []
+            
+        except Exception as e:
+            debug_print(f"Error getting cached file URLs for {repo_name}: {e}")
+            return []
+    
+    def _get_cached_file_url_by_type(self, repo_name, item_type, file_type):
+        """Get cached file URL for a specific file type"""
+        try:
+            cached_files = self._get_cached_file_urls(repo_name, item_type)
+            for file_info in cached_files:
+                if file_info.get('type') == file_type:
+                    return file_info.get('url')
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error getting cached file URL for {repo_name} type {file_type}: {e}")
+            return None
+    
+    def get_cached_manifest(self):
+        """Get manifest content from cache"""
+        try:
+            if os.path.exists(self.cache_manifest_file):
+                with open(self.cache_manifest_file, 'r', encoding='utf-8') as f:
+                    return f.read()
+            return None
+        except Exception as e:
+            debug_print(f"Error reading cached manifest: {e}")
+            return None
+    
+    def get_cached_index(self):
+        """Get cache index"""
+        try:
+            if os.path.exists(self.cache_index_file):
+                tree = ET.parse(self.cache_index_file)
+                return tree.getroot()
+            return None
+        except Exception as e:
+            debug_print(f"Error reading cache index: {e}")
+            return None
+    
+    def refresh_cache_if_needed(self):
+        """Refresh cache if it's expired or doesn't exist"""
+        if not self.is_cache_valid():
+            debug_print("Cache expired or invalid, refreshing...")
+            self.update_cache()
     
     def setup_windows_11_theme(self):
         """Setup Windows 11 compatible theme with light/dark mode detection"""
@@ -516,29 +1525,62 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Failed to update widget colors: {e}")
     
     def parse_app_manifest(self, manifest_content):
-        """Parse the manifest XML to find app options"""
+        """Parse the manifest XML to find app options with fallback to cache"""
         try:
-            root = ET.fromstring(manifest_content)
-            app_options = []
-            
-            # Look for package elements with handler type "App"
-            for package in root.findall('.//package'):
-                name = package.get('name', '')
-                repo = package.get('repo', '')
-                url = package.get('url', '')
-                handler = package.get('handler', '')
+            # Try to parse the provided manifest content first
+            if manifest_content:
+                root = ET.fromstring(manifest_content)
+                app_options = []
                 
-                # Check if this is an app package
-                if handler == 'App':
-                    app_options.append({
-                        'name': name,
-                        'repo': repo,
-                        'url': url,
-                        'handler': handler
-                    })
+                # Look for package elements with handler type "App"
+                for package in root.findall('.//package'):
+                    name = package.get('name', '')
+                    repo = package.get('repo', '')
+                    url = package.get('url', '')
+                    handler = package.get('handler', '')
+                    
+                    # Check if this is an app package
+                    if handler == 'App':
+                        app_info = {
+                            'name': name,
+                            'repo': repo,
+                            'url': url,
+                            'handler': handler
+                        }
+                        
+                        # Try to get cached file URLs for this app
+                        cached_files = self._get_cached_file_urls(repo, 'app')
+                        if cached_files:
+                            app_info['cached_files'] = cached_files
+                            debug_print(f"Using cached file URLs for {name}: {len(cached_files)} files")
+                        
+                        app_options.append(app_info)
+                
+                if app_options:
+                    debug_print(f"Found {len(app_options)} app options from manifest")
+                    return app_options
             
-            debug_print(f"Found {len(app_options)} app options")
-            return app_options
+            # Fallback to cache if no apps found in manifest
+            debug_print("No apps found in manifest, trying cache...")
+            cached_index = self.get_cached_index()
+            if cached_index:
+                app_options = []
+                for entry in cached_index.findall('.//apps/entry'):
+                    app_options.append({
+                        'name': entry.get('name', ''),
+                        'repo': entry.get('repo', ''),
+                        'url': entry.get('url', ''),
+                        'handler': entry.get('handler', ''),
+                        'release_url': entry.get('release_url', ''),
+                        'cached_files': self._get_cached_file_urls(entry.get('repo', ''), 'app')
+                    })
+                
+                if app_options:
+                    debug_print(f"Found {len(app_options)} app options from cache")
+                    return app_options
+            
+            debug_print("No apps found in manifest or cache")
+            return []
             
         except Exception as e:
             debug_print(f"Error parsing app manifest: {e}")
@@ -606,7 +1648,7 @@ class Y1HelperApp(tk.Tk):
             clean_name = strip_markdown(app['name'])
             # Make the first item (latest) bold using font weight instead of asterisks
             if i == 0:
-                listbox.insert(tk.END, f"★ {clean_name} (Latest)")
+                listbox.insert(tk.END, f"? {clean_name} (Latest)")
             else:
                 listbox.insert(tk.END, clean_name)
         
@@ -736,40 +1778,39 @@ class Y1HelperApp(tk.Tk):
         return root_config
     
     def download_and_unpack_config(self):
-        """Download config.zip from GitHub and unpack config.ini to root directory"""
+        """Download config.ini from GitHub master branch to root directory"""
         try:
-            config_url = "https://github.com/team-slide/Y1-helper/raw/refs/tags/0.7.0/config.zip"
-            config_zip_path = os.path.join(self.base_dir, "config.zip")
+            config_url = "https://raw.githubusercontent.com/team-slide/Y1-helper/master/config.ini"
             config_ini_path = os.path.join(self.base_dir, "config.ini")
             
-            debug_print("Downloading config.zip...")
+            debug_print("Downloading config.ini from master branch...")
             
             # Download config.zip using robust retry mechanism
             response = self._make_github_request_with_retries(config_url)
             
             if response.status_code == 200:
                 # Save the content to file
-                with open(config_zip_path, 'wb') as f:
-                    f.write(response.content)
+                with open(config_ini_path, 'w', encoding='utf-8') as f: f.write(response.text)
                 
-                # Extract config.ini from the zip
-                with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
-                    zip_ref.extract("config.ini", self.base_dir)
+                # Config.ini downloaded directly
                 
-                # Clean up the zip file
-                os.remove(config_zip_path)
-                
-                debug_print("Config.ini extracted successfully")
+                debug_print("Config.ini downloaded successfully from master branch")
             else:
-                debug_print(f"Failed to download config.zip: HTTP {response.status_code}")
+                debug_print(f"Failed to download config.ini: HTTP {response.status_code}")
                 
         except Exception as e:
-            debug_print(f"Failed to download/unpack config.zip: {e}")
+            debug_print(f"Failed to download config.ini: {e}")
             # Continue without config.ini if download fails
     
     def get_random_api_key(self):
         """Get a random API key from config.ini or hardcoded backup keys for rate limit prevention"""
         try:
+            config_path = self.get_config_path()
+            if not os.path.exists(config_path):
+                debug_print(f"Config file not found at: {config_path}")
+                return None
+
+            
             api_keys = []
             
             import configparser
@@ -994,7 +2035,7 @@ class Y1HelperApp(tk.Tk):
         return None  # Not an authentication/rate limit error
     
     def add_api_key_to_config(self, new_key):
-        """Add a new API key to config.ini"""
+        """Add a new API key to config.ini using the api_key format for thousands of keys"""
         try:
             config_path = self.get_config_path()
             
@@ -1009,25 +2050,41 @@ class Y1HelperApp(tk.Tk):
             if 'api_keys' not in config:
                 config['api_keys'] = {}
             
-            # Find next available key number
-            key_number = 1
-            while f'key_{key_number}' in config['api_keys']:
+            # Find next available api_key number (supports 0-9999)
+            key_number = 0
+            while f'api_key{key_number}' in config['api_keys']:
                 key_number += 1
+                if key_number > 9999:  # Safety limit
+                    debug_print("Maximum number of API keys reached (9999)")
+                    return
             
-            # Add the new key
-            config['api_keys'][f'key_{key_number}'] = new_key
+            # Add the new key using api_key format
+            config['api_keys'][f'api_key{key_number}'] = new_key
             
             # Write back to file
             with open(config_path, 'w', encoding='utf-8') as f:
                 config.write(f)
             
-            debug_print(f"Added new API key (key_{key_number}) to config.ini")
+            debug_print(f"Added new API key (api_key{key_number}) to config.ini")
+            
+            # Clear cached working tokens since we added a new one
+            self._clear_cached_working_tokens()
             
         except Exception as e:
             debug_print(f"Error adding API key to config: {e}")
     
+    def _clear_cached_working_tokens(self):
+        """Clear cached working tokens when new tokens are added"""
+        try:
+            cache_file = os.path.join(self.cache_dir, "working_tokens.json")
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+                debug_print("Cleared cached working tokens")
+        except Exception as e:
+            debug_print(f"Error clearing cached working tokens: {e}")
+    
     def get_all_api_keys(self):
-        """Get all available API keys in priority order: config.ini keys first, then backup keys"""
+        """Get all available API keys with optimized handling for thousands of keys"""
         try:
             api_keys = []
             
@@ -1042,27 +2099,39 @@ class Y1HelperApp(tk.Tk):
                 if 'api_keys' in config:
                     debug_print(f"Found api_keys section with {len(config['api_keys'])} entries")
                     try:
-                        # Check for key_1, key_2, etc. format
+                        # Check for key_1, key_2, etc. format (legacy)
                         for key, value in config['api_keys'].items():
                             if isinstance(value, str) and key.startswith('key_') and value.strip():
                                 token = value.strip()
-                                debug_print(f"Found config key {key}: {token[:10]}... (length: {len(token)})")
                                 if token.startswith('github_pat_'):
                                     token = token[11:]  # Remove 'github_pat_' prefix
-                                    debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
-                                api_keys.append(token)
+                                if token not in api_keys:
+                                    api_keys.append(token)
                         
-                        # Check for api_key0 - api_key1000 format
-                        for i in range(1001):  # 0 to 1000
-                            key_name = f'api_key{i}'
-                            if key_name in config['api_keys']:
-                                token = config['api_keys'][key_name].strip()
-                                if token and token not in api_keys:
-                                    debug_print(f"Found config {key_name}: {token[:10]}... (length: {len(token)})")
+                        # Check for api_key0 - api_key9999 format (supports thousands of keys)
+                        # Use a more efficient approach for large numbers of keys
+                        api_key_entries = []
+                        for key, value in config['api_keys'].items():
+                            if key.startswith('api_key') and isinstance(value, str) and value.strip():
+                                try:
+                                    # Extract number from api_key123 format
+                                    key_num = int(key[8:])  # Remove 'api_key' prefix
+                                    token = value.strip()
                                     if token.startswith('github_pat_'):
                                         token = token[11:]  # Remove 'github_pat_' prefix
-                                        debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
-                                    api_keys.append(token)
+                                    api_key_entries.append((key_num, token))
+                                except ValueError:
+                                    # Skip non-numeric keys
+                                    continue
+                        
+                        # Sort by key number and add to api_keys
+                        api_key_entries.sort(key=lambda x: x[0])
+                        for key_num, token in api_key_entries:
+                            if token not in api_keys:
+                                api_keys.append(token)
+                        
+                        debug_print(f"Found {len(api_key_entries)} api_key entries")
+                        
                     except Exception as e:
                         debug_print(f"Error processing api_keys section: {e}")
                 
@@ -1071,10 +2140,8 @@ class Y1HelperApp(tk.Tk):
                     try:
                         token = config['github']['token'].strip()
                         if token:
-                            debug_print(f"Found legacy token: {token[:10]}... (length: {len(token)})")
                             if token.startswith('github_pat_'):
                                 token = token[11:]  # Remove 'github_pat_' prefix
-                                debug_print(f"Stripped github_pat_ prefix, new token: {token[:10]}... (length: {len(token)})")
                             api_keys.append(token)
                     except Exception as e:
                         debug_print(f"Error processing legacy token: {e}")
@@ -1084,17 +2151,147 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Total API keys found from config: {len(api_keys)}")
             
             # Add hardcoded backup keys
-            for i, backup_key in enumerate(BACKUP_API_KEYS):
-                debug_print(f"Adding backup key {i+1}: {backup_key[:10]}... (length: {len(backup_key)})")
-                api_keys.append(backup_key)
+            for backup_key in BACKUP_API_KEYS:
+                if backup_key not in api_keys:
+                    api_keys.append(backup_key)
             
             debug_print(f"Total API keys available (config + backup): {len(api_keys)}")
+            
+            # Randomize the order to distribute load across tokens
+            import random
+            random.shuffle(api_keys)
+            debug_print("API keys randomized for load distribution")
+            
             return api_keys
             
         except Exception as e:
             debug_print(f"Error getting all API keys: {e}")
             # Return backup keys as fallback
             return BACKUP_API_KEYS.copy()
+    
+    def _test_token_efficiency(self, url, max_tokens_to_test=3):
+        """
+        Test a minimal subset of tokens to find working ones quickly.
+        Returns a list of working tokens in order of preference.
+        """
+        try:
+            # First check for cached working tokens
+            cached_tokens = self._get_cached_working_tokens()
+            if cached_tokens:
+                debug_print("Using cached working tokens")
+                return cached_tokens
+            
+            all_keys = self.get_all_api_keys()
+            if not all_keys:
+                debug_print("No API keys available")
+                return []
+            
+            # Test only the last few tokens (most likely to work)
+            tokens_to_test = all_keys[-max_tokens_to_test:] if len(all_keys) > max_tokens_to_test else all_keys
+            working_tokens = []
+            
+            debug_print(f"Testing {len(tokens_to_test)} tokens for efficiency")
+            
+            for i, token in enumerate(tokens_to_test):
+                if not self.check_rate_limits(token):
+                    debug_print(f"Rate limit exceeded for token {token[:10]}..., skipping")
+                    continue
+                
+                headers = {
+                    'User-Agent': 'Y1-Helper/0.7.0',
+                    'Authorization': f'token {token}'
+                }
+                
+                try:
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        debug_print(f"Token {token[:10]}... is working (test {i+1})")
+                        working_tokens.append(token)
+                        # Stop after finding 2 working tokens (more efficient)
+                        if len(working_tokens) >= 2:
+                            break
+                    else:
+                        debug_print(f"Token {token[:10]}... failed with status {response.status_code}")
+                except Exception as e:
+                    debug_print(f"Token {token[:10]}... failed with error: {e}")
+                    continue
+            
+            debug_print(f"Found {len(working_tokens)} working tokens")
+            
+            # Cache the working tokens for future use
+            if working_tokens:
+                self._cache_working_tokens(working_tokens)
+            
+            return working_tokens
+            
+        except Exception as e:
+            debug_print(f"Error testing token efficiency: {e}")
+            return []
+    
+    def _get_cached_working_tokens(self):
+        """Get cached working tokens to avoid repeated testing"""
+        try:
+            cache_file = os.path.join(self.cache_dir, "working_tokens.json")
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r') as f:
+                    data = json.load(f)
+                    cache_time = datetime.datetime.fromisoformat(data.get('cache_time', '1970-01-01T00:00:00'))
+                    # Cache is valid for 1 hour
+                    if datetime.datetime.now() - cache_time < datetime.timedelta(hours=1):
+                        tokens = data.get('tokens', [])
+                        debug_print(f"Using {len(tokens)} cached working tokens")
+                        return tokens
+                    else:
+                        debug_print("Cached working tokens expired")
+            return []
+        except Exception as e:
+            debug_print(f"Error loading cached working tokens: {e}")
+            return []
+    
+    def _cache_working_tokens(self, tokens):
+        """Cache working tokens for future use"""
+        try:
+            cache_file = os.path.join(self.cache_dir, "working_tokens.json")
+            
+            # Read existing tokens to merge with new ones
+            existing_tokens = []
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, 'r') as f:
+                        data = json.load(f)
+                        cache_time = datetime.datetime.fromisoformat(data.get('cache_time', '1970-01-01T00:00:00'))
+                        # Only use existing tokens if cache is still valid (1 hour)
+                        if datetime.datetime.now() - cache_time < datetime.timedelta(hours=1):
+                            existing_tokens = data.get('tokens', [])
+                except Exception:
+                    pass
+            
+            # Merge tokens, avoiding duplicates
+            all_tokens = existing_tokens.copy()
+            for token in tokens:
+                if token not in all_tokens:
+                    all_tokens.append(token)
+            
+            # Keep only the most recent 5 tokens to avoid cache bloat
+            if len(all_tokens) > 5:
+                all_tokens = all_tokens[-5:]
+            
+            data = {
+                'cache_time': datetime.datetime.now().isoformat(),
+                'tokens': all_tokens
+            }
+            with open(cache_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            debug_print(f"Cached {len(all_tokens)} working tokens (added {len(tokens)} new)")
+        except Exception as e:
+            debug_print(f"Error caching working tokens: {e}")
+    
+    def _add_working_token(self, token):
+        """Add a single working token to the cache immediately"""
+        try:
+            self._cache_working_tokens([token])
+        except Exception as e:
+            debug_print(f"Error adding working token: {e}")
     
     def _generate_github_fallback_urls(self, original_url):
         """Generate multiple fallback URLs for GitHub content access"""
@@ -1156,41 +2353,145 @@ class Y1HelperApp(tk.Tk):
 
     def _make_github_request_with_retries(self, url, method='GET', stream=False, **kwargs):
         """
-        Make a GitHub request with comprehensive retry logic and URL fallbacks.
+        Make a GitHub request with highly optimized token selection prioritizing working tokens.
         
-        Priority order:
-        1. All config.ini API keys (in order found)
-        2. All backup API keys (in order)
-        3. Unauthenticated request (final fallback)
-        
-        For each authentication method, tries multiple URL variations.
+        Strategy:
+        1. Use cached working tokens first (most efficient)
+        2. Only test new tokens if no working tokens available
+        3. Cache successful tokens immediately for future use
+        4. Skip expensive fallback to all tokens
+        5. Early termination on success
         
         Returns: requests.Response object
         Raises: requests.RequestException if all attempts fail
         """
+        # Check rate limits before making any API calls
+        if not self.check_rate_limits():
+            debug_print("Rate limit exceeded, trying unauthenticated request only")
+            # Try unauthenticated request as last resort
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers={'User-Agent': 'Y1-Helper/0.7.0'},
+                    stream=stream,
+                    timeout=30,
+                    **kwargs
+                )
+                
+                if response.status_code == 200:
+                    debug_print(f"Unauthenticated request successful for {url} (status: {response.status_code})")
+                    return response
+                else:
+                    debug_print(f"Unauthenticated request failed with status {response.status_code} for URL: {url}")
+                    raise Exception("Rate limit exceeded and unauthenticated request failed")
+                    
+            except Exception as e:
+                debug_print(f"Unauthenticated request failed for URL {url}: {e}")
+                raise Exception("Rate limit exceeded and all request methods failed")
+        
         # Generate fallback URLs
         fallback_urls = self._generate_github_fallback_urls(url)
-        all_keys = self.get_all_api_keys()
-        tried_tokens = set()
+        
+        # Get working tokens (cached or tested)
+        working_tokens = self._get_cached_working_tokens()
+        if not working_tokens and fallback_urls:
+            debug_print("No cached working tokens, testing token efficiency")
+            working_tokens = self._test_token_efficiency(fallback_urls[0])
         
         debug_print(f"Making GitHub request with {len(fallback_urls)} URL variations")
-        debug_print(f"Available tokens: {len(all_keys)} (config + backup)")
+        debug_print(f"Working tokens available: {len(working_tokens)}")
         
-        # Try each URL with each authentication method
+        # Try each URL with working tokens first
         for fallback_url in fallback_urls:
             debug_print(f"Trying URL: {fallback_url}")
             
-            # Try each API key in order
-            for token in all_keys:
-                if token in tried_tokens:
-                    continue
+            # Try working tokens first (most efficient)
+            if working_tokens:
+                for i, token in enumerate(working_tokens):
+                    if not self.check_rate_limits(token):
+                        continue
                     
-                tried_tokens.add(token)
-                debug_print(f"Trying token: {token[:10]}... (attempt {len(tried_tokens)})")
-                
+                    debug_print(f"Trying working token: {token[:10]}... (attempt {i+1}/{len(working_tokens)})")
+                    
+                    headers = {
+                        'User-Agent': 'Y1-Helper/0.7.0',
+                        'Authorization': f'token {token}'
+                    }
+                    
+                    try:
+                        response = requests.request(
+                            method=method,
+                            url=fallback_url,
+                            headers=headers,
+                            stream=stream,
+                            timeout=30,
+                            **kwargs
+                        )
+                        
+                        # Check for authentication/authorization errors
+                        if response.status_code in [401, 403]:
+                            debug_print(f"Working token failed with status {response.status_code}: {token[:10]}...")
+                            continue
+                        
+                        # Success! Stop trying more tokens
+                        debug_print(f"Request successful with working token: {token[:10]}... (status: {response.status_code})")
+                        # Ensure this token stays in cache (move to front)
+                        self._add_working_token(token)
+                        return response
+                        
+                    except requests.RequestException as e:
+                        debug_print(f"Request failed with working token {token[:10]}...: {e}")
+                        continue
+            
+            # If no working tokens available, test a small subset of tokens
+            if not working_tokens:
+                debug_print("No working tokens available, testing new tokens")
+                all_keys = self.get_all_api_keys()
+                if all_keys:
+                    # Test only the last few tokens (most likely to work)
+                    tokens_to_test = all_keys[-3:] if len(all_keys) > 3 else all_keys
+                    
+                    for i, token in enumerate(tokens_to_test):
+                        if not self.check_rate_limits(token):
+                            continue
+                        
+                        debug_print(f"Testing new token: {token[:10]}... (attempt {i+1}/{len(tokens_to_test)})")
+                        
+                        headers = {
+                            'User-Agent': 'Y1-Helper/0.7.0',
+                            'Authorization': f'token {token}'
+                        }
+                        
+                        try:
+                            response = requests.request(
+                                method=method,
+                                url=fallback_url,
+                                headers=headers,
+                                stream=stream,
+                                timeout=30,
+                                **kwargs
+                            )
+                            
+                            # Check for authentication/authorization errors
+                            if response.status_code in [401, 403]:
+                                debug_print(f"New token failed with status {response.status_code}: {token[:10]}...")
+                                continue
+                            
+                            # Success! Cache this token immediately and return
+                            debug_print(f"New token successful: {token[:10]}... (status: {response.status_code})")
+                            self._add_working_token(token)
+                            return response
+                            
+                        except requests.RequestException as e:
+                            debug_print(f"New token failed with error: {token[:10]}...: {e}")
+                            continue
+            
+            # If all authenticated requests failed for this URL, try unauthenticated
+            debug_print(f"All authenticated requests failed for {fallback_url}, trying unauthenticated")
+            if self.check_rate_limits():  # Check unauthenticated rate limit
                 headers = {
-                    'User-Agent': 'Y1-Helper/0.7.0',
-                    'Authorization': f'token {token}'
+                    'User-Agent': 'Y1-Helper/0.7.0'
                 }
                 
                 try:
@@ -1202,41 +2503,12 @@ class Y1HelperApp(tk.Tk):
                         timeout=30,
                         **kwargs
                     )
-                    
-                    # Check for authentication/authorization errors
-                    if response.status_code in [401, 403]:
-                        debug_print(f"Token failed with status {response.status_code}: {token[:10]}...")
-                        continue
-                    
-                    # Success!
-                    debug_print(f"Request successful with token: {token[:10]}... (status: {response.status_code})")
+                    debug_print(f"Unauthenticated request successful for {fallback_url} (status: {response.status_code})")
                     return response
                     
                 except requests.RequestException as e:
-                    debug_print(f"Request failed with token {token[:10]}...: {e}")
+                    debug_print(f"Unauthenticated request also failed for {fallback_url}: {e}")
                     continue
-            
-            # If all authenticated requests failed for this URL, try unauthenticated
-            debug_print(f"All authenticated requests failed for {fallback_url}, trying unauthenticated")
-            headers = {
-                'User-Agent': 'Y1-Helper/0.7.0'
-            }
-            
-            try:
-                response = requests.request(
-                    method=method,
-                    url=fallback_url,
-                    headers=headers,
-                    stream=stream,
-                    timeout=30,
-                    **kwargs
-                )
-                debug_print(f"Unauthenticated request successful for {fallback_url} (status: {response.status_code})")
-                return response
-                
-            except requests.RequestException as e:
-                debug_print(f"Unauthenticated request also failed for {fallback_url}: {e}")
-                continue
         
         # All attempts failed
         debug_print("All GitHub request attempts failed")
@@ -1530,8 +2802,8 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error in check_and_show_update: {e}")
             messagebox.showerror("Update Error", f"Failed to check for updates: {str(e)}")
     
-    def show_update_button_if_needed(self):
-        """Show update button if update is available"""
+    def show_update_pill_if_needed(self):
+        """Show update button if update is available and update menu labels"""
         try:
             if self.update_available and self.update_info:
                 debug_print("Update available, showing update button")
@@ -1540,25 +2812,55 @@ class Y1HelperApp(tk.Tk):
                 
                 # Update button text with version info
                 if self.update_info.get('patch_asset'):
-                    self.update_btn.config(text=f"🔄 Update to v{self.update_info['version']} (Patch)")
+                    self.update_btn.config(text=f"?? Update to v{self.update_info['version']} (Patch)")
                 elif self.update_info.get('installer_asset'):
-                    self.update_btn.config(text=f"🔄 Update to v{self.update_info['version']} (Full)")
+                    self.update_btn.config(text=f"?? Update to v{self.update_info['version']} (Full)")
                 else:
-                    self.update_btn.config(text=f"🔄 Update to v{self.update_info['version']}")
+                    self.update_btn.config(text=f"?? Update to v{self.update_info['version']}")
+                
+                # Update Help menu title to show update available
+                if hasattr(self, 'help_menu') and hasattr(self, 'help_menu_index'):
+                    self.menubar.entryconfig(self.help_menu_index, label="Help - Update Available")
+                    debug_print("Updated Help menu title to show Update Available")
+                
+                # Update menu item labels for update actions
+                if hasattr(self, 'update_app_index') and hasattr(self, 'reinstall_app_index'):
+                    self.help_menu.entryconfig(self.update_app_index, label="Quick Update")
+                    self.help_menu.entryconfig(self.reinstall_app_index, label="Full Install")
+                    debug_print("Updated menu labels for update actions")
             else:
                 debug_print("No update available")
+                # Reset to normal labels if no update available
+                if hasattr(self, 'help_menu') and hasattr(self, 'help_menu_index'):
+                    self.menubar.entryconfig(self.help_menu_index, label="Help")
+                    if hasattr(self, 'update_app_index') and hasattr(self, 'reinstall_app_index'):
+                        self.help_menu.entryconfig(self.update_app_index, label="Update App")
+                        self.help_menu.entryconfig(self.reinstall_app_index, label="Repair App")
+                    debug_print("Reset Help menu title to normal")
                 
         except Exception as e:
-            debug_print(f"Error in show_update_button_if_needed: {e}")
+            debug_print(f"Error in show_update_pill_if_needed: {e}")
     
     def check_for_team_slide_updates(self):
-        """Check for updates from team-slide/y1-helper repository with comprehensive fallbacks"""
+        """Check for updates from team-slide/y1-helper repository with caching"""
         try:
             debug_print("Checking for team-slide updates...")
+            
+            # First check cached update info
+            cached_update = self._get_cached_update_info()
+            if cached_update:
+                debug_print(f"Found cached update info: {cached_update['version']}")
+                if self._is_cached_update_newer(cached_update):
+                    debug_print("Cached update is newer than current version")
+                    return cached_update
+                else:
+                    debug_print("Cached update is not newer than current version")
             
             # Method 1: GitHub API (primary method)
             update_info = self._check_updates_via_api()
             if update_info:
+                # Cache the update info
+                self._cache_update_info(update_info)
                 # Check if version matches latest (no update needed)
                 if update_info.get('version') == self.version:
                     self._cleanup_old_installer_files()
@@ -1568,6 +2870,8 @@ class Y1HelperApp(tk.Tk):
             debug_print("API method failed, trying releases page fallback...")
             update_info = self._check_updates_via_releases_page()
             if update_info:
+                # Cache the update info
+                self._cache_update_info(update_info)
                 # Check if version matches latest (no update needed)
                 if update_info.get('version') == self.version:
                     self._cleanup_old_installer_files()
@@ -1577,6 +2881,8 @@ class Y1HelperApp(tk.Tk):
             debug_print("Releases page failed, trying master branch fallback...")
             update_info = self._check_updates_via_master_branch()
             if update_info:
+                # Cache the update info
+                self._cache_update_info(update_info)
                 # Check if version matches latest (no update needed)
                 if update_info.get('version') == self.version:
                     self._cleanup_old_installer_files()
@@ -1587,6 +2893,102 @@ class Y1HelperApp(tk.Tk):
             
         except Exception as e:
             debug_print(f"Error checking for team-slide updates: {e}")
+            return None
+    
+    def _get_cached_update_info(self):
+        """Get cached update information"""
+        try:
+            update_cache_file = os.path.join(self.cache_dir, "update_cache.json")
+            if os.path.exists(update_cache_file):
+                with open(update_cache_file, 'r') as f:
+                    cached_data = json.load(f)
+                
+                # Check if cache is still valid (24 hours)
+                cache_time = datetime.datetime.fromisoformat(cached_data.get('cache_time', ''))
+                if datetime.datetime.now() - cache_time < datetime.timedelta(hours=24):
+                    debug_print("Using cached update information")
+                    return cached_data.get('update_info')
+                else:
+                    debug_print("Cached update information expired")
+            return None
+        except Exception as e:
+            debug_print(f"Error reading cached update info: {e}")
+            return None
+    
+    def _cache_update_info(self, update_info):
+        """Enhanced cache update information with URLs, release versions, and tags"""
+        try:
+            update_cache_file = os.path.join(self.cache_dir, "update_cache.json")
+            
+            # Enhanced cache data structure
+            cache_data = {
+                'cache_time': datetime.datetime.now().isoformat(),
+                'update_info': update_info,
+                'cached_urls': {},
+                'release_version': update_info.get('version'),
+                'release_tag': update_info.get('tag_name', f"v{update_info.get('version', '')}"),
+                'installer_url': None,
+                'patch_url': None
+            }
+            
+            # Extract installer.exe and patch.exe URLs
+            if 'assets' in update_info:
+                for asset in update_info['assets']:
+                    asset_name = asset.get('name', '').lower()
+                    if asset_name == 'installer.exe':
+                        cache_data['installer_url'] = asset.get('browser_download_url')
+                        cache_data['cached_urls']['installer.exe'] = asset.get('browser_download_url')
+                    elif asset_name == 'patch.exe':
+                        cache_data['patch_url'] = asset.get('browser_download_url')
+                        cache_data['cached_urls']['patch.exe'] = asset.get('browser_download_url')
+            
+            # Add hardcoded fallback URLs for team-slide/y1-helper
+            if not cache_data['installer_url']:
+                cache_data['installer_url'] = f"https://github.com/team-slide/y1-helper/releases/latest/download/installer.exe"
+                cache_data['cached_urls']['installer.exe'] = cache_data['installer_url']
+            if not cache_data['patch_url']:
+                cache_data['patch_url'] = f"https://github.com/team-slide/y1-helper/releases/latest/download/patch.exe"
+                cache_data['cached_urls']['patch.exe'] = cache_data['patch_url']
+            
+            with open(update_cache_file, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            
+            debug_print("Enhanced update information cached")
+        except Exception as e:
+            debug_print(f"Error caching enhanced update info: {e}")
+    
+    def _is_cached_update_newer(self, cached_update):
+        """Check if cached update is newer than current version"""
+        try:
+            current_version = self.version
+            cached_version = cached_update.get('version')
+            
+            if not current_version or not cached_version:
+                return False
+            
+            # Compare versions
+            comparison = self.compare_versions(current_version, cached_version)
+            return comparison < 0  # Cached version is newer
+        except Exception as e:
+            debug_print(f"Error comparing cached update: {e}")
+            return False
+    
+    def _get_cached_update_urls(self):
+        """Get cached installer and patch URLs"""
+        try:
+            update_cache_file = os.path.join(self.cache_dir, "update_cache.json")
+            if os.path.exists(update_cache_file):
+                with open(update_cache_file, 'r') as f:
+                    cached_data = json.load(f)
+                
+                return {
+                    'installer_url': cached_data.get('installer_url'),
+                    'patch_url': cached_data.get('patch_url'),
+                    'cached_urls': cached_data.get('cached_urls', {})
+                }
+            return None
+        except Exception as e:
+            debug_print(f"Error reading cached update URLs: {e}")
             return None
     
     def _cleanup_old_update_files(self):
@@ -1908,8 +3310,6 @@ class Y1HelperApp(tk.Tk):
 
     def _run_update_exe_and_wait(self, exe_path, friendly_name):
         """Launch the update exe and close Y1 Helper immediately."""
-        import subprocess
-        from tkinter import messagebox
         try:
             debug_print(f"Launching {friendly_name}: {exe_path}")
             # Start the process and close Y1 Helper immediately
@@ -2087,7 +3487,7 @@ class Y1HelperApp(tk.Tk):
             
             def update_progress(message):
                 try:
-                    if progress_dialog and hasattr(progress_dialog, 'status_label'):
+                    if progress_dialog and hasattr(progress_dialog, 'status_label') and progress_dialog.winfo_exists():
                         progress_dialog.status_label.config(text=message)
                         progress_dialog.update()
                     debug_print(f"App Download Progress: {message}")
@@ -2096,6 +3496,58 @@ class Y1HelperApp(tk.Tk):
             
             update_progress("Connecting to GitHub...")
             
+            # Check if we have cached file URLs for this app
+            cached_files = app_info.get('cached_files', [])
+            debug_print(f"App {app_info['name']} cached files: {len(cached_files)} files")
+            if cached_files:
+                debug_print(f"Cached files for {app_info['name']}: {cached_files}")
+                # Find APK file in cached files
+                apk_file = None
+                for file_info in cached_files:
+                    if file_info.get('type') == 'apk':
+                        apk_file = file_info
+                        break
+                
+                if apk_file:
+                    debug_print(f"Using cached APK URL for {app_info['name']}: {apk_file['url']}")
+                    update_progress("Using cached APK information...")
+                else:
+                    debug_print(f"No APK file found in cached files for {app_info['name']}, falling back to API")
+                    update_progress("No cached APK found, fetching from GitHub...")
+            else:
+                debug_print(f"No cached files for {app_info['name']}, using API fallback")
+                update_progress("No cached information, fetching from GitHub...")
+            
+                # Download directly from cached URL
+                download_path = os.path.join(tempfile.gettempdir(), f"{app_info['name'].replace(' ', '_')}.apk")
+                
+                update_progress(f"Downloading {app_info['name']} from cached URL...")
+                debug_print(f"Downloading {app_info['name']} from cached URL: {apk_file['url']}")
+                
+                # Download the file
+                debug_print(f"Downloading from URL: {apk_file['url']}")
+                response = requests.get(apk_file['url'], stream=True, timeout=60)
+                response.raise_for_status()
+                debug_print(f"Download response status: {response.status_code}")
+                
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
+                
+                with open(download_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                progress = int((downloaded / total_size) * 100)
+                                update_progress(f"Downloading {app_info['name']}... {progress}%")
+                
+                update_progress(f"Download complete!")
+                
+                # Return the download path for installation
+                return download_path
+            
+            # Fallback to original method if no cached URL or no APK in cached files
             # Get random API key from config for rate limit prevention
             api_key = self.get_random_api_key()
             
@@ -2115,7 +3567,9 @@ class Y1HelperApp(tk.Tk):
                     api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
                     try:
                         # Use comprehensive GitHub API authentication with retries
+                        debug_print(f"Fetching latest release from API: {api_url}")
                         response = self._make_github_request_with_retries(api_url)
+                        debug_print(f"API response status: {response.status_code}")
                         release_data = json.loads(response.text)
                         debug_print(f"Latest release data: {release_data.get('tag_name', 'unknown')} - {len(release_data.get('assets', []))} assets")
                     except Exception as e:
@@ -2204,12 +3658,14 @@ class Y1HelperApp(tk.Tk):
             return download_path
         except Exception as e:
             debug_print(f"Error downloading app {app_info['name']}: {e}")
+            debug_print(f"Full traceback: {traceback.format_exc()}")
             return None
         finally:
             # Always clean up progress dialog
             if progress_dialog:
                 try:
-                    progress_dialog.destroy()
+                    if progress_dialog.winfo_exists():
+                        progress_dialog.destroy()
                 except Exception as e:
                     debug_print(f"Error destroying progress dialog: {e}")
     
@@ -2223,7 +3679,7 @@ class Y1HelperApp(tk.Tk):
             
             def update_progress(message):
                 try:
-                    if progress_dialog and hasattr(progress_dialog, 'status_label'):
+                    if progress_dialog and hasattr(progress_dialog, 'status_label') and progress_dialog.winfo_exists():
                         progress_dialog.status_label.config(text=message)
                         progress_dialog.update()
                     debug_print(f"App Install Progress: {message}")
@@ -2284,7 +3740,8 @@ class Y1HelperApp(tk.Tk):
             # Always clean up progress dialog
             if progress_dialog:
                 try:
-                    progress_dialog.destroy()
+                    if progress_dialog.winfo_exists():
+                        progress_dialog.destroy()
                 except Exception as e:
                     debug_print(f"Error destroying progress dialog: {e}")
     
@@ -2443,7 +3900,7 @@ class Y1HelperApp(tk.Tk):
         # Set Time button with modern styling
         self.set_time_btn = ttk.Button(
             row1_frame,
-            text="🕐 Set Time",
+            text="Set Time",
             command=self.sync_device_time,
             style="TButton"
         )
@@ -2452,7 +3909,7 @@ class Y1HelperApp(tk.Tk):
         # Install Firmware button with modern styling
         self.install_firmware_btn = ttk.Button(
             row1_frame,
-            text="⚡ Install Firmware",
+            text="Install Firmware",
             command=self.install_firmware,
             style="TButton"
         )
@@ -2461,7 +3918,7 @@ class Y1HelperApp(tk.Tk):
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
             row1_frame,
-            text="📸 Screenshot",
+            text="Screenshot",
             command=self.take_screenshot,
             style="TButton"
         )
@@ -2470,28 +3927,14 @@ class Y1HelperApp(tk.Tk):
         # Update Available button (hidden by default, shown when update is available)
         self.update_btn = ttk.Button(
             row1_frame,
-            text="🔄 Update Available",
+            text="Update Available",
             command=self.check_and_show_update,
             style="TButton"
         )
         self.update_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         self.update_btn.pack_forget()  # Hidden by default
         
-        # Clickable Update Pill (blue background, white text, bold)
-        self.update_pill = tk.Label(
-            row1_frame,
-            text="v*.** now available",
-            bg="#0078D4",  # Windows blue
-            fg="white",
-            font=("Segoe UI", 9, "bold"),
-            relief="flat",
-            padx=8,
-            pady=2,
-            cursor="hand2"
-        )
-        self.update_pill.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
-        self.update_pill.pack_forget()  # Hidden by default
-        self.update_pill.bind("<Button-1>", self.show_update_choice_dialog)
+        # Update pill will be positioned in bottom right corner later
         
         # Row 2 - Navigation controls
         row2_frame = ttk.Frame(main_controls_frame)
@@ -2500,7 +3943,7 @@ class Y1HelperApp(tk.Tk):
         # Navigation buttons
         self.home_btn = ttk.Button(
             row2_frame,
-            text="🏠 Home",
+            text="Home",
             command=self.go_home,
             style="TButton"
         )
@@ -2508,7 +3951,7 @@ class Y1HelperApp(tk.Tk):
         
         self.back_btn = ttk.Button(
             row2_frame,
-            text="⬅ Back",
+            text="Back",
             command=self.send_back_key,
             style="TButton"
         )
@@ -2517,7 +3960,7 @@ class Y1HelperApp(tk.Tk):
         # Additional navigation buttons
         self.recent_btn = ttk.Button(
             row2_frame,
-            text="📱 Recent",
+            text="Recent",
             command=self.show_recent_apps,
             style="TButton"
         )
@@ -2525,7 +3968,7 @@ class Y1HelperApp(tk.Tk):
         
         self.menu_btn = ttk.Button(
             row2_frame,
-            text="☰ Menu",
+            text="Menu",
             command=self.nav_center,
             style="TButton"
         )
@@ -2557,10 +4000,10 @@ class Y1HelperApp(tk.Tk):
         # Up button
         self.dpad_up_btn = ttk.Button(
             dpad_buttons_frame,
-            text="▲",
+            text="Up",
             command=self.nav_up,
             style="TButton",
-            width=3
+            width=8
         )
         self.dpad_up_btn.pack()
         
@@ -2570,40 +4013,51 @@ class Y1HelperApp(tk.Tk):
         
         self.dpad_left_btn = ttk.Button(
             middle_row,
-            text="◀",
-            command=self.nav_left,
+            text="Left",command=self.nav_left,
             style="TButton",
-            width=3
+            width=8
         )
         self.dpad_left_btn.pack(side=tk.LEFT)
         
         self.dpad_center_btn = ttk.Button(
             middle_row,
-            text="●",
-            command=self.nav_center,
+            text="OK",command=self.nav_center,
             style="TButton",
-            width=3
+            width=8
         )
         self.dpad_center_btn.pack(side=tk.LEFT, padx=(2, 0))
         
         self.dpad_right_btn = ttk.Button(
             middle_row,
-            text="▶",
-            command=self.nav_right,
+            text="Right",command=self.nav_right,
             style="TButton",
-            width=3
+            width=8
         )
         self.dpad_right_btn.pack(side=tk.LEFT, padx=(2, 0))
         
         # Down button
-        self.dpad_down_btn = ttk.Button(
-            dpad_buttons_frame,
-            text="▼",
+        self.dpad_down_btn = ttk.Button(dpad_buttons_frame,text="Down",
             command=self.nav_down,
             style="TButton",
-            width=3
+            width=8
         )
         self.dpad_down_btn.pack()
+        
+        # Update pill underneath dpad controls
+        self.update_pill = tk.Label(
+            dpad_buttons_frame,
+            text="Y1 Helper Update Available",
+            bg="#0078D4",  # Windows blue
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            padx=8,
+            pady=2,
+            cursor="hand2"
+        )
+        self.update_pill.pack(pady=(10, 0))
+        self.update_pill.pack_forget()  # Hidden by default
+        self.update_pill.bind("<Button-1>", self.show_update_choice_dialog)
         
         # Add tooltips with modern styling
         self._add_tooltip(self.input_mode_btn, (
@@ -2708,8 +4162,8 @@ class Y1HelperApp(tk.Tk):
         self.context_menu.add_command(label="Open Settings", command=self.launch_settings)
         self.context_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
         
-        # Initially hide controls frame until device is connected
-        self.hide_controls_frame()
+        # Controls frame is always visible now - no longer hidden based on device connection
+        # self.hide_controls_frame()  # Removed - controls should always be visible
         
         # Flag to track if input should be disabled (when showing ready.png)
         self.input_disabled = True
@@ -2721,19 +4175,21 @@ class Y1HelperApp(tk.Tk):
         self.screen_canvas.bind("<ButtonRelease-4>", self.on_mouse_wheel_release)  # Linux scroll up release
         self.screen_canvas.bind("<ButtonRelease-5>", self.on_mouse_wheel_release)  # Linux scroll down release
         
-        # Controls are always visible regardless of device connection
+        # Controls are always visible regardless of device connection\n        \n
     
     def hide_controls_frame(self):
         """Hide the controls frame when no device is connected"""
-        if hasattr(self, 'controls_frame'):
-            self.controls_frame.pack_forget()
-            debug_print("Controls frame hidden - no device connected")
+        # Controls frame is always visible now, so this is a no-op
+        # if hasattr(self, 'controls_frame'):
+        #     self.controls_frame.pack_forget()
+        debug_print("Controls frame is always visible - no need to hide")
     
     def show_controls_frame(self):
         """Show the controls frame when device is connected"""
-        if hasattr(self, 'controls_frame'):
-            self.controls_frame.pack(fill=tk.X, pady=(5, 0))
-            debug_print("Controls frame shown - device connected")
+        # Controls frame is always visible now, so this is a no-op
+        # if hasattr(self, 'controls_frame'):
+        #     self.controls_frame.pack(fill=tk.X, pady=(5, 0))
+        debug_print("Controls frame is always visible - no need to show")
     
     def disable_input_bindings(self):
         """Disable all input bindings when device is disconnected"""
@@ -2879,13 +4335,15 @@ class Y1HelperApp(tk.Tk):
         # Add standard device menu items
         self.device_menu.add_command(label="Device Info", command=self.show_device_info)
         self.device_menu.add_command(label="ADB Shell", command=self.open_adb_shell)
-        self.device_menu.add_command(label="File Explorer", command=self.open_file_explorer)
+        # File Explorer is hidden from menu but accessible via Ctrl+F
+        # self.device_menu.add_command(label="File Explorer", command=self.open_file_explorer)
         self.device_menu.add_command(label="Take Screenshot", command=self.take_screenshot)
         self.device_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
         self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
         self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+        # self.device_menu.add_command(label="Repair Device", command=self.repair_device)  # Removed
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Restart Device", command=self.restart_device)
         
@@ -2907,16 +4365,27 @@ class Y1HelperApp(tk.Tk):
         help_menu.add_command(label="Reinstall App", command=self.menu_reinstall_app)
         help_menu.add_command(label="Update App", command=self.menu_update_app)
         help_menu.add_separator()
+        help_menu.add_command(label="Run Older Version", command=self.launch_old_version)
+        help_menu.add_separator()
         help_menu.add_command(label="r/innioasis", command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
         help_menu.add_command(label="Project Gallagher Discord", command=lambda: webbrowser.open_new_tab("https://discord.gg/nAeFsqDB"))
+        help_menu.add_separator()
+        help_menu.add_command(label="Become a Patron", command=lambda: webbrowser.open_new_tab("https://www.patreon.com/c/TeamSlide"))
         menubar.add_cascade(label="Help", menu=help_menu)
         self.help_menu = help_menu  # Store reference for theme application
         
         # Store reference to help menu for dynamic label updates
         self.help_menu_label = "Help"
+        self.help_menu_index = len(menubar.winfo_children()) - 1  # Index of Help menu in menubar
+        self.update_app_index = 1  # Update App is now at index 1
+        self.reinstall_app_index = 0  # Reinstall App is now at index 0
         
         # Bind menu click event to handle update available clicks
         self.bind("<<MenuSelect>>", self.on_menu_select)
+        
+        # Bind Apps menu events to track user interaction
+        self.apps_menu.bind("<<MenuSelect>>", self.on_apps_menu_select)
+        self.apps_menu.bind("<Leave>", self.on_apps_menu_leave)
         
         # Apply theme colors after all menus are created
         self.apply_menu_colors()
@@ -2925,6 +4394,11 @@ class Y1HelperApp(tk.Tk):
     
     def refresh_apps(self):
         """Refresh list of installed apps (Apps menu only)"""
+        # Skip refresh if user is actively interacting with the Apps menu
+        if self.apps_menu_active:
+            debug_print("Skipping apps refresh - user is actively using Apps menu")
+            return
+        
         debug_print("Refreshing apps list")
         self.apps_menu.delete(0, tk.END)
         self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
@@ -3097,6 +4571,7 @@ class Y1HelperApp(tk.Tk):
                                 self.set_device_stay_awake()
                             
                             # Always refresh apps when device is connected and validated
+                            # (unless user is actively using Apps menu)
                             self.refresh_apps()
                         else:
                             # Device detected but not responsive
@@ -3107,8 +4582,8 @@ class Y1HelperApp(tk.Tk):
                                     self.device_connected = False
                                     self.status_var.set("Device disconnected - not responsive")
                                     
-                                    # Hide controls frame and disable input bindings
-                                    self.hide_controls_frame()
+                                    # Disable input bindings but keep controls frame visible
+                                    # self.hide_controls_frame()  # Removed - controls should always be visible
                                     self.disable_input_bindings()
                     else:
                         # Skip validation this time, but ensure device is marked as connected if it was before
@@ -3124,6 +4599,7 @@ class Y1HelperApp(tk.Tk):
                             self.set_device_stay_awake()
                         
                         # Refresh apps even if validation was skipped
+                        # (unless user is actively using Apps menu)
                         self.refresh_apps()
                         
                 else:
@@ -3134,8 +4610,8 @@ class Y1HelperApp(tk.Tk):
                         self.device_connected = False
                         self.status_var.set("First time? Install a Firmware from the Device Menu.")
                         
-                        # Hide controls frame and disable input bindings
-                        self.hide_controls_frame()
+                        # Disable input bindings but keep controls frame visible
+                        # self.hide_controls_frame()  # Removed - controls should always be visible
                         self.disable_input_bindings()
                     
                 self.last_device_check_time = current_time
@@ -3147,8 +4623,8 @@ class Y1HelperApp(tk.Tk):
                     self.device_connected = False
                     self.status_var.set("First time? Install a Firmware from the Device Menu.")
                     
-                    # Hide controls frame and disable input bindings
-                    self.hide_controls_frame()
+                    # Disable input bindings but keep controls frame visible
+                    # self.hide_controls_frame()  # Removed - controls should always be visible
                     self.disable_input_bindings()
         
         # Check if firmware flashing is in progress
@@ -3329,9 +4805,9 @@ class Y1HelperApp(tk.Tk):
                                    "The device appears to be running a factory testing OS image.\n\n"
                                    "Would you like to prepare the device by installing the stock Y1 launcher?\n\n"
                                    "This will allow you to:\n"
-                                   "• Start developing Y1 apps targeting Android API Level 16\n"
-                                   "• Test apps on real hardware with the correct display and input setup\n"
-                                   "• Use the full Y1 Helper functionality")
+                                   "� Start developing Y1 apps targeting Android API Level 16\n"
+                                   "� Test apps on real hardware with the correct display and input setup\n"
+                                   "� Use the full Y1 Helper functionality")
         if result:
             self.install_firmware()
     
@@ -3428,20 +4904,20 @@ class Y1HelperApp(tk.Tk):
                 
                 if not device_connected:
                     if not placeholder_shown:
-                        self.show_ready_placeholder()
+                        self.safe_after(self, 0, self.show_ready_placeholder)
                         placeholder_shown = True
-                        self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                        self.safe_after(self, 0, lambda: self.safe_ui_update(self.status_var, "set", "First time? Install a Firmware from the Device Menu."))
                         # Disable input bindings when device is disconnected
-                        self.disable_input_bindings()
+                        self.safe_after(self, 0, self.disable_input_bindings)
                     time.sleep(1)  # Check less frequently when disconnected
                     continue
                 
                 # Reset placeholder flag when device is connected
                 if placeholder_shown:
                     placeholder_shown = False
-                    self.status_var.set("Device connected")
+                    self.safe_after(self, 0, lambda: self.safe_ui_update(self.status_var, "set", "Device connected"))
                     # Enable input bindings when device reconnects
-                    self.enable_input_bindings()
+                    self.safe_after(self, 0, self.enable_input_bindings)
                 
                 # Use consistent refresh interval for better performance
                 refresh_interval = self.framebuffer_refresh_interval
@@ -3470,9 +4946,9 @@ class Y1HelperApp(tk.Tk):
                             self.consecutive_framebuffer_failures += 1
                             if self.consecutive_framebuffer_failures >= self.max_framebuffer_failures:
                                 if not placeholder_shown:
-                                    self.show_ready_placeholder()
+                                    self.safe_after(self, 0, self.show_ready_placeholder)
                                     placeholder_shown = True
-                                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                                    self.safe_after(self, 0, lambda: self.safe_ui_update(self.status_var, "set", "First time? Install a Firmware from the Device Menu."))
                             self.last_framebuffer_refresh = current_time
                             self.force_refresh_requested = False
                     else:
@@ -3480,9 +4956,9 @@ class Y1HelperApp(tk.Tk):
                         self.consecutive_framebuffer_failures += 1
                         if self.consecutive_framebuffer_failures >= self.max_framebuffer_failures:
                             if not placeholder_shown:
-                                self.show_ready_placeholder()
+                                self.safe_after(self, 0, self.show_ready_placeholder)
                                 placeholder_shown = True
-                                self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                                self.safe_after(self, 0, lambda: self.safe_ui_update(self.status_var, "set", "First time? Install a Firmware from the Device Menu."))
                         time.sleep(0.5)
                 else:
                     # Sleep when not refreshing to reduce CPU usage
@@ -3491,18 +4967,17 @@ class Y1HelperApp(tk.Tk):
             except Exception as e:
                 if not placeholder_shown:
                     self.device_connected = False
-                    self.show_ready_placeholder()
+                    self.safe_after(self, 0, self.show_ready_placeholder)
                     placeholder_shown = True
-                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                    self.safe_after(self, 0, lambda: self.safe_ui_update(self.status_var, "set", "First time? Install a Firmware from the Device Menu."))
                 time.sleep(0.5)
     
     def process_framebuffer(self, fb_path):
         """Process framebuffer data and display on canvas (optimized)"""
         try:
-            from PIL import Image
             if not os.path.exists(fb_path):
                 debug_print("Framebuffer file does not exist")
-                self.show_ready_placeholder()
+                self.safe_after(self, 0, self.show_ready_placeholder)
                 return
             file_size = os.path.getsize(fb_path)
             if file_size == 0:
@@ -3635,13 +5110,23 @@ class Y1HelperApp(tk.Tk):
         try:
             if hasattr(self, 'current_photo'):
                 del self.current_photo
-            self.screen_canvas.config(height=self.display_height)
+            self.safe_ui_update(self.screen_canvas, "config", height=self.display_height)
             
             # Use the provided photo directly - it's already a PhotoImage
             # Just display it as is without trying to modify it
             self.current_photo = photo
-            self.screen_canvas.delete("all")
-            self.screen_canvas.create_image(0, 0, anchor=tk.NW, image=self.current_photo)
+            
+            # Use safe UI update to modify canvas
+            def update_canvas():
+                try:
+                    if self.screen_canvas.winfo_exists():
+                        self.screen_canvas.delete("all")
+                        self.screen_canvas.create_image(0, 0, anchor=tk.NW, image=self.current_photo)
+                except Exception as e:
+                    debug_print(f"Error updating canvas in update_screen_display: {e}")
+            
+            # Schedule the update on the main thread
+            self.safe_after(self, 0, update_canvas)
             
         except Exception as e:
             debug_print(f"Display update error: {e}")
@@ -3659,7 +5144,6 @@ class Y1HelperApp(tk.Tk):
             else:
                 # Fallback: create a simple sleeping placeholder
                 img = Image.new('RGB', (self.display_width, self.display_height), (20, 20, 20))  # Very dark gray
-                from PIL import ImageDraw
                 draw = ImageDraw.Draw(img)
                 
                 # Draw a simple "sleeping" icon (moon shape)
@@ -3669,13 +5153,12 @@ class Y1HelperApp(tk.Tk):
                 
                 # Draw a crescent moon
                 draw.ellipse([center_x - radius, center_y - radius, center_x + radius, center_y + radius], 
-                           outline=(100, 100, 100), width=3)
+                           outline=(100, 100, 100), width=8)
                 draw.ellipse([center_x - radius//2, center_y - radius//2, center_x + radius//2, center_y + radius//2], 
                            fill=(20, 20, 20), outline=(20, 20, 20))
                 
                 # Add "Sleeping" text
                 try:
-                    from PIL import ImageFont
                     font_size = 14
                     try:
                         font = ImageFont.truetype("arial.ttf", font_size)
@@ -3694,13 +5177,23 @@ class Y1HelperApp(tk.Tk):
             
             # Convert to PhotoImage and display
             photo = ImageTk.PhotoImage(img)
-            self.screen_canvas.delete("all")
-            self.screen_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
             
-            # Store reference
-            if hasattr(self, 'current_photo'):
-                del self.current_photo
-            self.current_photo = photo
+            # Use safe UI update to modify canvas
+            def update_canvas():
+                try:
+                    if self.screen_canvas.winfo_exists():
+                        self.screen_canvas.delete("all")
+                        self.screen_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+                        
+                        # Store reference
+                        if hasattr(self, 'current_photo'):
+                            del self.current_photo
+                        self.current_photo = photo
+                except Exception as e:
+                    debug_print(f"Error updating canvas in show_sleeping_placeholder: {e}")
+            
+            # Schedule the update on the main thread
+            self.safe_after(self, 0, update_canvas)
             
         except Exception as e:
             debug_print(f"Sleeping placeholder display error: {e}")
@@ -3719,7 +5212,6 @@ class Y1HelperApp(tk.Tk):
             else:
                 # Fallback: create a simple ready placeholder
                 img = Image.new('RGB', (self.display_width, self.display_height), (30, 30, 30))  # Dark gray
-                from PIL import ImageDraw
                 draw = ImageDraw.Draw(img)
                 
                 # Draw a simple "ready" icon (checkmark)
@@ -3729,13 +5221,12 @@ class Y1HelperApp(tk.Tk):
                 
                 # Draw a checkmark
                 draw.line([center_x - size, center_y, center_x, center_y + size], 
-                         fill=(0, 255, 0), width=3)
+                         fill=(0, 255, 0), width=8)
                 draw.line([center_x, center_y + size, center_x + size, center_y - size], 
-                         fill=(0, 255, 0), width=3)
+                         fill=(0, 255, 0), width=8)
                 
                 # Add "Ready" text
                 try:
-                    from PIL import ImageFont
                     font_size = 14
                     try:
                         font = ImageFont.truetype("arial.ttf", font_size)
@@ -3754,13 +5245,23 @@ class Y1HelperApp(tk.Tk):
             
             # Convert to PhotoImage and display
             photo = ImageTk.PhotoImage(img)
-            self.screen_canvas.delete("all")
-            self.screen_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
             
-            # Store reference
-            if hasattr(self, 'current_photo'):
-                del self.current_photo
-            self.current_photo = photo
+            # Use safe UI update to modify canvas
+            def update_canvas():
+                try:
+                    if self.screen_canvas.winfo_exists():
+                        self.screen_canvas.delete("all")
+                        self.screen_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+                        
+                        # Store reference
+                        if hasattr(self, 'current_photo'):
+                            del self.current_photo
+                        self.current_photo = photo
+                except Exception as e:
+                    debug_print(f"Error updating canvas in show_ready_placeholder: {e}")
+            
+            # Schedule the update on the main thread
+            self.safe_after(self, 0, update_canvas)
             
         except Exception as e:
             debug_print(f"Ready placeholder display error: {e}")
@@ -3778,12 +5279,12 @@ class Y1HelperApp(tk.Tk):
         debug_print("Sending BACK key")
         success, stdout, stderr = self.run_adb_command("shell input keyevent 4")  # KEYCODE_BACK
         if success:
-            self.status_var.set("Back button pressed")
+            self.safe_ui_update(self.status_var, "set", "Back button pressed")
             debug_print("BACK key sent successfully")
             # Force framebuffer refresh after sending input
-            self.after(100, self.force_framebuffer_refresh)
+            self.safe_after(self, 100, self.force_framebuffer_refresh)
         else:
-            self.status_var.set(f"Back button failed: {stderr}")
+            self.safe_ui_update(self.status_var, "set", f"Back button failed: {stderr}")
             debug_print(f"BACK key failed: {stderr}")
     
     def set_device_stay_awake(self):
@@ -4004,6 +5505,9 @@ class Y1HelperApp(tk.Tk):
             )
             return
         
+        # Mark that user triggered a cache refresh
+        self.user_triggered_cache_refresh = True
+        
         try:
             # Create progress dialog for manifest fetching
             progress_dialog = self.create_progress_dialog("Fetching App Manifest")
@@ -4021,48 +5525,38 @@ class Y1HelperApp(tk.Tk):
             update_progress("Connecting to manifest server...")
             self.status_var.set("Fetching app manifest...")
             
-            # Download and parse manifest
-            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
-            debug_print(f"Downloading manifest from: {manifest_url}")
+            # Refresh cache if needed and rebuild file URLs
+            self.refresh_cache_if_needed()
             
-            update_progress("Downloading app manifest...")
-            # Use comprehensive retry mechanism for manifest download
+            # Try to get manifest content with fallback to cache
+            manifest_content = None
+            
+            # Method 1: Try to download fresh manifest
             try:
-                response = self._make_github_request_with_retries(manifest_url)
-                manifest_content = response.text
-                
-                # Parse manifest to find app repositories
-                update_progress("Parsing app manifest...")
-                app_options = self.parse_app_manifest(manifest_content)
-            except Exception as e:
-                debug_print(f"Error downloading or parsing app manifest: {e}")
-                # Try fallback manifest URL
-                try:
-                    fallback_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
-                    debug_print(f"Trying fallback manifest URL: {fallback_url}")
-                    response = self._make_github_request_with_retries(fallback_url)
+                debug_print("Attempting to download fresh manifest...")
+                response = self._make_github_request_with_retries(self.manifest_url)
+                if response and response.status_code == 200:
                     manifest_content = response.text
-                    app_options = self.parse_app_manifest(manifest_content)
-                except Exception as fallback_e:
-                    debug_print(f"Fallback manifest also failed: {fallback_e}")
-                    # Try local fallback manifest
+                    debug_print("Fresh manifest downloaded successfully")
+                    # Update cache with fresh manifest and rebuild file URLs
                     try:
-                        local_manifest_path = os.path.join(assets_dir, "fallback_manifest.xml")
-                        if os.path.exists(local_manifest_path):
-                            debug_print("Using local fallback manifest")
-                            with open(local_manifest_path, 'r', encoding='utf-8') as f:
-                                manifest_content = f.read()
-                            app_options = self.parse_app_manifest(manifest_content)
-                        else:
-                            app_options = []
-                    except Exception as local_e:
-                        debug_print(f"Local fallback also failed: {local_e}")
-                        app_options = []
-                    
-                    # Show appropriate message based on whether we have any options
-                    if not app_options:
-                        self.show_app_selection_dialog_with_error("No apps currently available. Check back later for new releases.")
-                        return
+                        self.build_cache_index_with_releases(manifest_content)
+                        debug_print("Cache updated with fresh manifest and file URLs")
+                    except Exception as e:
+                        debug_print(f"Cache update failed: {e}")
+                else:
+                    debug_print("Fresh manifest download failed, using cache")
+            except Exception as e:
+                debug_print(f"Error downloading fresh manifest: {e}")
+            
+            # Method 2: Fallback to cached manifest
+            if not manifest_content:
+                debug_print("Using cached manifest...")
+                manifest_content = self.get_cached_manifest()
+            
+            # Parse manifest to find app repositories
+            update_progress("Parsing app manifest...")
+            app_options = self.parse_app_manifest(manifest_content)
             
             # Close manifest progress dialog
             if progress_dialog:
@@ -4073,7 +5567,7 @@ class Y1HelperApp(tk.Tk):
             
             if not app_options:
                 # Show error message inline in the app selection dialog
-                self.show_app_selection_dialog_with_error("No apps currently available. Check back later for new releases.")
+                self.show_app_selection_dialog_with_error("No apps currently available. Apps will appear here once they are published to the Slidia repository.")
                 return
             
             # Show app selection dialog
@@ -4083,10 +5577,12 @@ class Y1HelperApp(tk.Tk):
             
             # Download the selected app
             self.status_var.set(f"Downloading {selected_app['name']}...")
+            debug_print(f"Starting download for app: {selected_app['name']}")
             app_path = self.download_app(selected_app)
             
             if not app_path:
-                messagebox.showerror("Download Failed", "Failed to download the selected app.")
+                debug_print(f"Download failed for app: {selected_app['name']}")
+                messagebox.showerror("Download Failed", f"Failed to download {selected_app['name']}. Check the debug logs for details.")
                 return
             
             # Install the app using ADB
@@ -4101,7 +5597,7 @@ class Y1HelperApp(tk.Tk):
                 # Check if the error is due to no device connection
                 user_friendly_error = "App installation failed. Check the logs for details."
                 if error_msg and "no devices/emulators found" in error_msg.lower():
-                    user_friendly_error = "App installation failed: No device connected via ADB.\n\nPlease ensure your device is:\n• Connected via USB\n• Has USB debugging enabled\n• Is authorized for ADB connections"
+                    user_friendly_error = "App installation failed: No device connected via ADB.\n\nPlease ensure your device is:\n� Connected via USB\n� Has USB debugging enabled\n� Is authorized for ADB connections"
                 elif error_msg and "device offline" in error_msg.lower():
                     user_friendly_error = "App installation failed: Device is offline.\n\nPlease check that your device is properly connected and try again."
                 elif error_msg and "unauthorized" in error_msg.lower():
@@ -4665,9 +6161,9 @@ class Y1HelperApp(tk.Tk):
             messagebox.showinfo("Language Settings", 
                               "Language settings have been opened on your device.\n\n"
                               "You can now:\n"
-                              "• Select your preferred language\n"
-                              "• Choose regional settings\n"
-                              "• Configure input methods")
+                              "� Select your preferred language\n"
+                              "� Choose regional settings\n"
+                              "� Configure input methods")
         else:
             error_msg = stderr.strip() if stderr else stdout.strip()
             self.status_var.set(f"Failed to open language settings: {error_msg}")
@@ -4733,6 +6229,127 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error restarting Rockbox: {e}")
             messagebox.showerror("Error", f"Failed to restart Rockbox: {e}")
     
+    def repair_device(self):
+        """Repair device by removing Rockbox and installing stock ROM"""
+        try:
+            if not self.device_connected:
+                messagebox.showerror("No Device Connected", "No device is currently connected via ADB.")
+                return
+            
+            # Show confirmation dialog
+            result = messagebox.askyesno(
+                "Repair Device", 
+                "This will:\n\n"
+                "1. Uninstall Rockbox (if present)\n"
+                "2. Remove Rockbox directories from device\n"
+                "3. Install stock ROM firmware\n\n"
+                "This process will erase all data on your device.\n\n"
+                "Do you want to continue?"
+            )
+            
+            if not result:
+                return
+            
+            # Create progress dialog
+            dialog, status_label, ok_button, progress_bar, text_widget = self.show_firmware_progress_modal("Device Repair Progress")
+            progress_bar = ttk.Progressbar(dialog, mode="indeterminate")
+            progress_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
+            progress_bar.start()
+            
+            def do_repair():
+                try:
+                    # Step 1: Uninstall Rockbox
+                    status_label.config(text="Uninstalling Rockbox...")
+                    dialog.update()
+                    
+                    try:
+                        self.run_adb_command("shell pm uninstall org.rockbox")
+                        debug_print("Rockbox uninstalled successfully")
+                    except Exception as e:
+                        debug_print(f"Rockbox not installed or uninstall failed: {e}")
+                    
+                    # Step 2: Remove Rockbox directories
+                    status_label.config(text="Removing Rockbox directories...")
+                    dialog.update()
+                    
+                    rockbox_paths = [
+                        "/sdcard/rockbox",
+                        "/sdcard/Android/data/org.rockbox",
+                        "/storage/sdcard0/rockbox",
+                        "/storage/sdcard1/rockbox"
+                    ]
+                    
+                    for path in rockbox_paths:
+                        try:
+                            self.run_adb_command(f"shell rm -rf {path}")
+                            debug_print(f"Removed {path}")
+                        except Exception as e:
+                            debug_print(f"Could not remove {path}: {e}")
+                    
+                    # Step 3: Get stock ROM info from manifest
+                    status_label.config(text="Fetching stock ROM information...")
+                    dialog.update()
+                    
+                    # Refresh cache and get manifest
+                    self.refresh_cache_if_needed()
+                    manifest_content = self.get_cached_manifest()
+                    
+                    if not manifest_content:
+                        # Try to download fresh manifest
+                        try:
+                            response = self._make_github_request_with_retries(self.manifest_url)
+                            if response and response.status_code == 200:
+                                manifest_content = response.text
+                        except Exception as e:
+                            debug_print(f"Error downloading manifest: {e}")
+                    
+                    if not manifest_content:
+                        raise Exception("Could not get manifest content")
+                    
+                    # Parse manifest to find stock ROM
+                    firmware_options = self.parse_firmware_manifest(manifest_content)
+                    stock_rom = None
+                    
+                    for firmware in firmware_options:
+                        if 'stock' in firmware.get('name', '').lower() or 'y1-stock-rom' in firmware.get('repo', '').lower():
+                            stock_rom = firmware
+                            break
+                    
+                    if not stock_rom:
+                        # Fallback: create stock ROM info manually
+                        stock_rom = {
+                            'name': 'Stock ROM',
+                            'repo': 'team-slide/y1-stock-rom',
+                            'url': 'https://github.com/team-slide/y1-stock-rom/releases/latest',
+                            'handler': 'Firmware'
+                        }
+                    
+                    # Step 4: Install stock ROM
+                    status_label.config(text="Installing stock ROM...")
+                    dialog.update()
+                    
+                    # Use the existing firmware installation flow
+                    self._download_and_flash_selected_firmware(stock_rom)
+                    
+                    # Close the repair dialog
+                    dialog.destroy()
+                    
+                    messagebox.showinfo("Repair Complete", "Device repair completed successfully!")
+                    
+                except Exception as e:
+                    debug_print(f"Error during device repair: {e}")
+                    dialog.destroy()
+                    messagebox.showerror("Repair Failed", f"Device repair failed: {e}")
+            
+            # Run repair in background thread
+            import threading
+            repair_thread = threading.Thread(target=do_repair, daemon=True)
+            repair_thread.start()
+            
+        except Exception as e:
+            debug_print(f"Error starting device repair: {e}")
+            messagebox.showerror("Error", f"Failed to start device repair: {e}")
+    
     def cleanup(self):
         """Clean up resources before closing"""
         debug_print("Cleaning up resources")
@@ -4746,6 +6363,8 @@ class Y1HelperApp(tk.Tk):
     def on_closing(self):
         """Handle window closing"""
         debug_print("Window closing")
+        # Save startup tracking before closing
+        self.save_startup_tracking()
         self.cleanup()
         self.quit()
 
@@ -4771,14 +6390,49 @@ class Y1HelperApp(tk.Tk):
         label = tk.Label(tooltip, text=text, background="#fff", relief=tk.SOLID, borderwidth=1, font=("Segoe UI", 9), wraplength=320, justify=tk.LEFT)
         label.pack(ipadx=4, ipady=2)
         def enter(event):
-            x = widget.winfo_rootx() + 20
-            y = widget.winfo_rooty() + 20
-            tooltip.geometry(f"+{x}+{y}")
-            tooltip.deiconify()
+            try:
+                if widget.winfo_exists():
+                    x = widget.winfo_rootx() + 20
+                    y = widget.winfo_rooty() + 20
+                    tooltip.geometry(f"+{x}+{y}")
+                    tooltip.deiconify()
+            except:
+                pass
         def leave(event):
-            tooltip.withdraw()
+            try:
+                if tooltip.winfo_exists():
+                    tooltip.withdraw()
+            except:
+                pass
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
+    
+    def safe_ui_update(self, widget, method, *args, **kwargs):
+        """Safely update a UI widget, checking if it exists first"""
+        try:
+            if widget and widget.winfo_exists():
+                if method == "config":
+                    widget.config(*args, **kwargs)
+                elif method == "pack":
+                    widget.pack(*args, **kwargs)
+                elif method == "pack_forget":
+                    widget.pack_forget()
+                elif method == "place":
+                    widget.place(*args, **kwargs)
+                elif method == "grid":
+                    widget.grid(*args, **kwargs)
+                else:
+                    getattr(widget, method)(*args, **kwargs)
+        except Exception as e:
+            debug_print(f"Safe UI update failed for {widget}: {e}")
+    
+    def safe_after(self, widget, delay, callback, *args):
+        """Safely schedule an after callback, checking if widget exists"""
+        try:
+            if widget and widget.winfo_exists():
+                widget.after(delay, callback, *args)
+        except Exception as e:
+            debug_print(f"Safe after failed for {widget}: {e}")
     
     def _should_show_launcher_toggle(self, package_name):
         # Show toggle if .y1 or .y1app in package name
@@ -5020,7 +6674,7 @@ class Y1HelperApp(tk.Tk):
             
             messagebox.showinfo(
                 "Current Update Branch",
-                f"Current update branch: {current_branch}\n\nUse Ctrl+D → Change Update Branch to modify this."
+                f"Current update branch: {current_branch}\n\nUse Ctrl+D ? Change Update Branch to modify this."
             )
             debug_print(f"Current update branch: {current_branch}")
             
@@ -5049,6 +6703,10 @@ class Y1HelperApp(tk.Tk):
         self.bind("<Control-d>", self.toggle_debug_menu)
         self.bind("<Control-D>", self.toggle_debug_menu)
         
+        # File Explorer with Ctrl+F (hidden from menu)
+        self.bind("<Control-f>", lambda e: self.open_file_explorer())
+        self.bind("<Control-F>", lambda e: self.open_file_explorer())
+        
         # Global key handling for all key presses
         self.bind_all("<Key>", self.on_key_press)
         # Global key release handling for cursor control
@@ -5075,9 +6733,32 @@ class Y1HelperApp(tk.Tk):
         debug_print("Update system initialized")
     
     def background_update_check(self):
-        """Background update check that runs once at startup"""
+        """Background update check that runs once at startup with API call optimization"""
         try:
             debug_print("Running background update check...")
+            
+            # Check if we should skip API calls due to recent startup
+            if self.should_skip_api_checks():
+                debug_print("Skipping background update check due to recent startup")
+                return
+            
+            # Update last API check time
+            self.last_api_check_time = datetime.datetime.now()
+            self.save_startup_tracking()
+            
+            # Refresh cache in background only if needed
+            try:
+                if self.should_refresh_cache():
+                    self.refresh_cache_if_needed()
+                    self.last_cache_refresh_time = datetime.datetime.now()
+                    self.save_startup_tracking()
+                    debug_print("Cache refreshed in background")
+                else:
+                    debug_print("Cache refresh not needed, using existing cache")
+                    
+            except Exception as e:
+                debug_print(f"Background cache refresh failed: {e}")
+            
             update_info = self.check_for_team_slide_updates()
             
             if update_info:
@@ -5089,7 +6770,7 @@ class Y1HelperApp(tk.Tk):
                 self.after(1000, lambda: self.show_team_slide_update_prompt(update_info))
                 
                 # Show update button in UI
-                self.after(2000, self.show_update_button_if_needed)
+                self.after(2000, self.show_update_pill_if_needed)
             else:
                 debug_print("No updates available")
                 
@@ -5097,9 +6778,40 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Background update check failed: {e}")
     
     def periodic_update_check(self):
-        """Periodic update check that runs every 5 minutes"""
+        """Periodic update check that runs every 15 minutes with API call optimization"""
         try:
             debug_print("Running periodic update check...")
+            
+            # Check if we should skip API calls due to recent startup
+            if self.should_skip_api_checks():
+                debug_print("Skipping periodic update check due to recent startup")
+                # Schedule next check
+                self.after(self.update_check_interval, self.periodic_update_check)
+                return
+            
+            # Update last API check time
+            self.last_api_check_time = datetime.datetime.now()
+            self.save_startup_tracking()
+            
+            # Refresh cache periodically only if needed
+            try:
+                if self.should_refresh_cache():
+                    self.refresh_cache_if_needed()
+                    self.last_cache_refresh_time = datetime.datetime.now()
+                    self.save_startup_tracking()
+                    debug_print("Cache refreshed in periodic check")
+                else:
+                    debug_print("Cache refresh not needed in periodic check")
+            except Exception as e:
+                debug_print(f"Periodic cache refresh failed: {e}")
+            
+            # Periodic cache cleanup to prevent over-reliance on cached data
+            try:
+                self.cleanup_cache_directory()
+                debug_print("Periodic cache cleanup completed")
+            except Exception as e:
+                debug_print(f"Periodic cache cleanup failed: {e}")
+            
             update_info = self.check_for_team_slide_updates()
             
             if update_info and not self.update_available:
@@ -5111,7 +6823,7 @@ class Y1HelperApp(tk.Tk):
                 self.show_team_slide_update_prompt(update_info)
                 
                 # Show update button in UI
-                self.show_update_button_if_needed
+                self.show_update_pill_if_needed
             
             # Schedule next check
             self.after(self.update_check_interval, self.periodic_update_check)
@@ -5128,36 +6840,105 @@ class Y1HelperApp(tk.Tk):
     def show_firmware_progress_modal(self, title="Firmware Flash Progress"):
         dialog = tk.Toplevel(self)
         dialog.title(title)
-        dialog.geometry("600x180")
+        dialog.geometry("600x400")  # Increased height to accommodate text widget
         dialog.transient(self)
         dialog.grab_set()
         dialog.resizable(False, False)
+        
+        # Apply theme colors to dialog
+        self.apply_dialog_theme(dialog)
+        
         frame = ttk.Frame(dialog, padding="20")
         frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Status label at the top
         status_label = ttk.Label(frame, text="", font=("Segoe UI", 11), wraplength=560, justify=tk.CENTER)
-        status_label.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        status_label.pack(fill=tk.X, pady=(0, 10))
+        
+        # Progress bar
+        progress_bar = ttk.Progressbar(frame, mode="determinate", maximum=100)
+        progress_bar.pack(fill=tk.X, pady=(0, 10))
+        
+        # Text widget for flash tool output with scrollbar
+        output_frame = ttk.Frame(frame)
+        output_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # Create text widget with scrollbar
+        text_widget = tk.Text(output_frame, height=12, font=("Consolas", 9), wrap=tk.WORD)
+        scrollbar = ttk.Scrollbar(output_frame, orient=tk.VERTICAL, command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        
+        # Apply theme colors to text widget
+        try:
+            if hasattr(self, 'bg_color') and hasattr(self, 'fg_color'):
+                text_widget.configure(bg=self.bg_color, fg=self.fg_color, insertbackground=self.fg_color)
+        except Exception as e:
+            debug_print(f"Could not apply theme to text widget: {e}")
+        
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # OK button at the bottom
         ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.DISABLED)
         ok_button.pack(pady=(10, 5))
-        return dialog, status_label, ok_button
+        
+        return dialog, status_label, ok_button, progress_bar, text_widget
 
     def install_firmware(self, local_file=None):
         """Unified firmware flashing: handles both manifest and local file, always uses _download_and_flash_selected_firmware for robust debug and error handling."""
         debug_print(f"install_firmware called with local_file={local_file}")
+        
+        # Mark that user triggered a cache refresh
+        self.user_triggered_cache_refresh = True
+        
         if local_file:
+            # Clear ROM directory before local firmware installation
+            self.clear_rom_directory_for_firmware()
+            
             # Treat local file as a firmware_info dict with a 'url' key
             firmware_info = {'url': local_file}
             self._download_and_flash_selected_firmware(firmware_info)
         else:
-            manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
-            debug_print(f"Downloading manifest from: {manifest_url}")
+            # Refresh cache if needed and rebuild file URLs
+            self.refresh_cache_if_needed()
+            
+            debug_print(f"Attempting to download manifest from: {self.manifest_url}")
             try:
-                # Use comprehensive retry mechanism for manifest download
-                response = self._make_github_request_with_retries(manifest_url)
-                manifest_content = response.text
+                # Try to get manifest content with fallback to cache
+                manifest_content = None
+                
+                # Method 1: Try to download fresh manifest
+                try:
+                    debug_print("Attempting to download fresh manifest...")
+                    response = self._make_github_request_with_retries(self.manifest_url)
+                    if response and response.status_code == 200:
+                        manifest_content = response.text
+                        debug_print("Fresh manifest downloaded successfully")
+                        # Update cache with fresh manifest and rebuild file URLs
+                        try:
+                            self.build_cache_index_with_releases(manifest_content)
+                            debug_print("Cache updated with fresh manifest and file URLs")
+                        except Exception as e:
+                            debug_print(f"Cache update failed: {e}")
+                    else:
+                        debug_print("Fresh manifest download failed, using cache")
+                except Exception as e:
+                    debug_print(f"Error downloading fresh manifest: {e}")
+                
+                # Method 2: Fallback to cached manifest
+                if not manifest_content:
+                    debug_print("Using cached manifest...")
+                    manifest_content = self.get_cached_manifest()
+                
+                if not manifest_content:
+                    debug_print("No manifest content available from any source")
+                    self.show_firmware_selection_dialog_with_error("Unable to load firmware listing. Please check your internet connection and try again.")
+                    return
+                
                 firmware_options = self.parse_firmware_manifest(manifest_content)
                 if not firmware_options:
                     # Show error message inline in the firmware selection dialog
-                    self.show_firmware_selection_dialog_with_error("No firmware currently available. Check back later for new releases.")
+                    self.show_firmware_selection_dialog_with_error("No firmware currently available. Firmware will appear here once they are published to the Slidia repository.")
                     return
                 selected_firmware = self.show_firmware_selection_dialog(firmware_options)
                 if not selected_firmware:
@@ -5165,45 +6946,9 @@ class Y1HelperApp(tk.Tk):
                 self._download_and_flash_selected_firmware(selected_firmware)
             except Exception as e:
                 debug_print(f"Exception while downloading or parsing manifest: {e}")
-                # Try fallback manifest URL
-                try:
-                    fallback_url = "https://raw.githubusercontent.com/team-slide/slidia/main/slidia_manifest.xml"
-                    debug_print(f"Trying fallback manifest URL: {fallback_url}")
-                    response = self._make_github_request_with_retries(fallback_url)
-                    manifest_content = response.text
-                    firmware_options = self.parse_firmware_manifest(manifest_content)
-                    if not firmware_options:
-                        self.show_firmware_selection_dialog_with_error("No firmware currently available. Check back later for new releases.")
-                        return
-                    selected_firmware = self.show_firmware_selection_dialog(firmware_options)
-                    if not selected_firmware:
-                        return
-                    self._download_and_flash_selected_firmware(selected_firmware)
-                except Exception as fallback_e:
-                    debug_print(f"Fallback manifest also failed: {fallback_e}")
-                    # Try local fallback manifest
-                    try:
-                        local_manifest_path = os.path.join(assets_dir, "fallback_manifest.xml")
-                        if os.path.exists(local_manifest_path):
-                            debug_print("Using local fallback manifest")
-                            with open(local_manifest_path, 'r', encoding='utf-8') as f:
-                                manifest_content = f.read()
-                            firmware_options = self.parse_firmware_manifest(manifest_content)
-                            if not firmware_options:
-                                self.show_firmware_selection_dialog_with_error("No firmware currently available. Check back later for new releases.")
-                                return
-                            selected_firmware = self.show_firmware_selection_dialog(firmware_options)
-                            if not selected_firmware:
-                                return
-                            self._download_and_flash_selected_firmware(selected_firmware)
-                        else:
-                            self.show_firmware_selection_dialog_with_error("No firmware currently available. Check back later for new releases.")
-                    except Exception as local_e:
-                        debug_print(f"Local fallback also failed: {local_e}")
-                        self.show_firmware_selection_dialog_with_error("Unable to load firmware manifest. Check your internet connection and try again.")
+                messagebox.showerror("Manifest Error", f"Failed to download or parse manifest: {e}")
 
     def browse_firmware_file(self):
-        from tkinter import messagebox
         file_path = filedialog.askopenfilename(
             title="Select Firmware File",
             filetypes=[("Firmware files", "*.img"), ("All files", "*.")]
@@ -5229,33 +6974,108 @@ class Y1HelperApp(tk.Tk):
         debug_print("install_firmware_with_local_file is deprecated. Use install_firmware(local_file=...) instead.")
         self.install_firmware(local_file=file_path)
 
+    def _prepare_rom_files(self, firmware_dir, dialog, status_label, progress_bar):
+        """
+        Replace pre-populated ROM files with downloaded files and run flash_tool.exe.
+        
+        This function:
+        1. Replaces files in the ROM directory with downloaded files (if available)
+        2. Ensures system.img comes from the downloaded ROM
+        3. Runs flash_tool.exe -c -d -f install_rom.xml
+        
+        The ROM directory is pre-populated at app startup, so this function just handles
+        file replacement and flash tool execution.
+        """
+        try:
+            debug_print(f"Preparing ROM files in: {firmware_dir}")
+            dialog.after(0, status_label.config, {"text": "Preparing ROM files..."})
+            
+            # Ensure ROM directory exists
+            os.makedirs(firmware_dir, exist_ok=True)
+            
+            # Log what files are currently in the ROM directory
+            debug_print(f"Files currently in ROM directory {firmware_dir}:")
+            existing_files = []
+            if os.path.exists(firmware_dir):
+                for file in os.listdir(firmware_dir):
+                    file_path = os.path.join(firmware_dir, file)
+                    if os.path.isfile(file_path):
+                        file_size = os.path.getsize(file_path)
+                        debug_print(f"  {file} ({file_size} bytes)")
+                        existing_files.append(file)
+                    else:
+                        debug_print(f"  {file} (directory)")
+            else:
+                debug_print("  ROM directory does not exist yet")
+            
+            # Check if system.img exists (should come from downloaded ROM)
+            system_img_path = os.path.join(firmware_dir, "system.img")
+            if not os.path.exists(system_img_path):
+                debug_print("Warning: system.img not found - this should come from the downloaded ROM")
+                dialog.after(0, status_label.config, {"text": "Warning: system.img not found in downloaded ROM"})
+                return False
+            
+            debug_print(f"ROM preparation completed: {len(existing_files)} files present")
+            dialog.after(0, status_label.config, {"text": f"ROM files prepared successfully ({len(existing_files)} files)"})
+            
+            # Run flash_tool.exe -c -d -f install_rom.xml
+            def run_flash_tool():
+                try:
+                    debug_print("Running flash_tool.exe -c -d -f install_rom.xml...")
+                    flash_tool_path = os.path.join(self.base_dir, "assets", "flash_tool.exe")
+                    install_rom_xml = os.path.join(firmware_dir, "install_rom.xml")
+                    
+                    if not os.path.exists(flash_tool_path):
+                        debug_print("flash_tool.exe not found in assets directory")
+                        return
+                    
+                    if not os.path.exists(install_rom_xml):
+                        debug_print("install_rom.xml not found in ROM directory")
+                        return
+                    
+                    # Run flash tool in assets directory with correct syntax for SP Flash Tool 5.1904
+                    import subprocess
+                    assets_dir_path = os.path.join(self.base_dir, "assets")
+                    scatter_file = os.path.join(assets_dir_path, "rom", "MT6572_Android_scatter.txt")
+                    
+                    # SP Flash Tool 5.1904 syntax: flash_tool -c download -s scatter_file
+                    cmd = [flash_tool_path, "-c", "download", "-s", scatter_file]
+                    debug_print(f"Running command: {' '.join(cmd)} in {assets_dir_path}")
+                    
+                    result = subprocess.run(cmd, cwd=assets_dir_path, capture_output=True, text=True, timeout=300)
+                    debug_print(f"Flash tool output: {result.stdout}")
+                    if result.stderr:
+                        debug_print(f"Flash tool errors: {result.stderr}")
+                    
+                    debug_print(f"Flash tool completed with return code: {result.returncode}")
+                    
+                except Exception as e:
+                    debug_print(f"Error running flash_tool.exe: {e}")
+            
+            # Run flash tool in a separate thread to avoid blocking UI
+            import threading
+            flash_thread = threading.Thread(target=run_flash_tool, daemon=True)
+            flash_thread.start()
+            
+            return True
+                
+        except Exception as e:
+            debug_print(f"Error preparing ROM files: {e}")
+            dialog.after(0, status_label.config, {"text": f"Error preparing ROM files: {e}"})
+            return False
+
     def _download_and_flash_selected_firmware(self, firmware_info):
         self.is_flashing_firmware = True
-        REQUIRED_FILES = [
-            "preloader_g368_nyx.bin",
-            "MBR",
-            "EBR1",
-            "EBR2",
-            "lk.bin",
-            "boot.img",
-            "recovery.img",
-            "secro.img",
-            "logo.bin",
-            "system.img",
-            "cache.img",
-            "userdata.img",
-            "MTK_AllInOne_DA.bin",
-            "MT6572_Android_scatter.txt"
-        ]
         try:
-            import threading
-            import requests
-            import shutil
             firmware_dir = os.path.join(assets_dir, "rom")
+            
+            # Clear ROM directory before firmware download to prevent contamination
+            self.clear_rom_directory_for_firmware()
+            
             os.makedirs(firmware_dir, exist_ok=True)
             dialog = tk.Toplevel(self)
             dialog.title("Firmware Flash Progress")
-            dialog.geometry("600x200")
+            dialog.geometry("600x400")
             dialog.transient(self)
             dialog.grab_set()
             dialog.resizable(False, False)
@@ -5270,9 +7090,110 @@ class Y1HelperApp(tk.Tk):
             progress_bar = ttk.Progressbar(frame, mode="indeterminate")
             progress_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
             progress_bar.stop()  # Only start after download
+            
             def do_download_and_flash():
                 try:
                     repo_url = firmware_info['url']
+                    # Check if we have cached file URLs for this firmware
+                    cached_files = firmware_info.get('cached_files', [])
+                    
+                    # Look for rom.zip or system.img in cached files first
+                    if cached_files:
+                        rom_zip_file = None
+                        system_img_file = None
+                        
+                        for file_info in cached_files:
+                            if file_info.get('name', '').lower() == 'rom.zip':
+                                rom_zip_file = file_info
+                            elif file_info.get('name', '').lower() == 'system.img':
+                                system_img_file = file_info
+                        
+                        if rom_zip_file:
+                            # Download rom.zip from cached URL
+                            download_url = rom_zip_file['url']
+                            zip_path = os.path.join(firmware_dir, 'rom.zip')
+                            dialog.after(0, status_label.config, {"text": "Downloading firmware files..."})
+                            
+                            response = requests.get(download_url, stream=True, timeout=60)
+                            response.raise_for_status()
+                            file_size = int(response.headers.get('content-length', 0))
+                            downloaded = 0
+                            progress_bar.config(mode='determinate', maximum=file_size)
+                            
+                            with open(zip_path, 'wb') as f:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    if not chunk:
+                                        break
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    percent = (downloaded / file_size) * 100 if file_size else 0
+                                    dialog.after(0, status_label.config, {"text": f"Downloading firmware files... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                    dialog.after(0, progress_bar.step, (len(chunk),))
+                            
+                            dialog.after(0, lambda: progress_bar.config(value=0))
+                            
+                            # Extract rom.zip
+                            dialog.after(0, status_label.config, {"text": "Extracting rom.zip..."})
+                            progress_bar.config(mode='indeterminate')
+                            progress_bar.start()
+                            
+                            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                                zip_ref.extractall(firmware_dir)
+                            
+                            # Clean up the zip file
+                            os.remove(zip_path)
+                            
+                            # Prepare all required ROM files
+                            if not self._prepare_rom_files(firmware_dir, dialog, status_label, progress_bar):
+                                dialog.after(0, status_label.config, {"text": "Failed to prepare ROM files. Aborting."})
+                                dialog.after(0, ok_button.config, {"state": "normal"})
+                                return
+                            
+                            dialog.after(0, warn_label.pack_forget)
+                            dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
+                            time.sleep(1.0)
+                            debug_print(f"Starting flash with rom directory: {firmware_dir}")
+                            self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar)
+                            return
+                        
+                        elif system_img_file:
+                            # Download system.img directly from cached URL
+                            download_url = system_img_file['url']
+                            system_img_path = os.path.join(firmware_dir, 'system.img')
+                            dialog.after(0, status_label.config, {"text": "Downloading firmware files..."})
+                            
+                            response = requests.get(download_url, stream=True, timeout=60)
+                            response.raise_for_status()
+                            file_size = int(response.headers.get('content-length', 0))
+                            downloaded = 0
+                            progress_bar.config(mode='determinate', maximum=file_size)
+                            
+                            with open(system_img_path, 'wb') as f:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    if not chunk:
+                                        break
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    percent = (downloaded / file_size) * 100 if file_size else 0
+                                    dialog.after(0, status_label.config, {"text": f"Downloading firmware files... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                    dialog.after(0, progress_bar.step, (len(chunk),))
+                            
+                            dialog.after(0, lambda: progress_bar.config(value=0))
+                            
+                            # Prepare all required ROM files
+                            if not self._prepare_rom_files(firmware_dir, dialog, status_label, progress_bar):
+                                dialog.after(0, status_label.config, {"text": "Failed to prepare ROM files. Aborting."})
+                                dialog.after(0, ok_button.config, {"state": "normal"})
+                                return
+                            
+                            dialog.after(0, warn_label.pack_forget)
+                            dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
+                            time.sleep(1.0)
+                            debug_print(f"Starting flash with rom directory: {firmware_dir}")
+                            self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar)
+                            return
+                    
+                    # Fallback to original method if no cached files or no suitable files found
                     # Download all .img and .bin assets from the release
                     downloaded_files = {}
                     if 'github.com' in repo_url and ('/releases/latest' in repo_url or '/releases/' in repo_url or repo_url.rstrip('/').endswith('/releases')):
@@ -5298,7 +7219,7 @@ class Y1HelperApp(tk.Tk):
                             # Download only rom.zip
                             download_url = rom_zip_asset['browser_download_url']
                             zip_path = os.path.join(firmware_dir, 'rom.zip')
-                            dialog.after(0, status_label.config, {"text": "Downloading rom.zip..."})
+                            dialog.after(0, status_label.config, {"text": "Downloading firmware files..."})
                             
                             # Use comprehensive retry mechanism for file download
                             response = self._make_github_request_with_retries(download_url, stream=True)
@@ -5313,12 +7234,12 @@ class Y1HelperApp(tk.Tk):
                                     f.write(chunk)
                                     downloaded += len(chunk)
                                     percent = (downloaded / file_size) * 100 if file_size else 0
-                                    dialog.after(0, status_label.config, {"text": f"Downloading rom.zip... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                    dialog.after(0, status_label.config, {"text": f"Downloading firmware files... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
                                     dialog.after(0, progress_bar.step, (len(chunk),))
                             dialog.after(0, lambda: progress_bar.config(value=0))
                             
                             # Extract rom.zip
-                            dialog.after(0, status_label.config, {"text": "Extracting rom.zip..."})
+                            dialog.after(0, status_label.config, {"text": "Extracting firmware files..."})
                             progress_bar.config(mode='indeterminate')
                             progress_bar.start()
                             
@@ -5342,7 +7263,6 @@ class Y1HelperApp(tk.Tk):
                                 
                                 # Clean up the zip file
                                 os.remove(zip_path)
-                                dialog.after(0, status_label.config, {"text": f"Extracted {len(extracted_files)} files from rom.zip"})
                                 
                             except Exception as e:
                                 dialog.after(0, status_label.config, {"text": f"Error extracting rom.zip: {e}"})
@@ -5358,7 +7278,7 @@ class Y1HelperApp(tk.Tk):
                                 if name.endswith('.img') or name.endswith('.bin'):
                                     download_url = asset['browser_download_url']
                                     dest_path = os.path.join(firmware_dir, name)
-                                    dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
+                                    dialog.after(0, status_label.config, {"text": "Downloading firmware files..."})
                                     
                                     # Use comprehensive retry mechanism for file download
                                     response = self._make_github_request_with_retries(download_url, stream=True)
@@ -5373,7 +7293,7 @@ class Y1HelperApp(tk.Tk):
                                             f.write(chunk)
                                             downloaded += len(chunk)
                                             percent = (downloaded / file_size) * 100 if file_size else 0
-                                            dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                            dialog.after(0, status_label.config, {"text": f"Downloading firmware files... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
                                             dialog.after(0, progress_bar.step, (len(chunk),))
                                     dialog.after(0, lambda: progress_bar.config(value=0))
                                     downloaded_files[name] = dest_path
@@ -5382,7 +7302,7 @@ class Y1HelperApp(tk.Tk):
                         name = os.path.basename(repo_url)
                         if name.endswith('.img') or name.endswith('.bin'):
                             dest_path = os.path.join(firmware_dir, name)
-                            dialog.after(0, status_label.config, {"text": f"Downloading {name}..."})
+                            dialog.after(0, status_label.config, {"text": "Downloading firmware files..."})
                             
                             # Use comprehensive retry mechanism for file download
                             response = self._make_github_request_with_retries(repo_url, stream=True)
@@ -5397,10 +7317,11 @@ class Y1HelperApp(tk.Tk):
                                     f.write(chunk)
                                     downloaded += len(chunk)
                                     percent = (downloaded / file_size) * 100 if file_size else 0
-                                    dialog.after(0, status_label.config, {"text": f"Downloading {name}... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
+                                    dialog.after(0, status_label.config, {"text": f"Downloading firmware files... {percent:.1f}% ({downloaded // (1024*1024)}MB / {file_size // (1024*1024)}MB)"})
                                     dialog.after(0, progress_bar.step, (len(chunk),))
                             dialog.after(0, lambda: progress_bar.config(value=0))
                             downloaded_files[name] = dest_path
+                    
                     # Check for system.img
                     debug_print(f"Checking for system.img in downloaded_files: {list(downloaded_files.keys())}")
                     if "system.img" not in downloaded_files:
@@ -5410,29 +7331,30 @@ class Y1HelperApp(tk.Tk):
                         return
                     else:
                         debug_print(f"system.img found at: {downloaded_files['system.img']}")
-                    # Copy missing required files from assets
-                    for req_file in REQUIRED_FILES:
-                        dest_path = os.path.join(firmware_dir, req_file)
-                        if not os.path.exists(dest_path):
-                            src_path = os.path.join(assets_dir, req_file)
-                            if os.path.exists(src_path):
-                                shutil.copy2(src_path, dest_path)
-                    dialog.after(0, status_label.config, {"text": "All firmware files prepared. Starting flash..."})
+                    
+                    # Prepare all required ROM files
+                    if not self._prepare_rom_files(firmware_dir, dialog, status_label, progress_bar):
+                        dialog.after(0, status_label.config, {"text": "Failed to prepare ROM files. Aborting."})
+                        dialog.after(0, ok_button.config, {"state": "normal"})
+                        return
+                    
                     dialog.after(0, warn_label.pack_forget)
                     dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
                     time.sleep(1.0)
-                    debug_print(f"Starting flash with system.img at: {os.path.join(firmware_dir, 'system.img')}")
-                    self._flash_with_modal(dialog, status_label, ok_button, os.path.join(firmware_dir, "system.img"), progress_bar)
+                    debug_print(f"Starting flash with rom directory: {firmware_dir}")
+                    self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar)
+                    
                 except Exception as e:
                     debug_print(f"Exception in do_download_and_flash: {e}")
                     dialog.after(0, status_label.config, {"text": f"Error: {e}"})
                     dialog.after(0, ok_button.config, {"state": "normal"})
+            
             threading.Thread(target=do_download_and_flash, daemon=True).start()
             dialog.wait_window()
         finally:
             self.is_flashing_firmware = False
 
-    def _flash_with_modal(self, dialog, status_label, ok_button, firmware_path, progress_bar=None):
+    def _flash_with_modal(self, dialog, status_label, ok_button, rom_dir, progress_bar=None, text_widget=None):
         import subprocess
         import threading
         try:
@@ -5442,16 +7364,20 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Checking for flash_tool.exe at: {flash_tool_path}")
             if not os.path.exists(flash_tool_path):
                 debug_print("flash_tool.exe not found!")
-                dialog.after(0, status_label.config, {"text": "SP Flash Tool not found in assets directory"})
+                error_msg = "flash_tool.exe not found in assets directory. Please ensure the flash tool is properly installed."
+                dialog.after(0, status_label.config, {"text": error_msg})
                 dialog.after(0, ok_button.pack)
                 dialog.after(0, ok_button.config, {"state": tk.NORMAL})
+                messagebox.showerror("Flash Tool Missing", error_msg)
                 return
             debug_print(f"Checking for install_rom.xml at: {install_rom_path}")
             if not os.path.exists(install_rom_path):
                 debug_print("install_rom.xml not found!")
-                dialog.after(0, status_label.config, {"text": "install_rom.xml not found in assets directory"})
+                error_msg = "install_rom.xml not found in assets directory. This file is required for firmware installation."
+                dialog.after(0, status_label.config, {"text": error_msg})
                 dialog.after(0, ok_button.pack)
                 dialog.after(0, ok_button.config, {"state": tk.NORMAL})
+                messagebox.showerror("Configuration Missing", error_msg)
                 return
             if progress_bar is None:
                 progress_bar = tk.ttk.Progressbar(dialog, mode="determinate", maximum=100)
@@ -5460,8 +7386,14 @@ class Y1HelperApp(tk.Tk):
                 progress_bar.config(mode="determinate", maximum=100)
             progress_bar.config(value=0)
             dialog.after(0, ok_button.pack_forget)
-            command = [flash_tool_path, "-b", "-i", "install_rom.xml"]
-            debug_print(f"About to run flash command: {' '.join(command)} (cwd=assets)")
+            # Run flash tool from assets directory with correct syntax for SP Flash Tool 5.1904
+            scatter_file = os.path.join(assets_dir, "rom", "MT6572_Android_scatter.txt")
+            
+            # SP Flash Tool 5.1904 syntax: flash_tool -c download -s scatter_file
+            command = [flash_tool_path, "-c", "download", "-s", scatter_file]
+            debug_print(f"About to run flash command: {' '.join(command)} (cwd={assets_dir})")
+            debug_print(f"Flash tool path exists: {os.path.exists(flash_tool_path)}")
+            debug_print(f"Scatter file exists: {os.path.exists(scatter_file)}")
             def run_flash():
                 debug_print("Starting flash_tool.exe subprocess...")
                 flash_done = False
@@ -5479,15 +7411,28 @@ class Y1HelperApp(tk.Tk):
                     if flash_done or all_done_seen or error_seen:
                         return
                     
+                    # Check if dialog and progress_bar still exist
+                    try:
+                        if not dialog.winfo_exists() or not progress_bar.winfo_exists():
+                            return
+                    except:
+                        return
+                    
                     elapsed = time.time() - start_time
                     if elapsed >= progress_duration:
                         # Progress complete, stop timer
-                        dialog.after(0, progress_bar.config, {"value": 100})
+                        try:
+                            dialog.after(0, lambda: progress_bar.config({"value": 100}) if progress_bar.winfo_exists() else None)
+                        except:
+                            pass
                         return
                     
                     # Calculate progress percentage
                     progress_percent = min(int((elapsed / progress_duration) * 100), 99)
-                    dialog.after(0, progress_bar.config, {"value": progress_percent})
+                    try:
+                        dialog.after(0, lambda: progress_bar.config({"value": progress_percent}) if progress_bar.winfo_exists() else None)
+                    except:
+                        pass
                     
                     # Schedule next update in 1 second
                     progress_timer = threading.Timer(1.0, update_progress)
@@ -5500,73 +7445,76 @@ class Y1HelperApp(tk.Tk):
                     cwd=assets_dir,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    universal_newlines=True,
-                    bufsize=1
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
                 )
+                debug_print(f"Flash tool process started with PID: {process.pid}")
+                dialog.after(0, status_label.config, {"text": "Flash tool started. Please connect your device and wait for the process to complete."})
+                debug_print("Reading flash tool output...")
                 for line in iter(process.stdout.readline, ''):
-                    line = line.rstrip('\r\n')
-                    debug_print(f"[FLASH-TOOL RAW] {repr(line)}")
-                    print(line)
                     if not line:
-                        continue
-                    # Only update status label at completion or failure
-                    if 'All command exec done!' in line:
+                        break
+                    line = line.strip()
+                    debug_print(f"Flash tool output: {line}")
+                    if text_widget:
+                        try:
+                            dialog.after(0, lambda: text_widget.insert(tk.END, line + "\n") if text_widget and text_widget.winfo_exists() else None)
+                            dialog.after(0, lambda: text_widget.see(tk.END) if text_widget and text_widget.winfo_exists() else None)
+                        except:
+                            pass
+                    if "search usb" in line.lower() or "search-usb" in line.lower():
+                        debug_print("Found 'search usb' prompt")
+                        dialog.after(0, status_label.config, {"text": "Flash tool is searching for USB device. Please connect your Y1 device."})
+                    elif "all command exec done!" in line.lower():
+                        debug_print("Found 'All command exec done!' message")
                         all_done_seen = True
-                        # Cancel progress timer and set to 100%
+                        flash_done = True
+                        dialog.after(0, status_label.config, {"text": "Flash completed successfully! Please wait for device to restart."})
+                        dialog.after(0, lambda: progress_bar.config({"value": 100}) if progress_bar.winfo_exists() else None)
                         if progress_timer:
                             progress_timer.cancel()
-                        dialog.after(0, progress_bar.config, {"value": 100})
-                        dialog.after(0, status_label.config, {"text": "Firmware installation complete! This window will close automatically in 3 seconds."})
-                        dialog.after(0, ok_button.pack)
-                        dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                        debug_print("[UI] Status label updated: Firmware installation complete! This window will close automatically in 3 seconds.")
-                        threading.Timer(3.0, lambda: dialog.destroy() if dialog.winfo_exists() else None).start()
-                    if all_done_seen and 'Disconnect!' in line:
+                        break
+                    elif "disconnect!" in line.lower():
+                        debug_print("Found 'Disconnect!' message")
                         disconnect_seen = True
-                        flash_done = True
-                    # Improved error handling for BROM/COM failures
-                    if ('Connect BROM failed' in line or 'S_COM_PORT_OPEN_FAIL' in line or 'S_BROM_CMD_STARTCMD_FAIL' in line):
-                        flash_done = True
-                        error_seen = True
-                        # Cancel progress timer
+                        dialog.after(0, status_label.config, {"text": "Device disconnected. Flash process completed."})
+                        dialog.after(0, lambda: progress_bar.config({"value": 100}) if progress_bar.winfo_exists() else None)
                         if progress_timer:
                             progress_timer.cancel()
-                        dialog.after(0, status_label.config, {"text": "Flashing failed: Could not connect to device.\n\nPlease check your USB cable, drivers, and ensure the device is in the correct mode (powered off, battery charged, correct USB port). Try a different cable or port if needed."})
-                        dialog.after(0, ok_button.pack)
-                        dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                        debug_print("[UI] Status label updated: Flashing failed due to BROM/COM port error.")
-                    # Only treat as a generic error if 'error' or 'fail' actually appears
-                    if 'Download failed' in line or 'error' in line.lower() or 'fail' in line.lower():
-                        flash_done = True
+                        break
+                    elif "error" in line.lower() or "failed" in line.lower():
+                        debug_print(f"Error detected in flash tool output: {line}")
                         error_seen = True
-                        # Cancel progress timer
+                        dialog.after(0, status_label.config, {"text": f"Flash error detected: {line}"})
+                        dialog.after(0, lambda: progress_bar.config({"value": 0}) if progress_bar.winfo_exists() else None)
                         if progress_timer:
                             progress_timer.cancel()
-                        dialog.after(0, status_label.config, {"text": "Firmware installation failed. Try again after pressing the reset button with a paperclip."})
-                        dialog.after(0, ok_button.pack)
-                        dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-                        debug_print("[UI] Status label updated: Firmware installation failed. Try again after pressing the reset button with a paperclip.")
+                        break
                 process.wait()
-                if not flash_done and not all_done_seen:
-                    # Cancel progress timer
-                    if progress_timer:
-                        progress_timer.cancel()
-                    if error_seen:
-                        dialog.after(0, status_label.config, {"text": "Flashing process failed. Please check the above output for details."})
-                        debug_print("[UI] Status label updated: Flashing process failed. Please check the above output for details.")
-                    else:
-                        dialog.after(0, status_label.config, {"text": "Flashing process finished. Please check the above output for results."})
-                        debug_print("[UI] Status label updated: Flashing process finished. Please check the above output for results.")
-                    dialog.after(0, ok_button.pack)
-                    dialog.after(0, ok_button.config, {"state": tk.NORMAL})
+                debug_print(f"Flash tool process completed with return code: {process.returncode}")
+                if process.returncode != 0 and not flash_done:
+                    debug_print("Flash tool exited with non-zero return code")
+                    dialog.after(0, status_label.config, {"text": f"Flash tool exited with error code: {process.returncode}"})
+                    dialog.after(0, lambda: progress_bar.config({"value": 0}) if progress_bar.winfo_exists() else None)
+                elif flash_done:
+                    debug_print("Flash completed successfully")
+                    dialog.after(0, status_label.config, {"text": "Firmware flash completed successfully!"})
+                    dialog.after(0, lambda: progress_bar.config({"value": 100}) if progress_bar.winfo_exists() else None)
+                else:
+                    debug_print("Flash tool completed but no completion message was detected")
+                    dialog.after(0, status_label.config, {"text": "Flash tool completed. Please check if the firmware was installed successfully."})
+                    dialog.after(0, lambda: progress_bar.config({"value": 100}) if progress_bar.winfo_exists() else None)
+                dialog.after(0, ok_button.pack)
+                dialog.after(0, ok_button.config, {"state": tk.NORMAL})
+                if progress_timer:
+                    progress_timer.cancel()
             threading.Thread(target=run_flash, daemon=True).start()
         except Exception as e:
             debug_print(f"Exception in _flash_with_modal: {e}")
-            dialog.after(0, status_label.config, {"text": f"Error during firmware flashing: {e}"})
+            dialog.after(0, status_label.config, {"text": f"Error starting flash tool: {e}"})
             dialog.after(0, ok_button.pack)
             dialog.after(0, ok_button.config, {"state": tk.NORMAL})
-
-
 
     def create_progress_dialog(self, title="Progress"):
         """Create a progress dialog with status and progress bar"""
@@ -5605,29 +7553,62 @@ class Y1HelperApp(tk.Tk):
         return dialog
 
     def parse_firmware_manifest(self, manifest_content):
-        """Parse the manifest XML to find firmware options"""
+        """Parse the manifest XML to find firmware options with fallback to cache"""
         try:
-            root = ET.fromstring(manifest_content)
-            firmware_options = []
-            
-            # Look for package elements with handler types "Firmware" or "Custom Firmware"
-            for package in root.findall('.//package'):
-                name = package.get('name', '')
-                repo = package.get('repo', '')
-                url = package.get('url', '')
-                handler = package.get('handler', '')
+            # Try to parse the provided manifest content first
+            if manifest_content:
+                root = ET.fromstring(manifest_content)
+                firmware_options = []
                 
-                # Check if this is a firmware package
-                if handler in ['Firmware', 'Custom Firmware']:
-                    firmware_options.append({
-                        'name': name,
-                        'repo': repo,
-                        'url': url,
-                        'handler': handler
-                    })
+                # Look for package elements with handler types "Firmware" or "Custom Firmware"
+                for package in root.findall('.//package'):
+                    name = package.get('name', '')
+                    repo = package.get('repo', '')
+                    url = package.get('url', '')
+                    handler = package.get('handler', '')
+                    
+                    # Check if this is a firmware package
+                    if handler in ['Firmware', 'Custom Firmware']:
+                        firmware_info = {
+                            'name': name,
+                            'repo': repo,
+                            'url': url,
+                            'handler': handler
+                        }
+                        
+                        # Try to get cached file URLs for this firmware
+                        cached_files = self._get_cached_file_urls(repo, 'firmware')
+                        if cached_files:
+                            firmware_info['cached_files'] = cached_files
+                            debug_print(f"Using cached file URLs for firmware {name}: {len(cached_files)} files")
+                        
+                        firmware_options.append(firmware_info)
+                
+                if firmware_options:
+                    debug_print(f"Found {len(firmware_options)} firmware options from manifest")
+                    return firmware_options
             
-            debug_print(f"Found {len(firmware_options)} firmware options")
-            return firmware_options
+            # Fallback to cache if no firmware found in manifest
+            debug_print("No firmware found in manifest, trying cache...")
+            cached_index = self.get_cached_index()
+            if cached_index:
+                firmware_options = []
+                for entry in cached_index.findall('.//firmware/entry'):
+                    firmware_options.append({
+                        'name': entry.get('name', ''),
+                        'repo': entry.get('repo', ''),
+                        'url': entry.get('url', ''),
+                        'handler': entry.get('handler', ''),
+                        'release_url': entry.get('release_url', ''),
+                        'cached_files': self._get_cached_file_urls(entry.get('repo', ''), 'firmware')
+                    })
+                
+                if firmware_options:
+                    debug_print(f"Found {len(firmware_options)} firmware options from cache")
+                    return firmware_options
+            
+            debug_print("No firmware found in manifest or cache")
+            return []
             
         except Exception as e:
             debug_print(f"Error parsing manifest: {e}")
@@ -5957,10 +7938,31 @@ class Y1HelperApp(tk.Tk):
         debug_print(f"Terminating current process: PID {current_pid}")
         return killed_count
 
+
     def startup_update_check(self):
-        """Check for updates at startup and show pill/menu indicator if available"""
         try:
             debug_print("Running startup update check...")
+            
+            # First check cached update info
+            cached_update = self._get_cached_update_info()
+            if cached_update and self._is_cached_update_newer(cached_update):
+                debug_print(f"Found cached update info: {cached_update['version']}")
+                debug_print("Cached update is newer than current version")
+                self.update_info = cached_update
+                self.update_available = True
+                
+                # Show update pill immediately
+                self.after(1000, self.show_update_pill_if_needed)
+                return
+            
+            # Check if we should skip API calls due to recent startup
+            if self.should_skip_api_checks():
+                debug_print("Skipping startup update check due to recent startup")
+                return
+            
+            # Update last API check time
+            self.last_api_check_time = datetime.datetime.now()
+            self.save_startup_tracking()
             
             # Check for updates using all methods
             update_info = self._check_updates_via_api()
@@ -6040,7 +8042,7 @@ class Y1HelperApp(tk.Tk):
                 self.show_update_pill_if_needed()
             
             # Update Now button
-            update_btn = ttk.Button(buttons_frame, text="🔄 Update Now", 
+            update_btn = ttk.Button(buttons_frame, text="Update Now", 
                                    command=update_now, style="TButton")
             update_btn.pack(fill=tk.X, pady=(0, 10))
             
@@ -6057,12 +8059,12 @@ class Y1HelperApp(tk.Tk):
         try:
             if hasattr(self, 'update_info') and self.update_info:
                 debug_print("Showing update pill")
-                self.update_pill.config(text=f"v{self.update_info['version']} now available")
-                self.update_pill.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
-                
-                # Update Help menu label to show "Update Available" in bold
+
+
+
+                self.update_pill.config(text="Y1 Helper Update Available")
                 self.help_menu_label = "Update Available"
-                self.menubar.entryconfig("Help", label=f"**{self.help_menu_label}**")
+                self.menubar.entryconfig("Help", label=self.help_menu_label)
         except Exception as e:
             debug_print(f"Error in show_update_pill_if_needed: {e}")
 
@@ -6080,6 +8082,25 @@ class Y1HelperApp(tk.Tk):
                     self.show_update_choice_dialog()
         except Exception as e:
             debug_print(f"Error in on_menu_select: {e}")
+    
+    def on_apps_menu_select(self, event):
+        """Track when user is interacting with Apps menu"""
+        self.apps_menu_active = True
+        self.apps_menu_last_interaction = datetime.datetime.now()
+        debug_print("Apps menu interaction detected")
+    
+    def on_apps_menu_leave(self, event):
+        """Track when user leaves Apps menu"""
+        # Delay the deactivation to prevent flickering
+        self.after(500, self._deactivate_apps_menu)
+    
+    def _deactivate_apps_menu(self):
+        """Deactivate Apps menu after a delay"""
+        if self.apps_menu_last_interaction:
+            time_since_interaction = datetime.datetime.now() - self.apps_menu_last_interaction
+            if time_since_interaction.total_seconds() > 0.5:  # 500ms delay
+                self.apps_menu_active = False
+                debug_print("Apps menu deactivated")
 
     def show_update_choice_dialog(self, event=None):
         """Show dialog to choose between quick update (patch) or full update (installer)"""
@@ -6151,13 +8172,13 @@ class Y1HelperApp(tk.Tk):
             
             # Quick Update button (patch)
             if self.update_info.get('patch_asset'):
-                quick_btn = ttk.Button(buttons_frame, text="🔄 Quick Update (Patch)", 
+                quick_btn = ttk.Button(buttons_frame, text="Quick Update (Patch)", 
                                       command=quick_update, style="TButton")
                 quick_btn.pack(fill=tk.X, pady=(0, 10))
             
             # Full Update button (installer)
             if self.update_info.get('installer_asset'):
-                full_btn = ttk.Button(buttons_frame, text="⚡ Full Update (Installer)", 
+                full_btn = ttk.Button(buttons_frame, text="Full Update (Installer)", 
                                      command=full_update, style="TButton")
                 full_btn.pack(fill=tk.X, pady=(0, 10))
             
@@ -6169,6 +8190,38 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error in show_update_choice_dialog: {e}")
             messagebox.showerror("Update Error", f"Failed to show update dialog: {str(e)}")
 
+    def launch_old_version(self):
+        """Launch old.py and exit current instance"""
+        try:
+            debug_print("Launching old.py...")
+            
+            # Get the path to old.py
+            old_py_path = os.path.join(self.base_dir, "old.py")
+            python_exe = os.path.join(self.base_dir, "assets", "python", "python.exe")
+            
+            if not os.path.exists(old_py_path):
+                messagebox.showerror("Error", "old.py not found in the project directory")
+                return
+            
+            if not os.path.exists(python_exe):
+                messagebox.showerror("Error", "Python executable not found at assets/python/python.exe")
+                return
+            
+            # Set up environment variables
+            env = os.environ.copy()
+            env['Y1_HELPER_ROOT'] = self.base_dir
+            env['Y1_HELPER_ASSETS'] = os.path.join(self.base_dir, 'assets')
+            
+            # Launch old.py
+            subprocess.Popen([python_exe, old_py_path], cwd=self.base_dir, env=env)
+            
+            # Exit current instance
+            self.quit()
+            
+        except Exception as e:
+            debug_print(f"Error launching old.py: {e}")
+            messagebox.showerror("Error", f"Failed to launch old.py: {e}")
+    
     def show_team_slide_update_prompt(self, update_info):
         if self.update_prompt_shown:
             return
@@ -6224,10 +8277,10 @@ class FileExplorerDialog:
         toolbar.pack(fill=tk.X, pady=(0, 10))
         
         # Navigation buttons
-        ttk.Button(toolbar, text="↑ Up", command=self.go_up).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(toolbar, text="🏠 Home", command=self.go_home).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(toolbar, text="📁 Root", command=self.go_root).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(toolbar, text="🔄 Refresh", command=self.refresh_current).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(toolbar, text="Up", command=self.go_up).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(toolbar, text="Home", command=self.go_home).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(toolbar, text="Root", command=self.go_root).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(toolbar, text="Refresh", command=self.refresh_current).pack(side=tk.LEFT, padx=(0, 5))
         
         # Path display
         ttk.Label(toolbar, text="Path:").pack(side=tk.LEFT, padx=(20, 5))
@@ -6240,13 +8293,13 @@ class FileExplorerDialog:
         file_toolbar = ttk.Frame(main_frame)
         file_toolbar.pack(fill=tk.X, pady=(0, 10))
         
-        ttk.Button(file_toolbar, text="📋 Copy", command=self.copy_selected).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(file_toolbar, text="✂️ Cut", command=self.cut_selected).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(file_toolbar, text="📌 Paste", command=self.paste_items).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(file_toolbar, text="🗑️ Delete", command=self.delete_selected).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(file_toolbar, text="✏️ Rename", command=self.rename_selected).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(file_toolbar, text="📁 New Folder", command=self.create_folder).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(file_toolbar, text="📄 New File", command=self.create_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_toolbar, text="Copy", command=self.copy_selected).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_toolbar, text="Cut", command=self.cut_selected).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_toolbar, text="Paste", command=self.paste_items).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_toolbar, text="Delete", command=self.delete_selected).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_toolbar, text="Rename", command=self.rename_selected).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_toolbar, text="New Folder", command=self.create_folder).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_toolbar, text="New File", command=self.create_file).pack(side=tk.LEFT, padx=(0, 5))
         
         # Progress bar
         progress_frame = ttk.Frame(main_frame)
@@ -6271,7 +8324,7 @@ class FileExplorerDialog:
         self.tree.heading("date", text="Modified")
         
         # Configure column widths
-        self.tree.column("#0", width=300, minwidth=200)
+        self.tree.column("#0", width=800, minwidth=200)
         self.tree.column("size", width=100, minwidth=80)
         self.tree.column("permissions", width=100, minwidth=80)
         self.tree.column("owner", width=100, minwidth=80)
@@ -6442,7 +8495,7 @@ class FileExplorerDialog:
                 # Add items to treeview
                 if self.tree:
                     for item in items:
-                        icon = "📁" if item['is_dir'] else "📄"
+                        icon = "??" if item['is_dir'] else "??"
                         values = (item['size'], item['permissions'], item['owner'], item['date'])
                         self.tree.insert("", "end", text=f"{icon} {item['name']}", values=values)
                 
@@ -6472,7 +8525,7 @@ class FileExplorerDialog:
         full_path = os.path.join(self.current_path, name).replace('\\', '/')
         
         # Check if it's a directory
-        if item['text'].startswith('📁'):
+        if item['text'].startswith('??'):
             self.load_directory(full_path)
         else:
             self.open_selected()
@@ -6488,7 +8541,7 @@ class FileExplorerDialog:
         name = item['text'].split(' ', 1)[1]
         full_path = os.path.join(self.current_path, name).replace('\\', '/')
         
-        if item['text'].startswith('📁'):
+        if item['text'].startswith('??'):
             self.load_directory(full_path)
         else:
             # For files, we could implement file viewing/editing
@@ -6504,7 +8557,7 @@ class FileExplorerDialog:
         name = item['text'].split(' ', 1)[1]
         full_path = os.path.join(self.current_path, name).replace('\\', '/')
         
-        if item['text'].startswith('📁'):
+        if item['text'].startswith('??'):
             new_explorer = FileExplorerDialog(self.parent, self.adb_path)
             new_explorer.show()
             new_explorer.load_directory(full_path)
@@ -6544,7 +8597,7 @@ class FileExplorerDialog:
             items.append({
                 'name': name,
                 'path': full_path,
-                'is_dir': item['text'].startswith('📁')
+                'is_dir': item['text'].startswith('??')
             })
         return items
         
@@ -6836,4 +8889,34 @@ Additional Info:
 if __name__ == "__main__":
     app = Y1HelperApp()
     app.mainloop()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

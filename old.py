@@ -4,10 +4,43 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
 import glob
+import datetime
+import json
+import requests
 
+
+def cleanup_old_directory():
+    """Clean up .old directory to keep only y1_helper.py files"""
+    try:
+        old_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.old')
+        if not os.path.exists(old_dir):
+            return
+            
+        debug_print("Cleaning up .old directory...")
+        removed_count = 0
+        
+        for root, dirs, files in os.walk(old_dir):
+            for file in files:
+                if file != "y1_helper.py":
+                    file_path = os.path.join(root, file)
+                    try:
+                        os.remove(file_path)
+                        removed_count += 1
+                        debug_print(f"Removed non-y1_helper.py file: {file_path}")
+                    except Exception as e:
+                        debug_print(f"Failed to remove {file_path}: {e}")
+                        
+        if removed_count > 0:
+            debug_print(f"Cleaned up {removed_count} non-y1_helper.py files from .old directory")
+            
+    except Exception as e:
+        debug_print(f"Error cleaning up .old directory: {e}")
 
 def get_old_versions():
     """Get list of available old version directories"""
+    # Clean up .old directory first
+    cleanup_old_directory()
+    
     old_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.old')
     if not os.path.exists(old_dir):
         return []
@@ -131,6 +164,124 @@ def debug_print(message):
     """Print debug messages"""
     print(f"[DEBUG] {message}")
 
+# Rate limiting system for old.py
+class RateLimiter:
+    def __init__(self):
+        self.api_rate_limits = {
+            'unauthenticated': {'calls': 0, 'reset_time': datetime.datetime.now() + datetime.timedelta(hours=1)},
+            'authenticated': {}  # Will store per-token limits
+        }
+        self.max_unauthenticated_calls = 40
+        self.max_authenticated_calls = 100
+        self.rate_limit_exceeded = False
+        self.cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.cache')
+        
+        # Create cache directory if it doesn't exist
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
+        
+        # Load rate limit state from file if it exists
+        self.load_rate_limit_state()
+    
+    def check_rate_limits(self, token=None):
+        """Check if we can make an API call based on rate limits"""
+        try:
+            now = datetime.datetime.now()
+            
+            # Check unauthenticated limits
+            if not token:
+                unauthenticated = self.api_rate_limits['unauthenticated']
+                if now > unauthenticated['reset_time']:
+                    # Reset counter
+                    unauthenticated['calls'] = 0
+                    unauthenticated['reset_time'] = now + datetime.timedelta(hours=1)
+                
+                if unauthenticated['calls'] >= self.max_unauthenticated_calls:
+                    self.rate_limit_exceeded = True
+                    debug_print("Unauthenticated API rate limit exceeded")
+                    return False
+                
+                unauthenticated['calls'] += 1
+                return True
+            
+            # Check authenticated limits
+            if token not in self.api_rate_limits['authenticated']:
+                self.api_rate_limits['authenticated'][token] = {
+                    'calls': 0, 
+                    'reset_time': now + datetime.timedelta(hours=1)
+                }
+            
+            token_limits = self.api_rate_limits['authenticated'][token]
+            if now > token_limits['reset_time']:
+                # Reset counter
+                token_limits['calls'] = 0
+                token_limits['reset_time'] = now + datetime.timedelta(hours=1)
+            
+            if token_limits['calls'] >= self.max_authenticated_calls:
+                debug_print(f"Authenticated API rate limit exceeded for token: {token[:10]}...")
+                return False
+            
+            token_limits['calls'] += 1
+            return True
+            
+        except Exception as e:
+            debug_print(f"Error checking rate limits: {e}")
+            return True  # Allow call if rate limit check fails
+    
+    def save_rate_limit_state(self):
+        """Save rate limit state to file for persistence between sessions"""
+        try:
+            rate_limit_file = os.path.join(self.cache_dir, "rate_limits.json")
+            state = {
+                'unauthenticated': self.api_rate_limits['unauthenticated'],
+                'authenticated': self.api_rate_limits['authenticated'],
+                'rate_limit_exceeded': self.rate_limit_exceeded
+            }
+            
+            # Convert datetime objects to strings for JSON serialization
+            for key in state['unauthenticated']:
+                if isinstance(state['unauthenticated'][key], datetime.datetime):
+                    state['unauthenticated'][key] = state['unauthenticated'][key].isoformat()
+            
+            for token in state['authenticated']:
+                for key in state['authenticated'][token]:
+                    if isinstance(state['authenticated'][token][key], datetime.datetime):
+                        state['authenticated'][token][key] = state['authenticated'][token][key].isoformat()
+            
+            with open(rate_limit_file, 'w') as f:
+                json.dump(state, f, indent=2)
+                
+        except Exception as e:
+            debug_print(f"Error saving rate limit state: {e}")
+    
+    def load_rate_limit_state(self):
+        """Load rate limit state from file"""
+        try:
+            rate_limit_file = os.path.join(self.cache_dir, "rate_limits.json")
+            if os.path.exists(rate_limit_file):
+                with open(rate_limit_file, 'r') as f:
+                    state = json.load(f)
+                
+                # Convert string timestamps back to datetime objects
+                for key in state['unauthenticated']:
+                    if key == 'reset_time':
+                        state['unauthenticated'][key] = datetime.datetime.fromisoformat(state['unauthenticated'][key])
+                
+                for token in state['authenticated']:
+                    for key in state['authenticated'][token]:
+                        if key == 'reset_time':
+                            state['authenticated'][token][key] = datetime.datetime.fromisoformat(state['authenticated'][token][key])
+                
+                self.api_rate_limits = state
+                self.rate_limit_exceeded = state.get('rate_limit_exceeded', False)
+                debug_print("Rate limit state loaded from file")
+                
+        except Exception as e:
+            debug_print(f"Error loading rate limit state: {e}")
+
+# Global rate limiter instance
+rate_limiter = RateLimiter()
+
 
 def show_version_selection_dialog():
     """Show dialog to select old version"""
@@ -248,6 +399,13 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # Save rate limit state before exiting
+        try:
+            rate_limiter.save_rate_limit_state()
+            debug_print("Rate limit state saved")
+        except Exception as e:
+            debug_print(f"Error saving rate limit state: {e}")
+        
         # Destroy the root window
         root.destroy()
 
