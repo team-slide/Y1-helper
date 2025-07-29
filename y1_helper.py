@@ -165,6 +165,9 @@ class Y1HelperApp(tk.Tk):
         # Write version.txt file
         self.write_version_file()
         
+        # Create versioned backup of y1_helper.py at launch
+        self.create_versioned_backup()
+        
         # Clean up any existing system.img from previous sessions
         system_img_path = os.path.join(assets_dir, "system.img")
         if os.path.exists(system_img_path):
@@ -348,6 +351,38 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Version file written: {version_file_path}")
         except Exception as e:
             debug_print(f"Failed to write version file: {e}")
+    
+    def create_versioned_backup(self):
+        """Create a versioned backup of y1_helper.py in .old directory"""
+        try:
+            # Create .old directory if it doesn't exist
+            old_dir = os.path.join(self.base_dir, ".old")
+            if not os.path.exists(old_dir):
+                os.makedirs(old_dir)
+                debug_print("Created .old directory")
+            
+            # Create version subdirectory
+            version_dir = os.path.join(old_dir, self.version)
+            if not os.path.exists(version_dir):
+                os.makedirs(version_dir)
+                debug_print(f"Created version directory: {self.version}")
+            
+            # Check if backup already exists for this version
+            backup_path = os.path.join(version_dir, "y1_helper.py")
+            if os.path.exists(backup_path):
+                debug_print(f"Backup already exists for version {self.version}")
+                return
+            
+            # Copy current y1_helper.py to versioned backup
+            current_file = os.path.join(self.base_dir, "y1_helper.py")
+            if os.path.exists(current_file):
+                shutil.copy2(current_file, backup_path)
+                debug_print(f"Created versioned backup: {backup_path}")
+            else:
+                debug_print("Current y1_helper.py not found, skipping backup")
+                
+        except Exception as e:
+            debug_print(f"Error creating versioned backup: {e}")
     
     def initialize_cache(self):
         """Initialize the cache system and clean up .old directory"""
