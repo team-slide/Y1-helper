@@ -4503,6 +4503,8 @@ class Y1HelperApp(tk.Tk):
         self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+        self.device_menu.add_command(label="Rockbox Utility", command=self.launch_rockbox_utility)
+        self.device_menu.add_command(label="SP Flash Tool", command=self.launch_sp_flash_tool)
         # self.device_menu.add_command(label="Repair Device", command=self.repair_device)  # Removed
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Restart Device", command=self.restart_device)
@@ -8394,6 +8396,44 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error launching old.py: {e}")
             messagebox.showerror("Error", f"Failed to launch old.py: {e}")
+
+    def launch_rockbox_utility(self):
+        """Launch Rockbox Utility from assets folder"""
+        try:
+            debug_print("Launching Rockbox Utility...")
+            
+            # Get the path to rockboxutility.exe
+            rockbox_path = os.path.join(self.base_dir, "assets", "rockboxutility.exe")
+            
+            if not os.path.exists(rockbox_path):
+                messagebox.showerror("Error", "rockboxutility.exe not found in assets folder")
+                return
+            
+            # Launch rockboxutility.exe
+            subprocess.Popen([rockbox_path], cwd=os.path.join(self.base_dir, "assets"))
+            
+        except Exception as e:
+            debug_print(f"Error launching Rockbox Utility: {e}")
+            messagebox.showerror("Error", f"Failed to launch Rockbox Utility: {e}")
+
+    def launch_sp_flash_tool(self):
+        """Launch SP Flash Tool from assets folder"""
+        try:
+            debug_print("Launching SP Flash Tool...")
+            
+            # Get the path to flash_tool.exe
+            flash_tool_path = os.path.join(self.base_dir, "assets", "flash_tool.exe")
+            
+            if not os.path.exists(flash_tool_path):
+                messagebox.showerror("Error", "flash_tool.exe not found in assets folder")
+                return
+            
+            # Launch flash_tool.exe
+            subprocess.Popen([flash_tool_path], cwd=os.path.join(self.base_dir, "assets"))
+            
+        except Exception as e:
+            debug_print(f"Error launching SP Flash Tool: {e}")
+            messagebox.showerror("Error", f"Failed to launch SP Flash Tool: {e}")
     
     def show_team_slide_update_prompt(self, update_info):
         if self.update_prompt_shown:
