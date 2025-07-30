@@ -7101,77 +7101,47 @@ class Y1HelperApp(tk.Tk):
         debug_print("Update system initialized")
     
     def background_update_check(self):
-        """Background update check that runs once at startup with API call optimization"""
+        """Simplified background update check - only check cached info"""
         try:
-            debug_print("Running background update check...")
+            debug_print("Running simplified background update check...")
             
-            # Check if we should skip API calls due to recent startup
-            if self.should_skip_api_checks():
-                debug_print("Skipping background update check due to recent startup")
-                return
+            # Only check cached update info (no network calls)
+            cached_update = self._get_cached_update_info()
             
-            # Update last API check time
-            self.last_api_check_time = datetime.datetime.now()
-            self.save_startup_tracking()
-            
-            # Refresh cache in background only if needed
-            try:
-                if self.should_refresh_cache():
-                    self.refresh_cache_if_needed()
-                    self.last_cache_refresh_time = datetime.datetime.now()
-                    self.save_startup_tracking()
-                    debug_print("Cache refreshed in background")
-                else:
-                    debug_print("Cache refresh not needed, using existing cache")
-                    
-            except Exception as e:
-                debug_print(f"Background cache refresh failed: {e}")
-            
-            update_info = self.check_for_team_slide_updates()
-            
-            if update_info:
+            if cached_update and self._is_cached_update_newer(cached_update):
                 self.update_available = True
-                self.update_info = update_info
-                debug_print(f"Update available: {update_info['version']}")
+                self.update_info = cached_update
+                debug_print(f"Cached update available: {cached_update['version']}")
                 
                 # Show update prompt dialog
-                self.after(1000, lambda: self.show_team_slide_update_prompt(update_info))
+                self.after(1000, lambda: self.show_team_slide_update_prompt(cached_update))
                 
                 # Show update button in UI
                 self.after(2000, self.show_update_pill_if_needed)
             else:
-                debug_print("No updates available")
+                debug_print("No cached updates available")
                 
         except Exception as e:
             debug_print(f"Background update check failed: {e}")
     
     def periodic_update_check(self):
-        """Periodic update check that runs every 15 minutes with API call optimization"""
+        """Simplified periodic update check - only check cached info and cleanup"""
         try:
-            debug_print("Running periodic update check...")
+            debug_print("Running simplified periodic update check...")
             
-            # Check if we should skip API calls due to recent startup
-            if self.should_skip_api_checks():
-                debug_print("Skipping periodic update check due to recent startup")
-                # Schedule next check
-                self.after(self.update_check_interval, self.periodic_update_check)
-                return
+            # Only check cached update info (no network calls)
+            cached_update = self._get_cached_update_info()
             
-            # Update last API check time
-            self.last_api_check_time = datetime.datetime.now()
-            self.save_startup_tracking()
-            
-            # Refresh cache periodically only if needed
-            try:
-                if self.should_refresh_cache():
-                    self.refresh_cache_if_needed()
-                    self.last_cache_refresh_time = datetime.datetime.now()
-                    self.save_startup_tracking()
-                    debug_print("Cache refreshed in periodic check")
-                else:
-                    debug_print("Cache refresh not needed in periodic check")
-            except Exception as e:
-                debug_print(f"Periodic cache refresh failed: {e}")
+            if cached_update and self._is_cached_update_newer(cached_update) and not self.update_available:
+                self.update_available = True
+                self.update_info = cached_update
+                debug_print(f"New cached update available: {cached_update['version']}")
+                
+                # Show update prompt dialog
+                self.show_team_slide_update_prompt(cached_update)
+                
+                # Show update button in UI
+                self.show_update_pill_if_needed
             
             # Periodic cache cleanup to prevent over-reliance on cached data
             try:
@@ -7179,19 +7149,6 @@ class Y1HelperApp(tk.Tk):
                 debug_print("Periodic cache cleanup completed")
             except Exception as e:
                 debug_print(f"Periodic cache cleanup failed: {e}")
-            
-            update_info = self.check_for_team_slide_updates()
-            
-            if update_info and not self.update_available:
-                self.update_available = True
-                self.update_info = update_info
-                debug_print(f"New update available: {update_info['version']}")
-                
-                # Show update prompt dialog
-                self.show_team_slide_update_prompt(update_info)
-                
-                # Show update button in UI
-                self.show_update_pill_if_needed
             
             # Schedule next check
             self.after(self.update_check_interval, self.periodic_update_check)
@@ -8318,10 +8275,20 @@ class Y1HelperApp(tk.Tk):
 
 
     def startup_update_check(self):
+        """Simplified startup update check - only reload cache and check cached info"""
         try:
-            debug_print("Running startup update check...")
+            debug_print("Running simplified startup update check...")
             
-            # First check cached update info
+            # Only reload cache if it's stale (older than 24 hours)
+            if self.should_refresh_cache():
+                debug_print("Cache is stale, reloading...")
+                try:
+                    # Reload cache in background without blocking UI
+                    self.after(1000, self._reload_cache_background)
+                except Exception as e:
+                    debug_print(f"Error reloading cache: {e}")
+            
+            # Check cached update info (fast, no network calls)
             cached_update = self._get_cached_update_info()
             if cached_update and self._is_cached_update_newer(cached_update):
                 debug_print(f"Found cached update info: {cached_update['version']}")
@@ -8334,53 +8301,37 @@ class Y1HelperApp(tk.Tk):
                     debug_print("Cached patch.exe available - starting automatic update")
                     # Block UI and start automatic patch
                     self.disable_input_bindings()
-                    self.after(1000, lambda: self.download_and_run_patch(cached_update['patch_asset']))
+                    self.after(2000, lambda: self.download_and_run_patch(cached_update['patch_asset']))
                 else:
                     # No patch available - show update pill for manual update
                     debug_print("No cached patch.exe available - showing update pill")
-                    self.after(1000, self.show_update_pill_if_needed)
-                return
-            
-            # Check if we should skip API calls due to recent startup
-            if self.should_skip_api_checks():
-                debug_print("Skipping startup update check due to recent startup")
-                return
-            
-            # Update last API check time
-            self.last_api_check_time = datetime.datetime.now()
-            self.save_startup_tracking()
-            
-            # Check for updates using all methods
-            update_info = self._check_updates_via_api()
-            if not update_info:
-                update_info = self._check_updates_via_releases_page()
-            if not update_info:
-                update_info = self._check_updates_via_master_branch()
-            
-            if update_info:
-                # Compare versions to see if it's actually newer
-                if self.compare_versions(update_info['version'], self.version) > 0:
-                    debug_print(f"Newer version available at startup: {update_info['version']}")
-                    self.update_info = update_info
-                    self.update_available = True
-                    
-                    # Check if patch.exe is available for automatic update
-                    if update_info.get('patch_asset'):
-                        debug_print("Patch.exe available - starting automatic update")
-                        # Block UI and start automatic patch
-                        self.disable_input_bindings()
-                        self.after(1000, lambda: self.download_and_run_patch(update_info['patch_asset']))
-                    else:
-                        # No patch available - show update pill for manual update
-                        debug_print("No patch.exe available - showing update pill")
-                        self.after(2000, self.show_update_pill_if_needed)
-                else:
-                    debug_print("No newer version available at startup")
+                    self.after(2000, self.show_update_pill_if_needed)
             else:
-                debug_print("No update information available at startup")
+                debug_print("No cached update info or no newer version available")
                 
         except Exception as e:
             debug_print(f"Error in startup_update_check: {e}")
+    
+    def _reload_cache_background(self):
+        """Reload cache in background without blocking UI"""
+        try:
+            debug_print("Reloading cache in background...")
+            
+            # Use threading to avoid blocking UI
+            import threading
+            def reload_thread():
+                try:
+                    # Simple cache reload without complex API calls
+                    self.refresh_cache_if_needed()
+                    debug_print("Cache reload completed")
+                except Exception as e:
+                    debug_print(f"Error in background cache reload: {e}")
+            
+            thread = threading.Thread(target=reload_thread, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            debug_print(f"Error starting background cache reload: {e}")
 
     def show_startup_update_dialog(self, update_info):
         """Show startup update dialog asking if user wants to update"""
