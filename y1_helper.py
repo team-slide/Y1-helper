@@ -7155,7 +7155,7 @@ class Y1HelperApp(tk.Tk):
             
         except Exception as e:
             debug_print(f"Periodic update check failed: {e}")
-            # Schedule next check even if this one failed
+            # Schedule next check even on error
             self.after(self.update_check_interval, self.periodic_update_check)
 
     def _destroy_splash(self):
@@ -7434,13 +7434,18 @@ class Y1HelperApp(tk.Tk):
                                 system_img_file = file_info
                         
                         if rom_zip_file:
-                            # Download rom.zip from cached URL
+                            # Download rom.zip from cached URL using enhanced GitHub API
                             download_url = rom_zip_file['url']
                             zip_path = os.path.join(firmware_dir, 'rom.zip')
                             dialog.after(0, status_label.config, {"text": "Downloading firmware files..."})
                             
-                            response = requests.get(download_url, stream=True, timeout=60)
-                            response.raise_for_status()
+                            # Use comprehensive GitHub API for file download
+                            response = self._make_github_request_with_retries(download_url, stream=True)
+                            if not response or response.status_code != 200:
+                                debug_print(f"Failed to download rom.zip from {download_url}")
+                                dialog.after(0, status_label.config, {"text": "Failed to download rom.zip. Aborting."})
+                                dialog.after(0, ok_button.config, {"state": "normal"})
+                                return
                             file_size = int(response.headers.get('content-length', 0))
                             downloaded = 0
                             progress_bar.config(mode='determinate', maximum=file_size)
@@ -7482,13 +7487,18 @@ class Y1HelperApp(tk.Tk):
                             return
                         
                         elif system_img_file:
-                            # Download system.img directly from cached URL
+                            # Download system.img directly from cached URL using enhanced GitHub API
                             download_url = system_img_file['url']
                             system_img_path = os.path.join(firmware_dir, 'system.img')
                             dialog.after(0, status_label.config, {"text": "Downloading firmware files..."})
                             
-                            response = requests.get(download_url, stream=True, timeout=60)
-                            response.raise_for_status()
+                            # Use comprehensive GitHub API for file download
+                            response = self._make_github_request_with_retries(download_url, stream=True)
+                            if not response or response.status_code != 200:
+                                debug_print(f"Failed to download system.img from {download_url}")
+                                dialog.after(0, status_label.config, {"text": "Failed to download system.img. Aborting."})
+                                dialog.after(0, ok_button.config, {"state": "normal"})
+                                return
                             file_size = int(response.headers.get('content-length', 0))
                             downloaded = 0
                             progress_bar.config(mode='determinate', maximum=file_size)
@@ -7529,8 +7539,15 @@ class Y1HelperApp(tk.Tk):
                             # Handle /releases/ or /releases
                             repo_path = repo_url.replace('https://github.com/', '').replace('/releases/', '').replace('/releases', '')
                             api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
-                        r = requests.get(api_url)
-                        release_data = r.json()
+                        # Use comprehensive GitHub API with all available tokens
+                        response = self._make_github_request_with_retries(api_url)
+                        if not response or response.status_code != 200:
+                            debug_print(f"Failed to get release data from {api_url}")
+                            dialog.after(0, status_label.config, {"text": "Failed to get release data. Aborting."})
+                            dialog.after(0, ok_button.config, {"state": "normal"})
+                            return
+                        
+                        release_data = response.json()
                         assets = release_data.get('assets', [])
                         
                         # Check if rom.zip is available
@@ -8301,7 +8318,7 @@ class Y1HelperApp(tk.Tk):
                     debug_print("Cached patch.exe available - starting automatic update")
                     # Block UI and start automatic patch
                     self.disable_input_bindings()
-                    self.after(2000, lambda: self.download_and_run_patch(cached_update['patch_asset']))
+                    self.after(1000, lambda: self.download_and_run_patch(cached_update['patch_asset']))
                 else:
                     # No patch available - show update pill for manual update
                     debug_print("No cached patch.exe available - showing update pill")
