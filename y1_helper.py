@@ -3070,12 +3070,12 @@ class Y1HelperApp(tk.Tk):
             if not current_version:
                 return
             
-            # Check if we're up to date by comparing with latest release
-            update_info = self.check_for_team_slide_updates()
-            if not update_info:
+            # Use cached update info to avoid infinite recursion
+            cached_update = self._get_cached_update_info()
+            if not cached_update:
                 return
             
-            latest_version = update_info.get('version')
+            latest_version = cached_update.get('version')
             if not latest_version:
                 return
             
@@ -4568,75 +4568,100 @@ class Y1HelperApp(tk.Tk):
             debug_print("Skipping apps refresh - user is actively using Apps menu")
             return
         
-        debug_print("Refreshing apps list")
+        # Use threading to prevent UI blocking
+        def refresh_apps_thread():
+            try:
+                debug_print("Refreshing apps list in background")
+                
+                # Get user-installed apps with shorter timeout
+                success_user, stdout_user, stderr_user = self.run_adb_command(
+                    "shell pm list packages -3 -f", timeout=5)
+                user_apps = []
+                
+                # Get system apps with shorter timeout
+                success_system, stdout_system, stderr_system = self.run_adb_command(
+                    "shell pm list packages -s -f", timeout=5)
+                system_apps = []
+                
+                # Parse user apps
+                if success_user:
+                    debug_print(f"Found {len(stdout_user.strip().split('\n'))} user package lines")
+                    for line in stdout_user.strip().split('\n'):
+                        if line.startswith('package:'):
+                            if '=' in line:
+                                package_name = line.split('=')[1]
+                            else:
+                                package_name = line[len('package:'):]
+                            if package_name and package_name.strip():
+                                user_apps.append(package_name)
+                
+                # Parse system apps
+                if success_system:
+                    debug_print(f"Found {len(stdout_system.strip().split('\n'))} system package lines")
+                    for line in stdout_system.strip().split('\n'):
+                        if line.startswith('package:'):
+                            if '=' in line:
+                                package_name = line.split('=')[1]
+                            else:
+                                package_name = line[len('package:'):]
+                            if package_name and package_name.strip():
+                                system_apps.append(package_name)
+                
+                # Remove duplicates (system apps might also appear in user apps list)
+                user_apps = list(set(user_apps))
+                system_apps = list(set(system_apps))
+                
+                debug_print(f"Found {len(user_apps)} user apps and {len(system_apps)} system apps")
+                
+                # Update UI in main thread
+                self.after(0, lambda: self._update_apps_menu(user_apps, system_apps))
+                
+            except Exception as e:
+                debug_print(f"Error refreshing apps: {e}")
         
-        # Use safe UI update to prevent threading issues
-        def update_menu():
+        # Start the background thread
+        import threading
+        thread = threading.Thread(target=refresh_apps_thread, daemon=True)
+        thread.start()
+    
+    def _update_apps_menu(self, user_apps, system_apps):
+        """Update the apps menu with the provided app lists (called in main thread)"""
+        try:
             self.apps_menu.delete(0, tk.END)
             self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
             self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
             self.apps_menu.add_separator()
-        
-        self.safe_ui_update(self.apps_menu, update_menu)
-        
-        # Get user-installed apps with shorter timeout
-        success_user, stdout_user, stderr_user = self.run_adb_command(
-            "shell pm list packages -3 -f", timeout=5)
-        user_apps = []
-        
-        # Get system apps with shorter timeout
-        success_system, stdout_system, stderr_system = self.run_adb_command(
-            "shell pm list packages -s -f", timeout=5)
-        system_apps = []
-        
-        # Parse user apps
-        if success_user:
-            debug_print(f"Found {len(stdout_user.strip().split('\n'))} user package lines")
-            for line in stdout_user.strip().split('\n'):
-                if line.startswith('package:'):
-                    if '=' in line:
-                        package_name = line.split('=')[1]
-                    else:
-                        package_name = line[len('package:'):]
-                    if package_name and package_name.strip():
-                        user_apps.append(package_name)
-        
-        # Parse system apps
-        if success_system:
-            debug_print(f"Found {len(stdout_system.strip().split('\n'))} system package lines")
-            for line in stdout_system.strip().split('\n'):
-                if line.startswith('package:'):
-                    if '=' in line:
-                        package_name = line.split('=')[1]
-                    else:
-                        package_name = line[len('package:'):]
-                    if package_name and package_name.strip():
-                        system_apps.append(package_name)
-        
-        # Remove duplicates (system apps might also appear in user apps list)
-        user_apps = list(set(user_apps))
-        system_apps = list(set(system_apps))
-        
-        debug_print(f"Found {len(user_apps)} user apps and {len(system_apps)} system apps")
-        
-        # Add User Apps submenu
-        if user_apps:
-            user_apps_menu = Menu(self.apps_menu, tearoff=0)
-            for app in sorted(user_apps):
-                app_menu = Menu(user_apps_menu, tearoff=0)
-                app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
-                app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a))
+            
+            # Add User Apps submenu
+            if user_apps:
+                user_apps_menu = Menu(self.apps_menu, tearoff=0)
+                for app in sorted(user_apps):
+                    app_menu = Menu(user_apps_menu, tearoff=0)
+                    app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
+                    app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a))
+                    
+                    # Add restart option for Rockbox
+                    if app == "org.rockbox":
+                        app_menu.add_separator()
+                        app_menu.add_command(label="Restart Rockbox", command=self.restart_rockbox)
+                    
+                    user_apps_menu.add_cascade(label=app, menu=app_menu)
+                    
+                    # Apply theme colors to new app menu
+                    if hasattr(self, 'menu_bg'):
+                        app_menu.configure(
+                            bg=self.menu_bg,
+                            fg=self.menu_fg,
+                            activebackground=self.menu_select_bg,
+                            activeforeground=self.menu_select_fg,
+                            selectcolor=self.menu_bg,
+                            relief='flat',
+                            bd=0
+                        )
                 
-                # Add restart option for Rockbox
-                if app == "org.rockbox":
-                    app_menu.add_separator()
-                    app_menu.add_command(label="Restart Rockbox", command=self.restart_rockbox)
-                
-                user_apps_menu.add_cascade(label=app, menu=app_menu)
-                
-                # Apply theme colors to new app menu
+                # Apply theme colors to user apps submenu
                 if hasattr(self, 'menu_bg'):
-                    app_menu.configure(
+                    user_apps_menu.configure(
                         bg=self.menu_bg,
                         fg=self.menu_fg,
                         activebackground=self.menu_select_bg,
@@ -4645,36 +4670,36 @@ class Y1HelperApp(tk.Tk):
                         relief='flat',
                         bd=0
                     )
-            
-            # Apply theme colors to user apps submenu
-            if hasattr(self, 'menu_bg'):
-                user_apps_menu.configure(
-                    bg=self.menu_bg,
-                    fg=self.menu_fg,
-                    activebackground=self.menu_select_bg,
-                    activeforeground=self.menu_select_fg,
-                    selectcolor=self.menu_bg,
-                    relief='flat',
-                    bd=0
-                )
-            
-            self.apps_menu.add_cascade(label=f"User Apps ({len(user_apps)})", menu=user_apps_menu)
-        else:
-            self.apps_menu.add_command(label="No user apps installed", state="disabled")
-        
-        # Add System Apps submenu
-        if system_apps:
-            system_apps_menu = Menu(self.apps_menu, tearoff=0)
-            for app in sorted(system_apps):
-                app_menu = Menu(system_apps_menu, tearoff=0)
-                app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
-                # Don't allow uninstall for system apps
-                app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a), state="disabled")
-                system_apps_menu.add_cascade(label=app, menu=app_menu)
                 
-                # Apply theme colors to new app menu
+                self.apps_menu.add_cascade(label=f"User Apps ({len(user_apps)})", menu=user_apps_menu)
+            else:
+                self.apps_menu.add_command(label="No user apps installed", state="disabled")
+            
+            # Add System Apps submenu
+            if system_apps:
+                system_apps_menu = Menu(self.apps_menu, tearoff=0)
+                for app in sorted(system_apps):
+                    app_menu = Menu(system_apps_menu, tearoff=0)
+                    app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
+                    # Don't allow uninstall for system apps
+                    app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a), state="disabled")
+                    system_apps_menu.add_cascade(label=app, menu=app_menu)
+                    
+                    # Apply theme colors to new app menu
+                    if hasattr(self, 'menu_bg'):
+                        app_menu.configure(
+                            bg=self.menu_bg,
+                            fg=self.menu_fg,
+                            activebackground=self.menu_select_bg,
+                            activeforeground=self.menu_select_fg,
+                            selectcolor=self.menu_bg,
+                            relief='flat',
+                            bd=0
+                        )
+                
+                # Apply theme colors to system apps submenu
                 if hasattr(self, 'menu_bg'):
-                    app_menu.configure(
+                    system_apps_menu.configure(
                         bg=self.menu_bg,
                         fg=self.menu_fg,
                         activebackground=self.menu_select_bg,
@@ -4683,84 +4708,94 @@ class Y1HelperApp(tk.Tk):
                         relief='flat',
                         bd=0
                     )
+                
+                self.apps_menu.add_cascade(label=f"System Apps ({len(system_apps)})", menu=system_apps_menu)
+            else:
+                self.apps_menu.add_command(label="No system apps found", state="disabled")
             
-            # Apply theme colors to system apps submenu
-            if hasattr(self, 'menu_bg'):
-                system_apps_menu.configure(
-                    bg=self.menu_bg,
-                    fg=self.menu_fg,
-                    activebackground=self.menu_select_bg,
-                    activeforeground=self.menu_select_fg,
-                    selectcolor=self.menu_bg,
-                    relief='flat',
-                    bd=0
-                )
+            debug_print(f"Added {len(user_apps)} user apps and {len(system_apps)} system apps to menu")
             
-            self.apps_menu.add_cascade(label=f"System Apps ({len(system_apps)})", menu=system_apps_menu)
-        else:
-            self.apps_menu.add_command(label="No system apps found", state="disabled")
-        
-        debug_print(f"Added {len(user_apps)} user apps and {len(system_apps)} system apps to menu")
+        except Exception as e:
+            debug_print(f"Error updating apps menu: {e}")
     
     def unified_device_check(self):
         """Unified method to check device connection and refresh app list with enhanced robustness"""
-        # Use thread lock to prevent race conditions
-        with self.device_connection_lock:
-            try:
-                adb_path = self.get_adb_path()
-                current_time = time.time()
-                
-                # Check device connection with more robust parsing and shorter timeout
-                result = subprocess.run([adb_path, "devices"], 
-                                      capture_output=True, text=True, timeout=1)
-                
-                # More robust device detection - look for actual device lines
-                device_lines = [line.strip() for line in result.stdout.strip().split('\n') 
-                              if line.strip() and not line.startswith('List of devices')]
-                
-                device_found = False
-                for line in device_lines:
-                    if line.endswith('device'):  # Only fully authorized devices
-                        device_found = True
-                        break
-                
-                if device_found:
-                    # Device appears to be connected, validate it's actually responsive
-                    if current_time - self.last_device_validation > self.device_validation_interval:
-                        # Use non-blocking validation to prevent UI hanging
-                        self.after(100, self._validate_device_async)
-                    else:
-                        # Skip validation this time, but ensure device is marked as connected if it was before
+        # Use thread lock to prevent race conditions, but with timeout to prevent hanging
+        if not self.device_connection_lock.acquire(timeout=1.0):
+            debug_print("Device check lock timeout, skipping this check")
+            return
+            
+        try:
+            adb_path = self.get_adb_path()
+            current_time = time.time()
+            
+            # Check device connection with more robust parsing and shorter timeout
+            result = subprocess.run([adb_path, "devices"], 
+                                  capture_output=True, text=True, timeout=2)
+            
+            # More robust device detection - look for actual device lines
+            device_lines = [line.strip() for line in result.stdout.strip().split('\n') 
+                          if line.strip() and not line.startswith('List of devices')]
+            
+            device_found = False
+            for line in device_lines:
+                if line.endswith('device'):  # Only fully authorized devices
+                    device_found = True
+                    break
+            
+            if device_found:
+                # Device appears to be connected, validate it's actually responsive
+                if current_time - self.last_device_validation > self.device_validation_interval:
+                    if self.validate_device_connection():
+                        self.device_check_failures = 0  # Reset failure counter
+                        self.consecutive_framebuffer_failures = 0  # Reset framebuffer failures
+                        self.last_device_validation = current_time
+                        
                         if not self.device_connected:
+                            # Device just reconnected
                             self.device_connected = True
                             self.status_var.set("Device connected")
                             
-                            # Show controls frame and enable input bindings
+                            # Show controls frame and enable input bindings when device connects
                             self.show_controls_frame()
                             self.enable_input_bindings()
                             
                             # Set device to stay awake
                             self.set_device_stay_awake()
                         
-                        # Refresh apps even if validation was skipped (non-blocking)
-                        # (unless user is actively using Apps menu)
-                        self.after(200, self._refresh_apps_async)
+                        # Schedule app refresh instead of calling directly to prevent blocking
+                        if not self.apps_menu_active:
+                            self.after(100, self.refresh_apps)
+                    else:
+                        # Device detected but not responsive
+                        self.device_check_failures += 1
                         
+                        if self.device_check_failures >= self.max_device_check_failures:
+                            if self.device_connected:
+                                self.device_connected = False
+                                self.status_var.set("Device disconnected - not responsive")
+                                
+                                # Disable input bindings but keep controls frame visible
+                                self.disable_input_bindings()
                 else:
-                    # No device found
-                    self.device_check_failures += 1
-                    
-                    if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
-                        self.device_connected = False
-                        self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                    # Skip validation this time, but ensure device is marked as connected if it was before
+                    if not self.device_connected:
+                        self.device_connected = True
+                        self.status_var.set("Device connected")
                         
-                        # Disable input bindings but keep controls frame visible
-                        # self.hide_controls_frame()  # Removed - controls should always be visible
-                        self.disable_input_bindings()
+                        # Show controls frame and enable input bindings
+                        self.show_controls_frame()
+                        self.enable_input_bindings()
+                        
+                        # Set device to stay awake
+                        self.set_device_stay_awake()
                     
-                self.last_device_check_time = current_time
+                    # Schedule app refresh instead of calling directly
+                    if not self.apps_menu_active:
+                        self.after(100, self.refresh_apps)
                     
-            except Exception as e:
+            else:
+                # No device found
                 self.device_check_failures += 1
                 
                 if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
@@ -4768,67 +4803,23 @@ class Y1HelperApp(tk.Tk):
                     self.status_var.set("First time? Install a Firmware from the Device Menu.")
                     
                     # Disable input bindings but keep controls frame visible
-                    # self.hide_controls_frame()  # Removed - controls should always be visible
                     self.disable_input_bindings()
-    
-    def _validate_device_async(self):
-        """Async device validation to prevent UI hanging"""
-        try:
-            if self.validate_device_connection():
-                self.device_check_failures = 0  # Reset failure counter
-                self.consecutive_framebuffer_failures = 0  # Reset framebuffer failures
-                self.last_device_validation = time.time()
                 
-                if not self.device_connected:
-                    # Device just reconnected
-                    self.device_connected = True
-                    self.status_var.set("Device connected")
-                    
-                    # Show controls frame and enable input bindings when device connects
-                    self.show_controls_frame()
-                    self.enable_input_bindings()
-                    
-                    # Set device to stay awake
-                    self.set_device_stay_awake()
+            self.last_device_check_time = current_time
                 
-                # Always refresh apps when device is connected and validated (non-blocking)
-                # (unless user is actively using Apps menu)
-                self.after(100, self._refresh_apps_async)
-            else:
-                # Device detected but not responsive
-                self.device_check_failures += 1
-                
-                if self.device_check_failures >= self.max_device_check_failures:
-                    if self.device_connected:
-                        self.device_connected = False
-                        self.status_var.set("Device disconnected - not responsive")
-                        
-                        # Disable input bindings but keep controls frame visible
-                        self.disable_input_bindings()
-        except Exception as e:
-            debug_print(f"Error in async device validation: {e}")
+        except subprocess.TimeoutExpired:
+            debug_print("ADB devices command timed out")
             self.device_check_failures += 1
-    
-    def _refresh_apps_async(self):
-        """Async app refresh to prevent UI hanging"""
-        try:
-            # Skip refresh if user is actively interacting with the Apps menu
-            if self.apps_menu_active:
-                debug_print("Skipping apps refresh - user is actively using Apps menu")
-                return
-            
-            # Use a thread to prevent UI blocking
-            import threading
-            def refresh_thread():
-                try:
-                    self.refresh_apps()
-                except Exception as e:
-                    debug_print(f"Error in app refresh thread: {e}")
-            
-            thread = threading.Thread(target=refresh_thread, daemon=True)
-            thread.start()
         except Exception as e:
-            debug_print(f"Error starting app refresh thread: {e}")
+            debug_print(f"Device check error: {e}")
+            self.device_check_failures += 1
+            
+            if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
+                self.device_connected = False
+                self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                self.disable_input_bindings()
+        finally:
+            self.device_connection_lock.release()
         
         # Check if firmware flashing is in progress
         if getattr(self, 'is_flashing_firmware', False):
