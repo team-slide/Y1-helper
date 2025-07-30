@@ -6116,27 +6116,27 @@ class Y1HelperApp(tk.Tk):
             direction = direction_map[keycode]
             debug_print(f"D-pad key detected: {key} -> {direction}")
             if self.control_launcher and self.scroll_wheel_mode_var.get():
-                # Check if direction should be inverted (Y1 launcher detected OR checkbox enabled)
-                should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
+                # Check if direction should be inverted (checkbox enabled)
+                should_invert = self.disable_dpad_swap_var.get()
                 
                 if should_invert:
-                    # Inverted direction - remap D-pad axes (no direction reversal)
+                    # Inverted direction - cross-map the directions
                     if keycode == 19:  # UP
-                        keycode = 22  # RIGHT (up becomes right)
-                        direction = 'right'
-                        debug_print("Scroll wheel mode: remapping up -> right (inverted)")
-                    elif keycode == 20:  # DOWN
-                        keycode = 21  # LEFT (down becomes left)
+                        keycode = 21  # LEFT (up fires left)
                         direction = 'left'
-                        debug_print("Scroll wheel mode: remapping down -> left (inverted)")
+                        debug_print("Scroll wheel mode: inverting up -> left")
+                    elif keycode == 20:  # DOWN
+                        keycode = 22  # RIGHT (down fires right)
+                        direction = 'right'
+                        debug_print("Scroll wheel mode: inverting down -> right")
                     elif keycode == 21:  # LEFT
-                        keycode = 20  # DOWN (left becomes down)
-                        direction = 'down'
-                        debug_print("Scroll wheel mode: remapping left -> down (inverted)")
-                    elif keycode == 22:  # RIGHT
-                        keycode = 19  # UP (right becomes up)
+                        keycode = 19  # UP (left fires up)
                         direction = 'up'
-                        debug_print("Scroll wheel mode: remapping right -> up (inverted)")
+                        debug_print("Scroll wheel mode: inverting left -> up")
+                    elif keycode == 22:  # RIGHT
+                        keycode = 20  # DOWN (right fires down)
+                        direction = 'down'
+                        debug_print("Scroll wheel mode: inverting right -> down")
                 else:
                     debug_print("Scroll wheel mode: using normal mapping")
                 
@@ -7879,7 +7879,7 @@ class Y1HelperApp(tk.Tk):
         
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
-        label = ttk.Label(frame, text="Turn off and unplug your Y1, then select a firmware to install:", font=("Segoe UI", 11))
+        label = ttk.Label(frame, text="Turn off and unplug your Y1 then select a firmware to install:", font=("Segoe UI", 11))
         label.pack(pady=(0, 10))
         listbox = tk.Listbox(frame, font=("Segoe UI", 10))
         listbox.pack(fill=tk.BOTH, expand=True)
@@ -7948,7 +7948,7 @@ class Y1HelperApp(tk.Tk):
         
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
-        label = ttk.Label(frame, text="Turn off and unplug your Y1, then select a firmware to install:", font=("Segoe UI", 11))
+        label = ttk.Label(frame, text="Turn off and unplug your Y1 then select a firmware to install:", font=("Segoe UI", 11))
         label.pack(pady=(0, 10))
         listbox = tk.Listbox(frame, font=("Segoe UI", 10))
         listbox.pack(fill=tk.BOTH, expand=True)
