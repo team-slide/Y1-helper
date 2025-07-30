@@ -527,7 +527,13 @@ class Y1HelperApp(tk.Tk):
             "cache.img",
             "userdata.img",
             "MTK_AllInOne_DA.bin",
-            "MT6572_Android_scatter.txt"
+            "MT6572_Android_scatter.txt",
+            "DA_PL.bin",
+            "DA_PL_CRYPTO20.bin",
+            "DA_SWSEC.bin",
+            "DA_SWSEC_CRYPTO20.bin",
+            "kernel",
+            "kernel_g368_nyx.bin"
         ]
     
     def cleanup_cache_directory(self):
@@ -1275,7 +1281,7 @@ class Y1HelperApp(tk.Tk):
         """Get cached release URL for a repository"""
         try:
             cached_index = self.get_cached_index()
-            if not cached_index:
+            if cached_index is None:
                 return None
                 
             # Look for the entry in the appropriate section
@@ -1294,7 +1300,7 @@ class Y1HelperApp(tk.Tk):
         """Get cached file URLs for a repository"""
         try:
             cached_index = self.get_cached_index()
-            if not cached_index:
+            if cached_index is None:
                 return []
                 
             # Look for the entry in the appropriate section
@@ -4563,19 +4569,24 @@ class Y1HelperApp(tk.Tk):
             return
         
         debug_print("Refreshing apps list")
-        self.apps_menu.delete(0, tk.END)
-        self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
-        self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
-        self.apps_menu.add_separator()
         
-        # Get user-installed apps
+        # Use safe UI update to prevent threading issues
+        def update_menu():
+            self.apps_menu.delete(0, tk.END)
+            self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
+            self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
+            self.apps_menu.add_separator()
+        
+        self.safe_ui_update(self.apps_menu, update_menu)
+        
+        # Get user-installed apps with shorter timeout
         success_user, stdout_user, stderr_user = self.run_adb_command(
-            "shell pm list packages -3 -f")
+            "shell pm list packages -3 -f", timeout=5)
         user_apps = []
         
-        # Get system apps
+        # Get system apps with shorter timeout
         success_system, stdout_system, stderr_system = self.run_adb_command(
-            "shell pm list packages -s -f")
+            "shell pm list packages -s -f", timeout=5)
         system_apps = []
         
         # Parse user apps
@@ -4699,9 +4710,9 @@ class Y1HelperApp(tk.Tk):
                 adb_path = self.get_adb_path()
                 current_time = time.time()
                 
-                # Check device connection with more robust parsing
+                # Check device connection with more robust parsing and shorter timeout
                 result = subprocess.run([adb_path, "devices"], 
-                                      capture_output=True, text=True, timeout=3)
+                                      capture_output=True, text=True, timeout=1)
                 
                 # More robust device detection - look for actual device lines
                 device_lines = [line.strip() for line in result.stdout.strip().split('\n') 
@@ -4716,38 +4727,8 @@ class Y1HelperApp(tk.Tk):
                 if device_found:
                     # Device appears to be connected, validate it's actually responsive
                     if current_time - self.last_device_validation > self.device_validation_interval:
-                        if self.validate_device_connection():
-                            self.device_check_failures = 0  # Reset failure counter
-                            self.consecutive_framebuffer_failures = 0  # Reset framebuffer failures
-                            self.last_device_validation = current_time
-                            
-                            if not self.device_connected:
-                                # Device just reconnected
-                                self.device_connected = True
-                                self.status_var.set("Device connected")
-                                
-                                # Show controls frame and enable input bindings when device connects
-                                self.show_controls_frame()
-                                self.enable_input_bindings()
-                                
-                                # Set device to stay awake
-                                self.set_device_stay_awake()
-                            
-                            # Always refresh apps when device is connected and validated
-                            # (unless user is actively using Apps menu)
-                            self.refresh_apps()
-                        else:
-                            # Device detected but not responsive
-                            self.device_check_failures += 1
-                            
-                            if self.device_check_failures >= self.max_device_check_failures:
-                                if self.device_connected:
-                                    self.device_connected = False
-                                    self.status_var.set("Device disconnected - not responsive")
-                                    
-                                    # Disable input bindings but keep controls frame visible
-                                    # self.hide_controls_frame()  # Removed - controls should always be visible
-                                    self.disable_input_bindings()
+                        # Use non-blocking validation to prevent UI hanging
+                        self.after(100, self._validate_device_async)
                     else:
                         # Skip validation this time, but ensure device is marked as connected if it was before
                         if not self.device_connected:
@@ -4761,9 +4742,9 @@ class Y1HelperApp(tk.Tk):
                             # Set device to stay awake
                             self.set_device_stay_awake()
                         
-                        # Refresh apps even if validation was skipped
+                        # Refresh apps even if validation was skipped (non-blocking)
                         # (unless user is actively using Apps menu)
-                        self.refresh_apps()
+                        self.after(200, self._refresh_apps_async)
                         
                 else:
                     # No device found
@@ -4789,6 +4770,65 @@ class Y1HelperApp(tk.Tk):
                     # Disable input bindings but keep controls frame visible
                     # self.hide_controls_frame()  # Removed - controls should always be visible
                     self.disable_input_bindings()
+    
+    def _validate_device_async(self):
+        """Async device validation to prevent UI hanging"""
+        try:
+            if self.validate_device_connection():
+                self.device_check_failures = 0  # Reset failure counter
+                self.consecutive_framebuffer_failures = 0  # Reset framebuffer failures
+                self.last_device_validation = time.time()
+                
+                if not self.device_connected:
+                    # Device just reconnected
+                    self.device_connected = True
+                    self.status_var.set("Device connected")
+                    
+                    # Show controls frame and enable input bindings when device connects
+                    self.show_controls_frame()
+                    self.enable_input_bindings()
+                    
+                    # Set device to stay awake
+                    self.set_device_stay_awake()
+                
+                # Always refresh apps when device is connected and validated (non-blocking)
+                # (unless user is actively using Apps menu)
+                self.after(100, self._refresh_apps_async)
+            else:
+                # Device detected but not responsive
+                self.device_check_failures += 1
+                
+                if self.device_check_failures >= self.max_device_check_failures:
+                    if self.device_connected:
+                        self.device_connected = False
+                        self.status_var.set("Device disconnected - not responsive")
+                        
+                        # Disable input bindings but keep controls frame visible
+                        self.disable_input_bindings()
+        except Exception as e:
+            debug_print(f"Error in async device validation: {e}")
+            self.device_check_failures += 1
+    
+    def _refresh_apps_async(self):
+        """Async app refresh to prevent UI hanging"""
+        try:
+            # Skip refresh if user is actively interacting with the Apps menu
+            if self.apps_menu_active:
+                debug_print("Skipping apps refresh - user is actively using Apps menu")
+                return
+            
+            # Use a thread to prevent UI blocking
+            import threading
+            def refresh_thread():
+                try:
+                    self.refresh_apps()
+                except Exception as e:
+                    debug_print(f"Error in app refresh thread: {e}")
+            
+            thread = threading.Thread(target=refresh_thread, daemon=True)
+            thread.start()
+        except Exception as e:
+            debug_print(f"Error starting app refresh thread: {e}")
         
         # Check if firmware flashing is in progress
         if getattr(self, 'is_flashing_firmware', False):
@@ -6368,7 +6408,7 @@ class Y1HelperApp(tk.Tk):
             messagebox.showerror("Error", f"Failed to restart device: {e}")
     
     def launch_rockbox_utility(self):
-        """Launch Rockbox Utility from assets directory with elevated privileges"""
+        """Launch Rockbox Utility from assets directory"""
         try:
             debug_print("Launching Rockbox Utility...")
             rockbox_utility_path = os.path.join(self.base_dir, "assets", "RockboxUtility.exe")
@@ -6380,10 +6420,9 @@ class Y1HelperApp(tk.Tk):
             
             debug_print(f"Launching Rockbox Utility from: {rockbox_utility_path}")
             
-            # Launch with elevated privileges using runas
+            # Launch normally - Rockbox Utility will request its own privileges
             import subprocess
-            subprocess.Popen(["runas", "/user:Administrator", rockbox_utility_path], 
-                           cwd=os.path.dirname(rockbox_utility_path))
+            subprocess.Popen([rockbox_utility_path], cwd=os.path.dirname(rockbox_utility_path))
             
             self.status_var.set("Rockbox Utility launched")
             debug_print("Rockbox Utility launched successfully")
@@ -6403,10 +6442,8 @@ class Y1HelperApp(tk.Tk):
                 return
             
             debug_print(f"Launching SP Flash Tool from: {flash_tool_path}")
-            
             import subprocess
             subprocess.Popen([flash_tool_path], cwd=os.path.dirname(flash_tool_path))
-            
             self.status_var.set("SP Flash Tool launched")
             debug_print("SP Flash Tool launched successfully")
         except Exception as e:
@@ -8173,15 +8210,17 @@ class Y1HelperApp(tk.Tk):
                 self.update_info = cached_update
                 self.update_available = True
                 
-                # Check if patch.exe is available for automatic installation
-                if self._has_patch_available(cached_update):
-                    debug_print("Patch.exe available - starting automatic patch installation")
-                    self._start_automatic_patch_installation(cached_update)
-                    return
+                # Check if patch.exe is available for automatic update
+                if cached_update.get('patch_asset'):
+                    debug_print("Cached patch.exe available - starting automatic update")
+                    # Block UI and start automatic patch
+                    self.disable_input_bindings()
+                    self.after(1000, lambda: self.download_and_run_patch(cached_update['patch_asset']))
                 else:
-                    debug_print("No patch.exe available - showing update pill")
+                    # No patch available - show update pill for manual update
+                    debug_print("No cached patch.exe available - showing update pill")
                     self.after(1000, self.show_update_pill_if_needed)
-                    return
+                return
             
             # Check if we should skip API calls due to recent startup
             if self.should_skip_api_checks():
@@ -8206,11 +8245,14 @@ class Y1HelperApp(tk.Tk):
                     self.update_info = update_info
                     self.update_available = True
                     
-                    # Check if patch.exe is available for automatic installation
-                    if self._has_patch_available(update_info):
-                        debug_print("Patch.exe available - starting automatic patch installation")
-                        self._start_automatic_patch_installation(update_info)
+                    # Check if patch.exe is available for automatic update
+                    if update_info.get('patch_asset'):
+                        debug_print("Patch.exe available - starting automatic update")
+                        # Block UI and start automatic patch
+                        self.disable_input_bindings()
+                        self.after(1000, lambda: self.download_and_run_patch(update_info['patch_asset']))
                     else:
+                        # No patch available - show update pill for manual update
                         debug_print("No patch.exe available - showing update pill")
                         self.after(2000, self.show_update_pill_if_needed)
                 else:
@@ -8220,112 +8262,6 @@ class Y1HelperApp(tk.Tk):
                 
         except Exception as e:
             debug_print(f"Error in startup_update_check: {e}")
-    
-    def _has_patch_available(self, update_info):
-        """Check if patch.exe is available in the update"""
-        try:
-            if 'assets' in update_info:
-                for asset in update_info['assets']:
-                    if asset.get('name', '').lower() == 'patch.exe':
-                        return True
-            return False
-        except Exception as e:
-            debug_print(f"Error checking for patch availability: {e}")
-            return False
-    
-    def _start_automatic_patch_installation(self, update_info):
-        """Start automatic patch installation, blocking UI interaction"""
-        try:
-            debug_print("Starting automatic patch installation...")
-            
-            # Disable all UI interactions
-            self.disable_input_bindings()
-            
-            # Create blocking dialog
-            dialog = tk.Toplevel(self)
-            dialog.title("Automatic Update")
-            dialog.geometry("500x300")
-            dialog.transient(self)
-            dialog.grab_set()
-            dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
-            
-            # Apply theme colors to dialog
-            self.apply_dialog_theme(dialog)
-            
-            # Center dialog
-            dialog.update_idletasks()
-            x = (dialog.winfo_screenwidth() // 2) - (500 // 2)
-            y = (dialog.winfo_screenheight() // 2) - (300 // 2)
-            dialog.geometry(f"500x300+{x}+{y}")
-            
-            # Create frame
-            frame = ttk.Frame(dialog, padding="20")
-            frame.pack(fill=tk.BOTH, expand=True)
-            
-            # Title
-            title_label = ttk.Label(frame, text="Automatic Update in Progress", 
-                                   font=("Segoe UI", 16, "bold"))
-            title_label.pack(pady=(0, 10))
-            
-            # Version info
-            version_label = ttk.Label(frame, 
-                                     text=f"Installing patch for version v{update_info['version']}...",
-                                     font=("Segoe UI", 11))
-            version_label.pack(pady=(0, 20))
-            
-            # Progress bar
-            progress_bar = ttk.Progressbar(frame, mode="indeterminate")
-            progress_bar.pack(fill=tk.X, pady=(0, 20))
-            progress_bar.start()
-            
-            # Status label
-            status_label = ttk.Label(frame, text="Downloading patch...", 
-                                    font=("Segoe UI", 10))
-            status_label.pack(pady=(0, 20))
-            
-            # Find patch.exe asset
-            patch_asset = None
-            for asset in update_info['assets']:
-                if asset.get('name', '').lower() == 'patch.exe':
-                    patch_asset = asset
-                    break
-            
-            if not patch_asset:
-                debug_print("Patch asset not found")
-                dialog.destroy()
-                self.enable_input_bindings()
-                return
-            
-            def update_status(message):
-                try:
-                    status_label.config(text=message)
-                    dialog.update()
-                except:
-                    pass
-            
-            def download_and_install_patch():
-                try:
-                    update_status("Downloading patch...")
-                    self.download_and_run_patch(patch_asset)
-                    update_status("Patch installation complete!")
-                    
-                    # Wait a moment then close dialog
-                    self.after(2000, lambda: dialog.destroy())
-                    
-                except Exception as e:
-                    debug_print(f"Error in automatic patch installation: {e}")
-                    update_status(f"Error: {e}")
-                    self.after(3000, lambda: dialog.destroy())
-                    self.enable_input_bindings()
-            
-            # Start patch installation in background
-            import threading
-            patch_thread = threading.Thread(target=download_and_install_patch, daemon=True)
-            patch_thread.start()
-            
-        except Exception as e:
-            debug_print(f"Error starting automatic patch installation: {e}")
-            self.enable_input_bindings()
 
     def show_startup_update_dialog(self, update_info):
         """Show startup update dialog asking if user wants to update"""
@@ -8458,22 +8394,6 @@ class Y1HelperApp(tk.Tk):
                 
                 self.update_info = update_info
             
-            # Check if any executables are available
-            has_patch = self._has_patch_available(self.update_info)
-            has_installer = self._has_installer_available(self.update_info)
-            
-            if not has_patch and not has_installer:
-                messagebox.showinfo("Update", "No update executables available in this release.")
-                return
-            
-            # If only installer is available, redirect directly to installer
-            if not has_patch and has_installer:
-                debug_print("No patch.exe available, redirecting to installer")
-                installer_asset = self._get_installer_asset(self.update_info)
-                if installer_asset:
-                    self.download_and_run_installer(installer_asset)
-                return
-            
             # Create choice dialog
             dialog = tk.Toplevel(self)
             dialog.title("Update Available")
@@ -8509,34 +8429,43 @@ class Y1HelperApp(tk.Tk):
             buttons_frame.pack(fill=tk.X, pady=(0, 20))
             
             def quick_update():
-                patch_asset = self._get_patch_asset(self.update_info)
-                if patch_asset:
+                if self.update_info.get('patch_asset'):
                     dialog.destroy()
-                    self.download_and_run_patch(patch_asset)
+                    self.download_and_run_patch(self.update_info['patch_asset'])
                 else:
-                    messagebox.showwarning("Quick Update", "No patch.exe available for quick update.")
+                    # No patch available, redirect to full installer
+                    dialog.destroy()
+                    if self.update_info.get('installer_asset'):
+                        self.download_and_run_installer(self.update_info['installer_asset'])
+                    else:
+                        messagebox.showwarning("Update", "No update executables available.")
             
             def full_update():
-                installer_asset = self._get_installer_asset(self.update_info)
-                if installer_asset:
+                if self.update_info.get('installer_asset'):
                     dialog.destroy()
-                    self.download_and_run_installer(installer_asset)
+                    self.download_and_run_installer(self.update_info['installer_asset'])
                 else:
                     messagebox.showwarning("Full Update", "No installer.exe available for full update.")
             
             def cancel():
                 dialog.destroy()
             
-            # Quick Update button (patch)
-            if has_patch:
+            # Quick Update button (patch) - only show if patch is available
+            if self.update_info.get('patch_asset'):
                 quick_btn = ttk.Button(buttons_frame, text="Quick Update (Patch)", 
                                       command=quick_update, style="TButton")
                 quick_btn.pack(fill=tk.X, pady=(0, 10))
             
-            # Full Update button (installer)
-            if has_installer:
-                full_btn = ttk.Button(buttons_frame, text="Full Update (Installer)", 
-                                     command=full_update, style="TButton")
+            # Full Update button (installer) - show if installer is available
+            if self.update_info.get('installer_asset'):
+                if self.update_info.get('patch_asset'):
+                    # Both available - show as "Full Update"
+                    full_btn = ttk.Button(buttons_frame, text="Full Update (Installer)", 
+                                         command=full_update, style="TButton")
+                else:
+                    # Only installer available - show as "Update"
+                    full_btn = ttk.Button(buttons_frame, text="Update", 
+                                         command=full_update, style="TButton")
                 full_btn.pack(fill=tk.X, pady=(0, 10))
             
             # Cancel button
@@ -8546,42 +8475,6 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error in show_update_choice_dialog: {e}")
             messagebox.showerror("Update Error", f"Failed to show update dialog: {str(e)}")
-    
-    def _has_installer_available(self, update_info):
-        """Check if installer.exe is available in the update"""
-        try:
-            if 'assets' in update_info:
-                for asset in update_info['assets']:
-                    if asset.get('name', '').lower() == 'installer.exe':
-                        return True
-            return False
-        except Exception as e:
-            debug_print(f"Error checking for installer availability: {e}")
-            return False
-    
-    def _get_patch_asset(self, update_info):
-        """Get patch.exe asset from update info"""
-        try:
-            if 'assets' in update_info:
-                for asset in update_info['assets']:
-                    if asset.get('name', '').lower() == 'patch.exe':
-                        return asset
-            return None
-        except Exception as e:
-            debug_print(f"Error getting patch asset: {e}")
-            return None
-    
-    def _get_installer_asset(self, update_info):
-        """Get installer.exe asset from update info"""
-        try:
-            if 'assets' in update_info:
-                for asset in update_info['assets']:
-                    if asset.get('name', '').lower() == 'installer.exe':
-                        return asset
-            return None
-        except Exception as e:
-            debug_print(f"Error getting installer asset: {e}")
-            return None
 
     def launch_old_version(self):
         """Launch old.py and exit current instance"""
