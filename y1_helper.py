@@ -6382,10 +6382,8 @@ class Y1HelperApp(tk.Tk):
             
             # Launch with elevated privileges using runas
             import subprocess
-            subprocess.Popen([
-                "runas", "/user:Administrator", 
-                f'"{rockbox_utility_path}"'
-            ], shell=True)
+            subprocess.Popen(["runas", "/user:Administrator", rockbox_utility_path], 
+                           cwd=os.path.dirname(rockbox_utility_path))
             
             self.status_var.set("Rockbox Utility launched")
             debug_print("Rockbox Utility launched successfully")
@@ -6406,7 +6404,6 @@ class Y1HelperApp(tk.Tk):
             
             debug_print(f"Launching SP Flash Tool from: {flash_tool_path}")
             
-            # Launch SP Flash Tool
             import subprocess
             subprocess.Popen([flash_tool_path], cwd=os.path.dirname(flash_tool_path))
             
@@ -8176,9 +8173,15 @@ class Y1HelperApp(tk.Tk):
                 self.update_info = cached_update
                 self.update_available = True
                 
-                # Show update pill immediately
-                self.after(1000, self.show_update_pill_if_needed)
-                return
+                # Check if patch.exe is available for automatic installation
+                if self._has_patch_available(cached_update):
+                    debug_print("Patch.exe available - starting automatic patch installation")
+                    self._start_automatic_patch_installation(cached_update)
+                    return
+                else:
+                    debug_print("No patch.exe available - showing update pill")
+                    self.after(1000, self.show_update_pill_if_needed)
+                    return
             
             # Check if we should skip API calls due to recent startup
             if self.should_skip_api_checks():
@@ -8203,8 +8206,13 @@ class Y1HelperApp(tk.Tk):
                     self.update_info = update_info
                     self.update_available = True
                     
-                    # Show update pill and update menu label instead of dialog
-                    self.after(2000, self.show_update_pill_if_needed)
+                    # Check if patch.exe is available for automatic installation
+                    if self._has_patch_available(update_info):
+                        debug_print("Patch.exe available - starting automatic patch installation")
+                        self._start_automatic_patch_installation(update_info)
+                    else:
+                        debug_print("No patch.exe available - showing update pill")
+                        self.after(2000, self.show_update_pill_if_needed)
                 else:
                     debug_print("No newer version available at startup")
             else:
@@ -8212,6 +8220,112 @@ class Y1HelperApp(tk.Tk):
                 
         except Exception as e:
             debug_print(f"Error in startup_update_check: {e}")
+    
+    def _has_patch_available(self, update_info):
+        """Check if patch.exe is available in the update"""
+        try:
+            if 'assets' in update_info:
+                for asset in update_info['assets']:
+                    if asset.get('name', '').lower() == 'patch.exe':
+                        return True
+            return False
+        except Exception as e:
+            debug_print(f"Error checking for patch availability: {e}")
+            return False
+    
+    def _start_automatic_patch_installation(self, update_info):
+        """Start automatic patch installation, blocking UI interaction"""
+        try:
+            debug_print("Starting automatic patch installation...")
+            
+            # Disable all UI interactions
+            self.disable_input_bindings()
+            
+            # Create blocking dialog
+            dialog = tk.Toplevel(self)
+            dialog.title("Automatic Update")
+            dialog.geometry("500x300")
+            dialog.transient(self)
+            dialog.grab_set()
+            dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+            
+            # Apply theme colors to dialog
+            self.apply_dialog_theme(dialog)
+            
+            # Center dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (500 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (300 // 2)
+            dialog.geometry(f"500x300+{x}+{y}")
+            
+            # Create frame
+            frame = ttk.Frame(dialog, padding="20")
+            frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            title_label = ttk.Label(frame, text="Automatic Update in Progress", 
+                                   font=("Segoe UI", 16, "bold"))
+            title_label.pack(pady=(0, 10))
+            
+            # Version info
+            version_label = ttk.Label(frame, 
+                                     text=f"Installing patch for version v{update_info['version']}...",
+                                     font=("Segoe UI", 11))
+            version_label.pack(pady=(0, 20))
+            
+            # Progress bar
+            progress_bar = ttk.Progressbar(frame, mode="indeterminate")
+            progress_bar.pack(fill=tk.X, pady=(0, 20))
+            progress_bar.start()
+            
+            # Status label
+            status_label = ttk.Label(frame, text="Downloading patch...", 
+                                    font=("Segoe UI", 10))
+            status_label.pack(pady=(0, 20))
+            
+            # Find patch.exe asset
+            patch_asset = None
+            for asset in update_info['assets']:
+                if asset.get('name', '').lower() == 'patch.exe':
+                    patch_asset = asset
+                    break
+            
+            if not patch_asset:
+                debug_print("Patch asset not found")
+                dialog.destroy()
+                self.enable_input_bindings()
+                return
+            
+            def update_status(message):
+                try:
+                    status_label.config(text=message)
+                    dialog.update()
+                except:
+                    pass
+            
+            def download_and_install_patch():
+                try:
+                    update_status("Downloading patch...")
+                    self.download_and_run_patch(patch_asset)
+                    update_status("Patch installation complete!")
+                    
+                    # Wait a moment then close dialog
+                    self.after(2000, lambda: dialog.destroy())
+                    
+                except Exception as e:
+                    debug_print(f"Error in automatic patch installation: {e}")
+                    update_status(f"Error: {e}")
+                    self.after(3000, lambda: dialog.destroy())
+                    self.enable_input_bindings()
+            
+            # Start patch installation in background
+            import threading
+            patch_thread = threading.Thread(target=download_and_install_patch, daemon=True)
+            patch_thread.start()
+            
+        except Exception as e:
+            debug_print(f"Error starting automatic patch installation: {e}")
+            self.enable_input_bindings()
 
     def show_startup_update_dialog(self, update_info):
         """Show startup update dialog asking if user wants to update"""
@@ -8280,20 +8394,16 @@ class Y1HelperApp(tk.Tk):
             messagebox.showerror("Update Error", f"Failed to show startup update dialog: {str(e)}")
 
     def show_update_pill_if_needed(self):
-        """Show the update pill if update is available and has executables"""
+        """Show the update pill if update is available"""
         try:
             if hasattr(self, 'update_info') and self.update_info:
-                # Only show update pill if there are executables available
-                has_patch = self.update_info.get('patch_asset') is not None
-                has_installer = self.update_info.get('installer_asset') is not None
-                
-                if has_patch or has_installer:
-                    debug_print("Showing update pill - executables available")
-                    self.update_pill.config(text="Y1 Helper Update Available")
-                    self.help_menu_label = "Update Available"
-                    self.menubar.entryconfig("Help", label=self.help_menu_label)
-                else:
-                    debug_print("Update available but no executables found - hiding pill")
+                debug_print("Showing update pill")
+
+
+
+                self.update_pill.config(text="Y1 Helper Update Available")
+                self.help_menu_label = "Update Available"
+                self.menubar.entryconfig("Help", label=self.help_menu_label)
         except Exception as e:
             debug_print(f"Error in show_update_pill_if_needed: {e}")
 
@@ -8348,6 +8458,22 @@ class Y1HelperApp(tk.Tk):
                 
                 self.update_info = update_info
             
+            # Check if any executables are available
+            has_patch = self._has_patch_available(self.update_info)
+            has_installer = self._has_installer_available(self.update_info)
+            
+            if not has_patch and not has_installer:
+                messagebox.showinfo("Update", "No update executables available in this release.")
+                return
+            
+            # If only installer is available, redirect directly to installer
+            if not has_patch and has_installer:
+                debug_print("No patch.exe available, redirecting to installer")
+                installer_asset = self._get_installer_asset(self.update_info)
+                if installer_asset:
+                    self.download_and_run_installer(installer_asset)
+                return
+            
             # Create choice dialog
             dialog = tk.Toplevel(self)
             dialog.title("Update Available")
@@ -8383,34 +8509,32 @@ class Y1HelperApp(tk.Tk):
             buttons_frame.pack(fill=tk.X, pady=(0, 20))
             
             def quick_update():
-                if self.update_info.get('patch_asset'):
+                patch_asset = self._get_patch_asset(self.update_info)
+                if patch_asset:
                     dialog.destroy()
-                    self.download_and_run_patch(self.update_info['patch_asset'])
+                    self.download_and_run_patch(patch_asset)
                 else:
-                    # No patch available, redirect to full installer
-                    dialog.destroy()
-                    if self.update_info.get('installer_asset'):
-                        self.download_and_run_installer(self.update_info['installer_asset'])
-                    else:
-                        messagebox.showwarning("Update", "No update executables available.")
+                    messagebox.showwarning("Quick Update", "No patch.exe available for quick update.")
             
             def full_update():
-                if self.update_info.get('installer_asset'):
+                installer_asset = self._get_installer_asset(self.update_info)
+                if installer_asset:
                     dialog.destroy()
-                    self.download_and_run_installer(self.update_info['installer_asset'])
+                    self.download_and_run_installer(installer_asset)
                 else:
                     messagebox.showwarning("Full Update", "No installer.exe available for full update.")
             
             def cancel():
                 dialog.destroy()
             
-            # Quick Update button (patch) - show even if no patch, will redirect to installer
-            quick_btn = ttk.Button(buttons_frame, text="Quick Update (Patch)", 
-                                  command=quick_update, style="TButton")
-            quick_btn.pack(fill=tk.X, pady=(0, 10))
+            # Quick Update button (patch)
+            if has_patch:
+                quick_btn = ttk.Button(buttons_frame, text="Quick Update (Patch)", 
+                                      command=quick_update, style="TButton")
+                quick_btn.pack(fill=tk.X, pady=(0, 10))
             
             # Full Update button (installer)
-            if self.update_info.get('installer_asset'):
+            if has_installer:
                 full_btn = ttk.Button(buttons_frame, text="Full Update (Installer)", 
                                      command=full_update, style="TButton")
                 full_btn.pack(fill=tk.X, pady=(0, 10))
@@ -8422,6 +8546,42 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error in show_update_choice_dialog: {e}")
             messagebox.showerror("Update Error", f"Failed to show update dialog: {str(e)}")
+    
+    def _has_installer_available(self, update_info):
+        """Check if installer.exe is available in the update"""
+        try:
+            if 'assets' in update_info:
+                for asset in update_info['assets']:
+                    if asset.get('name', '').lower() == 'installer.exe':
+                        return True
+            return False
+        except Exception as e:
+            debug_print(f"Error checking for installer availability: {e}")
+            return False
+    
+    def _get_patch_asset(self, update_info):
+        """Get patch.exe asset from update info"""
+        try:
+            if 'assets' in update_info:
+                for asset in update_info['assets']:
+                    if asset.get('name', '').lower() == 'patch.exe':
+                        return asset
+            return None
+        except Exception as e:
+            debug_print(f"Error getting patch asset: {e}")
+            return None
+    
+    def _get_installer_asset(self, update_info):
+        """Get installer.exe asset from update info"""
+        try:
+            if 'assets' in update_info:
+                for asset in update_info['assets']:
+                    if asset.get('name', '').lower() == 'installer.exe':
+                        return asset
+            return None
+        except Exception as e:
+            debug_print(f"Error getting installer asset: {e}")
+            return None
 
     def launch_old_version(self):
         """Launch old.py and exit current instance"""
