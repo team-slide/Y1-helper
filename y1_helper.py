@@ -4503,9 +4503,10 @@ class Y1HelperApp(tk.Tk):
         self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
+        # self.device_menu.add_command(label="Repair Device", command=self.repair_device)  # Removed
+        self.device_menu.add_separator()
         self.device_menu.add_command(label="Rockbox Utility", command=self.launch_rockbox_utility)
         self.device_menu.add_command(label="SP Flash Tool", command=self.launch_sp_flash_tool)
-        # self.device_menu.add_command(label="Repair Device", command=self.repair_device)  # Removed
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Restart Device", command=self.restart_device)
         
@@ -6365,6 +6366,52 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error restarting device: {e}")
             messagebox.showerror("Error", f"Failed to restart device: {e}")
+    
+    def launch_rockbox_utility(self):
+        """Launch Rockbox Utility from assets directory with elevated privileges"""
+        try:
+            debug_print("Launching Rockbox Utility...")
+            rockbox_utility_path = os.path.join(self.base_dir, "assets", "RockboxUtility.exe")
+            
+            if not os.path.exists(rockbox_utility_path):
+                debug_print("RockboxUtility.exe not found in assets directory")
+                messagebox.showerror("Error", "RockboxUtility.exe not found in assets directory")
+                return
+            
+            debug_print(f"Launching Rockbox Utility from: {rockbox_utility_path}")
+            
+            # Launch with elevated privileges using runas
+            import subprocess
+            subprocess.Popen([
+                "runas", "/user:Administrator", 
+                f'"{rockbox_utility_path}"'
+            ], shell=True)
+            
+            self.status_var.set("Rockbox Utility launched with elevated privileges")
+            debug_print("Rockbox Utility launched successfully with elevated privileges")
+        except Exception as e:
+            debug_print(f"Error launching Rockbox Utility: {e}")
+            messagebox.showerror("Error", f"Failed to launch Rockbox Utility: {e}")
+    
+    def launch_sp_flash_tool(self):
+        """Launch SP Flash Tool from assets directory"""
+        try:
+            debug_print("Launching SP Flash Tool...")
+            flash_tool_path = os.path.join(self.base_dir, "assets", "flash_tool.exe")
+            
+            if not os.path.exists(flash_tool_path):
+                debug_print("flash_tool.exe not found in assets directory")
+                messagebox.showerror("Error", "flash_tool.exe not found in assets directory")
+                return
+            
+            debug_print(f"Launching SP Flash Tool from: {flash_tool_path}")
+            import subprocess
+            subprocess.Popen([flash_tool_path], cwd=os.path.dirname(flash_tool_path))
+            self.status_var.set("SP Flash Tool launched")
+            debug_print("SP Flash Tool launched successfully")
+        except Exception as e:
+            debug_print(f"Error launching SP Flash Tool: {e}")
+            messagebox.showerror("Error", f"Failed to launch SP Flash Tool: {e}")
     
     def restart_rockbox(self):
         """Restart Rockbox application"""
@@ -8332,8 +8379,12 @@ class Y1HelperApp(tk.Tk):
                 if self.update_info.get('patch_asset'):
                     dialog.destroy()
                     self.download_and_run_patch(self.update_info['patch_asset'])
+                elif self.update_info.get('installer_asset'):
+                    # No patch available, automatically use installer instead
+                    dialog.destroy()
+                    self.download_and_run_installer(self.update_info['installer_asset'])
                 else:
-                    messagebox.showwarning("Quick Update", "No patch.exe available for quick update.")
+                    messagebox.showwarning("Quick Update", "No update files available.")
             
             def full_update():
                 if self.update_info.get('installer_asset'):
@@ -8345,14 +8396,19 @@ class Y1HelperApp(tk.Tk):
             def cancel():
                 dialog.destroy()
             
-            # Quick Update button (patch)
+            # Quick Update button (patch) - show if patch available, otherwise show as "Update" if only installer available
             if self.update_info.get('patch_asset'):
                 quick_btn = ttk.Button(buttons_frame, text="Quick Update (Patch)", 
                                       command=quick_update, style="TButton")
                 quick_btn.pack(fill=tk.X, pady=(0, 10))
+            elif self.update_info.get('installer_asset'):
+                # Only installer available, show as single update option
+                update_btn = ttk.Button(buttons_frame, text="Update", 
+                                       command=quick_update, style="TButton")
+                update_btn.pack(fill=tk.X, pady=(0, 10))
             
-            # Full Update button (installer)
-            if self.update_info.get('installer_asset'):
+            # Full Update button (installer) - only show if both patch and installer are available
+            if self.update_info.get('patch_asset') and self.update_info.get('installer_asset'):
                 full_btn = ttk.Button(buttons_frame, text="Full Update (Installer)", 
                                      command=full_update, style="TButton")
                 full_btn.pack(fill=tk.X, pady=(0, 10))
@@ -8396,44 +8452,6 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error launching old.py: {e}")
             messagebox.showerror("Error", f"Failed to launch old.py: {e}")
-
-    def launch_rockbox_utility(self):
-        """Launch Rockbox Utility from assets folder"""
-        try:
-            debug_print("Launching Rockbox Utility...")
-            
-            # Get the path to rockboxutility.exe
-            rockbox_path = os.path.join(self.base_dir, "assets", "rockboxutility.exe")
-            
-            if not os.path.exists(rockbox_path):
-                messagebox.showerror("Error", "rockboxutility.exe not found in assets folder")
-                return
-            
-            # Launch rockboxutility.exe
-            subprocess.Popen([rockbox_path], cwd=os.path.join(self.base_dir, "assets"))
-            
-        except Exception as e:
-            debug_print(f"Error launching Rockbox Utility: {e}")
-            messagebox.showerror("Error", f"Failed to launch Rockbox Utility: {e}")
-
-    def launch_sp_flash_tool(self):
-        """Launch SP Flash Tool from assets folder"""
-        try:
-            debug_print("Launching SP Flash Tool...")
-            
-            # Get the path to flash_tool.exe
-            flash_tool_path = os.path.join(self.base_dir, "assets", "flash_tool.exe")
-            
-            if not os.path.exists(flash_tool_path):
-                messagebox.showerror("Error", "flash_tool.exe not found in assets folder")
-                return
-            
-            # Launch flash_tool.exe
-            subprocess.Popen([flash_tool_path], cwd=os.path.join(self.base_dir, "assets"))
-            
-        except Exception as e:
-            debug_print(f"Error launching SP Flash Tool: {e}")
-            messagebox.showerror("Error", f"Failed to launch SP Flash Tool: {e}")
     
     def show_team_slide_update_prompt(self, update_info):
         if self.update_prompt_shown:
