@@ -37,11 +37,11 @@ assets_dir = os.path.join(base_dir, 'assets')
 
 # Hardcoded backup API keys (stripped of github_pat_ prefix)
 BACKUP_API_KEYS = [
-    "11BUHMFQQ0S0BJlidk1hVe_j081TB15LMr84UOTp5cCSGoPMD7reL8naZAnsywrX8NZ56RY55IqPqeaqUf",
-    "1BUHMFQQ0kI3jUezJIefF_c0sYzNSc98CFYiWytkpCZdLRGwDU49k87i6d1UZ6sMHMMLEYYYQmqhCxWOR",
-    "11BUHMFQQ0Jd3WX8SZ7QAg_3eekBXeJC6ZmHZUTjDtGUx6KEuV9SaJdLlCTNnD58jpW2K6SZ2ANQRCnBHE",
-    "11BUHMFQQ07ICpSRb0UXv4_SYOAPW11eNx9uu2FhuwWp4urbXJcS3LHmNOtEKjsu1X3YJM2UWTuDuCldBs",
-    "11BUHMFQQ0Klynt0Ddzg30_1zvtZUvI6Tbw3ApczAAHhXTxeYDzoDc7ffLehm6Tzu4ACZPZG64Tt9YWKlf",
+    "11BUHMFQQ0uN6Zlg15lvSZ_vri8CobRUiNTOXkX8bw3Avz2PqIvBQehrxNlzFM40vLOD4SWNFAXEZGP5Yr",
+    "11BUHMFQQ0pFcbFjZm0F1v_NhtTYIOoor5w0LxvsN4P23Nx7xN4rjUHaGhhMzYgx7xTAXC7SUS4jVEhdav",
+    "11BUHMFQQ0QwLSFZUmc0jZ_EO8vMVk8nSQyi1fZQUPQE8Jq3ijUphtXWryp6Q8mofsHL36P4ZEkIMnNy5h",
+    "1BUHMFQQ0YUAxJbxi5bNU_wnqdD4TPDUXMtLQZiA3TVIAl7SwbT0fCdbgxCrbz6dUPRE5XY7CmZLHESXu",
+    "11BUHMFQQ0xQQx7J0PFf0n_qMkjLunDcQoYgY4kgZneZ1WF8mWU2FCGncnM752x6BaWYL4QD2HYB1dDrO8",
     "11BUHMFQQ07NN2czv5nxhh_a16N4Y99uDi9Znr4tnewdjL1aPjC3eK27iDoTHrubrZCNOTDHQ3mKI9QpEJ"
 ]
 
@@ -653,11 +653,11 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error updating cache: {e}")
     
     def check_rate_limits(self, token=None):
-        """Check if we can make an API call based on rate limits"""
+        """Check if we can make an API call based on rate limits with conservative limits"""
         try:
             now = datetime.datetime.now()
             
-            # Check unauthenticated limits
+            # Check unauthenticated limits (very conservative: 30 calls per hour)
             if not token:
                 unauthenticated = self.api_rate_limits['unauthenticated']
                 if now > unauthenticated['reset_time']:
@@ -665,16 +665,20 @@ class Y1HelperApp(tk.Tk):
                     unauthenticated['calls'] = 0
                     unauthenticated['reset_time'] = now + datetime.timedelta(hours=1)
                 
-                if unauthenticated['calls'] >= self.max_unauthenticated_calls:
+                # Use very conservative limit (GitHub allows 60, we use 30)
+                conservative_limit = min(self.max_unauthenticated_calls, 30)
+                
+                if unauthenticated['calls'] >= conservative_limit:
                     self.rate_limit_exceeded = True
                     self.update_title_for_rate_limit()
-                    debug_print("Unauthenticated API rate limit exceeded")
+                    debug_print(f"Unauthenticated API rate limit exceeded ({unauthenticated['calls']}/{conservative_limit})")
                     return False
                 
                 unauthenticated['calls'] += 1
+                debug_print(f"Unauthenticated API call {unauthenticated['calls']}/{conservative_limit}")
                 return True
             
-            # Check authenticated limits
+            # Check authenticated limits (conservative: 4000 calls per hour)
             if token not in self.api_rate_limits['authenticated']:
                 self.api_rate_limits['authenticated'][token] = {
                     'calls': 0, 
@@ -687,11 +691,15 @@ class Y1HelperApp(tk.Tk):
                 token_limits['calls'] = 0
                 token_limits['reset_time'] = now + datetime.timedelta(hours=1)
             
-            if token_limits['calls'] >= self.max_authenticated_calls:
-                debug_print(f"Authenticated API rate limit exceeded for token: {token[:10]}...")
+            # Use conservative limit (GitHub allows 5000, we use 4000)
+            conservative_limit = min(self.max_authenticated_calls, 4000)
+            
+            if token_limits['calls'] >= conservative_limit:
+                debug_print(f"Authenticated API rate limit exceeded for token {token[:10]}... ({token_limits['calls']}/{conservative_limit})")
                 return False
             
             token_limits['calls'] += 1
+            debug_print(f"Authenticated API call for token {token[:10]}... ({token_limits['calls']}/{conservative_limit})")
             return True
             
         except Exception as e:
@@ -2400,166 +2408,208 @@ class Y1HelperApp(tk.Tk):
 
     def _make_github_request_with_retries(self, url, method='GET', stream=False, **kwargs):
         """
-        Make a GitHub request with highly optimized token selection prioritizing working tokens.
+        Make a GitHub request with comprehensive authentication and fallback strategies.
         
         Strategy:
-        1. Use cached working tokens first (most efficient)
-        2. Only test new tokens if no working tokens available
-        3. Cache successful tokens immediately for future use
-        4. Skip expensive fallback to all tokens
-        5. Early termination on success
+        1. Try cached working tokens first (most efficient)
+        2. Test all available tokens systematically
+        3. Use hardcoded backup tokens
+        4. Try legacy token methods
+        5. Fall back to unauthenticated requests
+        6. Use multiple URL variations
+        7. Respect rate limits with self-imposed limits below GitHub's
         
         Returns: requests.Response object
         Raises: requests.RequestException if all attempts fail
         """
-        # Check rate limits before making any API calls
-        if not self.check_rate_limits():
-            debug_print("Rate limit exceeded, trying unauthenticated request only")
-            # Try unauthenticated request as last resort
-            try:
-                response = requests.request(
-                    method=method,
-                    url=url,
-                    headers={'User-Agent': 'Y1-Helper/0.7.0'},
-                    stream=stream,
-                    timeout=30,
-                    **kwargs
-                )
-                
-                if response.status_code == 200:
-                    debug_print(f"Unauthenticated request successful for {url} (status: {response.status_code})")
-                    return response
-                else:
-                    debug_print(f"Unauthenticated request failed with status {response.status_code} for URL: {url}")
-                    raise Exception("Rate limit exceeded and unauthenticated request failed")
-                    
-            except Exception as e:
-                debug_print(f"Unauthenticated request failed for URL {url}: {e}")
-                raise Exception("Rate limit exceeded and all request methods failed")
+        debug_print(f"Making GitHub request to: {url}")
         
-        # Generate fallback URLs
+        # Generate fallback URLs for different access methods
         fallback_urls = self._generate_github_fallback_urls(url)
+        debug_print(f"Generated {len(fallback_urls)} fallback URLs")
         
-        # Get working tokens (cached or tested)
+        # Get all available authentication methods
+        all_tokens = self.get_all_api_keys()
         working_tokens = self._get_cached_working_tokens()
-        if not working_tokens and fallback_urls:
-            debug_print("No cached working tokens, testing token efficiency")
-            working_tokens = self._test_token_efficiency(fallback_urls[0])
         
-        debug_print(f"Making GitHub request with {len(fallback_urls)} URL variations")
-        debug_print(f"Working tokens available: {len(working_tokens)}")
+        debug_print(f"Available tokens: {len(all_tokens)}, Working tokens: {len(working_tokens)}")
         
-        # Try each URL with working tokens first
+        # Try each URL variation
         for fallback_url in fallback_urls:
             debug_print(f"Trying URL: {fallback_url}")
             
-            # Try working tokens first (most efficient)
+            # Method 1: Try cached working tokens first (most efficient)
             if working_tokens:
                 for i, token in enumerate(working_tokens):
                     if not self.check_rate_limits(token):
+                        debug_print(f"Rate limit exceeded for working token {token[:10]}...")
                         continue
                     
-                    debug_print(f"Trying working token: {token[:10]}... (attempt {i+1}/{len(working_tokens)})")
-                    
-                    headers = {
-                        'User-Agent': 'Y1-Helper/0.7.0',
-                        'Authorization': f'token {token}'
-                    }
+                    debug_print(f"Trying cached working token: {token[:10]}... ({i+1}/{len(working_tokens)})")
                     
                     try:
-                        response = requests.request(
-                            method=method,
-                            url=fallback_url,
-                            headers=headers,
-                            stream=stream,
-                            timeout=30,
-                            **kwargs
-                        )
-                        
-                        # Check for authentication/authorization errors
-                        if response.status_code in [401, 403]:
-                            debug_print(f"Working token failed with status {response.status_code}: {token[:10]}...")
-                            continue
-                        
-                        # Success! Stop trying more tokens
-                        debug_print(f"Request successful with working token: {token[:10]}... (status: {response.status_code})")
-                        # Ensure this token stays in cache (move to front)
-                        self._add_working_token(token)
-                        return response
-                        
-                    except requests.RequestException as e:
-                        debug_print(f"Request failed with working token {token[:10]}...: {e}")
+                        response = self._make_authenticated_request(fallback_url, method, token, stream, **kwargs)
+                        if response and response.status_code == 200:
+                            debug_print(f"Success with cached working token: {token[:10]}...")
+                            self._add_working_token(token)  # Move to front of cache
+                            return response
+                    except Exception as e:
+                        debug_print(f"Cached working token failed: {token[:10]}... - {e}")
                         continue
             
-            # If no working tokens available, test a small subset of tokens
-            if not working_tokens:
-                debug_print("No working tokens available, testing new tokens")
-                all_keys = self.get_all_api_keys()
-                if all_keys:
-                    # Test only the last few tokens (most likely to work)
-                    tokens_to_test = all_keys[-3:] if len(all_keys) > 3 else all_keys
+            # Method 2: Try all available tokens systematically
+            if all_tokens:
+                debug_print(f"Testing all {len(all_tokens)} available tokens")
+                for i, token in enumerate(all_tokens):
+                    if not self.check_rate_limits(token):
+                        debug_print(f"Rate limit exceeded for token {token[:10]}...")
+                        continue
                     
-                    for i, token in enumerate(tokens_to_test):
-                        if not self.check_rate_limits(token):
-                            continue
-                        
-                        debug_print(f"Testing new token: {token[:10]}... (attempt {i+1}/{len(tokens_to_test)})")
-                        
-                        headers = {
-                            'User-Agent': 'Y1-Helper/0.7.0',
-                            'Authorization': f'token {token}'
-                        }
-                        
-                        try:
-                            response = requests.request(
-                                method=method,
-                                url=fallback_url,
-                                headers=headers,
-                                stream=stream,
-                                timeout=30,
-                                **kwargs
-                            )
-                            
-                            # Check for authentication/authorization errors
-                            if response.status_code in [401, 403]:
-                                debug_print(f"New token failed with status {response.status_code}: {token[:10]}...")
-                                continue
-                            
-                            # Success! Cache this token immediately and return
-                            debug_print(f"New token successful: {token[:10]}... (status: {response.status_code})")
+                    debug_print(f"Testing token: {token[:10]}... ({i+1}/{len(all_tokens)})")
+                    
+                    try:
+                        response = self._make_authenticated_request(fallback_url, method, token, stream, **kwargs)
+                        if response and response.status_code == 200:
+                            debug_print(f"Success with new token: {token[:10]}...")
                             self._add_working_token(token)
                             return response
-                            
-                        except requests.RequestException as e:
-                            debug_print(f"New token failed with error: {token[:10]}...: {e}")
-                            continue
+                    except Exception as e:
+                        debug_print(f"Token failed: {token[:10]}... - {e}")
+                        continue
             
-            # If all authenticated requests failed for this URL, try unauthenticated
-            debug_print(f"All authenticated requests failed for {fallback_url}, trying unauthenticated")
-            if self.check_rate_limits():  # Check unauthenticated rate limit
-                headers = {
-                    'User-Agent': 'Y1-Helper/0.7.0'
-                }
+            # Method 3: Try hardcoded backup tokens specifically
+            debug_print("Trying hardcoded backup tokens")
+            for i, backup_token in enumerate(BACKUP_API_KEYS):
+                if not self.check_rate_limits(backup_token):
+                    continue
+                
+                debug_print(f"Trying backup token: {backup_token[:10]}... ({i+1}/{len(BACKUP_API_KEYS)})")
                 
                 try:
-                    response = requests.request(
-                        method=method,
-                        url=fallback_url,
-                        headers=headers,
-                        stream=stream,
-                        timeout=30,
-                        **kwargs
-                    )
-                    debug_print(f"Unauthenticated request successful for {fallback_url} (status: {response.status_code})")
-                    return response
-                    
-                except requests.RequestException as e:
-                    debug_print(f"Unauthenticated request also failed for {fallback_url}: {e}")
+                    response = self._make_authenticated_request(fallback_url, method, backup_token, stream, **kwargs)
+                    if response and response.status_code == 200:
+                        debug_print(f"Success with backup token: {backup_token[:10]}...")
+                        self._add_working_token(backup_token)
+                        return response
+                except Exception as e:
+                    debug_print(f"Backup token failed: {backup_token[:10]}... - {e}")
                     continue
+            
+            # Method 4: Try legacy token methods
+            debug_print("Trying legacy token methods")
+            try:
+                legacy_token = self._get_legacy_token()
+                if legacy_token and self.check_rate_limits(legacy_token):
+                    debug_print(f"Trying legacy token: {legacy_token[:10]}...")
+                    response = self._make_authenticated_request(fallback_url, method, legacy_token, stream, **kwargs)
+                    if response and response.status_code == 200:
+                        debug_print(f"Success with legacy token: {legacy_token[:10]}...")
+                        self._add_working_token(legacy_token)
+                        return response
+            except Exception as e:
+                debug_print(f"Legacy token failed: {e}")
+            
+            # Method 5: Try unauthenticated request as last resort
+            debug_print("Trying unauthenticated request")
+            if self.check_rate_limits():  # Check unauthenticated rate limit
+                try:
+                    response = self._make_unauthenticated_request(fallback_url, method, stream, **kwargs)
+                    if response and response.status_code == 200:
+                        debug_print("Success with unauthenticated request")
+                        return response
+                except Exception as e:
+                    debug_print(f"Unauthenticated request failed: {e}")
         
-        # All attempts failed
-        debug_print("All GitHub request attempts failed")
-        raise Exception("Failed to make GitHub request after all retries")
+        # All methods failed
+        debug_print("All GitHub request methods failed")
+        raise Exception("Failed to make GitHub request after exhausting all authentication methods")
+    
+    def _make_authenticated_request(self, url, method, token, stream, **kwargs):
+        """Make an authenticated GitHub request with proper error handling"""
+        headers = {
+            'User-Agent': 'Y1-Helper/0.7.0',
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        response = requests.request(
+            method=method,
+            url=url,
+            headers=headers,
+            stream=stream,
+            timeout=30,
+            **kwargs
+        )
+        
+        # Handle rate limiting
+        if response.status_code == 403:
+            rate_limit_remaining = response.headers.get('X-RateLimit-Remaining', '0')
+            rate_limit_reset = response.headers.get('X-RateLimit-Reset', '0')
+            debug_print(f"Rate limit hit for token {token[:10]}... - Remaining: {rate_limit_remaining}, Reset: {rate_limit_reset}")
+            return None
+        
+        # Handle authentication errors
+        if response.status_code in [401, 403]:
+            debug_print(f"Authentication failed for token {token[:10]}... - Status: {response.status_code}")
+            return None
+        
+        return response
+    
+    def _make_unauthenticated_request(self, url, method, stream, **kwargs):
+        """Make an unauthenticated GitHub request"""
+        headers = {
+            'User-Agent': 'Y1-Helper/0.7.0',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        response = requests.request(
+            method=method,
+            url=url,
+            headers=headers,
+            stream=stream,
+            timeout=30,
+            **kwargs
+        )
+        
+        # Handle unauthenticated rate limiting
+        if response.status_code == 403:
+            rate_limit_remaining = response.headers.get('X-RateLimit-Remaining', '0')
+            debug_print(f"Unauthenticated rate limit hit - Remaining: {rate_limit_remaining}")
+            return None
+        
+        return response
+    
+    def _get_legacy_token(self):
+        """Get legacy token from config.ini"""
+        try:
+            config_path = self.get_config_path()
+            if os.path.exists(config_path):
+                import configparser
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                
+                # Try legacy github.token section
+                if 'github' in config and 'token' in config['github']:
+                    token = config['github']['token'].strip()
+                    if token:
+                        if token.startswith('github_pat_'):
+                            token = token[11:]  # Remove 'github_pat_' prefix
+                        debug_print("Found legacy token in config")
+                        return token
+                
+                # Try legacy key_1 format
+                if 'api_keys' in config:
+                    for key, value in config['api_keys'].items():
+                        if key == 'key_1' and isinstance(value, str) and value.strip():
+                            token = value.strip()
+                            if token.startswith('github_pat_'):
+                                token = token[11:]
+                            debug_print("Found legacy key_1 token")
+                            return token
+        except Exception as e:
+            debug_print(f"Error getting legacy token: {e}")
+        
+        return None
     
     def update_config_background(self):
         """Update config.ini in background every 5 minutes"""
@@ -3094,63 +3144,141 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error cleaning up installer files: {e}")
     
     def _check_updates_via_api(self):
-        """Check for updates using GitHub API"""
+        """Check for updates using GitHub API with comprehensive fallback"""
         try:
             debug_print("Checking updates via GitHub API...")
             
-            # GitHub API URL for latest release
-            api_url = "https://api.github.com/repos/team-slide/y1-helper/releases/latest"
+            # Try multiple API endpoints for maximum compatibility
+            api_urls = [
+                "https://api.github.com/repos/team-slide/y1-helper/releases/latest",
+                "https://api.github.com/repos/team-slide/Y1-helper/releases/latest",  # Case variation
+                "https://api.github.com/repos/team-slide/y1_helper/releases/latest"   # Underscore variation
+            ]
             
-            # Use our comprehensive retry mechanism with rate limiting
-            response = self._make_github_request_with_retries(api_url)
+            for api_url in api_urls:
+                debug_print(f"Trying API URL: {api_url}")
+                
+                try:
+                    # Use our comprehensive retry mechanism with rate limiting
+                    response = self._make_github_request_with_retries(api_url)
+                    
+                    if response and response.status_code == 200:
+                        release_data = json.loads(response.text)
+                        
+                        if not release_data:
+                            debug_print("No release data received from API")
+                            continue
+                        
+                        # Extract version from tag name (remove 'v' prefix if present)
+                        latest_version = release_data.get('tag_name', '')
+                        if latest_version.startswith('v'):
+                            latest_version = latest_version[1:]
+                        
+                        debug_print(f"Current version: {self.version}, Latest version: {latest_version}")
+                        debug_print(f"Latest version found: {latest_version}")
+                        
+                        # Check for patch.exe or installer.exe
+                        assets = release_data.get('assets', [])
+                        patch_asset = None
+                        installer_asset = None
+                        
+                        for asset in assets:
+                            asset_name = asset.get('name', '').lower()
+                            if asset_name == 'patch.exe':
+                                patch_asset = asset
+                                debug_print("Found patch.exe in release")
+                            elif asset_name == 'installer.exe':
+                                installer_asset = asset
+                                debug_print("Found installer.exe in release")
+                        
+                        return {
+                            'version': latest_version,
+                            'tag_name': release_data.get('tag_name', ''),
+                            'body': release_data.get('body', ''),
+                            'assets': assets,
+                            'patch_asset': patch_asset,
+                            'installer_asset': installer_asset,
+                            'html_url': release_data.get('html_url', ''),
+                            'method': 'api'
+                        }
+                    else:
+                        debug_print(f"GitHub API returned status {response.status_code if response else 'No response'}")
+                        
+                except Exception as e:
+                    debug_print(f"Error with API URL {api_url}: {e}")
+                    continue
             
-            if response.status_code != 200:
-                debug_print(f"GitHub API returned status {response.status_code}")
-                return None
-            
-            release_data = json.loads(response.text)
-            
-            if not release_data:
-                debug_print("No release data received from API")
-                return None
-            
-            # Extract version from tag name (remove 'v' prefix if present)
-            latest_version = release_data.get('tag_name', '')
-            if latest_version.startswith('v'):
-                latest_version = latest_version[1:]
-            
-            debug_print(f"Current version: {self.version}, Latest version: {latest_version}")
-            
-            # Always return the latest release info, regardless of version comparison
-            debug_print(f"Latest version found: {latest_version}")
-            
-            # Check for patch.exe or installer.exe
-            assets = release_data.get('assets', [])
-            patch_asset = None
-            installer_asset = None
-            
-            for asset in assets:
-                asset_name = asset.get('name', '').lower()
-                if asset_name == 'patch.exe':
-                    patch_asset = asset
-                    debug_print("Found patch.exe in release")
-                elif asset_name == 'installer.exe':
-                    installer_asset = asset
-                    debug_print("Found installer.exe in release")
-            
-            return {
-                'version': latest_version,
-                'tag_name': release_data.get('tag_name', ''),
-                'body': release_data.get('body', ''),
-                'assets': assets,
-                'patch_asset': patch_asset,
-                'installer_asset': installer_asset,
-                'html_url': release_data.get('html_url', ''),
-                'method': 'api'
-            }
+            # If all API methods fail, try hardcoded fallback URLs
+            debug_print("All API methods failed, trying hardcoded fallback URLs")
+            return self._check_updates_via_hardcoded_urls()
             
         except Exception as e:
             debug_print(f"Error checking updates via API: {e}")
+            return None
+    
+    def _check_updates_via_hardcoded_urls(self):
+        """Check for updates using hardcoded URLs as fallback"""
+        try:
+            debug_print("Checking updates via hardcoded URLs...")
+            
+            # Hardcoded URLs for team-slide/y1-helper releases
+            hardcoded_urls = [
+                "https://github.com/team-slide/y1-helper/releases/latest",
+                "https://github.com/team-slide/Y1-helper/releases/latest",
+                "https://github.com/team-slide/y1_helper/releases/latest"
+            ]
+            
+            for url in hardcoded_urls:
+                debug_print(f"Trying hardcoded URL: {url}")
+                
+                try:
+                    response = self._make_github_request_with_retries(url)
+                    
+                    if response and response.status_code == 200:
+                        # Parse the HTML to extract version information
+                        import re
+                        content = response.text
+                        
+                        # Look for version patterns in the page
+                        version_patterns = [
+                            r'releases/tag/v?([0-9]+\.[0-9]+\.[0-9]+)',
+                            r'Version\s+([0-9]+\.[0-9]+\.[0-9]+)',
+                            r'v([0-9]+\.[0-9]+\.[0-9]+)'
+                        ]
+                        
+                        latest_version = None
+                        for pattern in version_patterns:
+                            matches = re.findall(pattern, content)
+                            if matches:
+                                latest_version = max(matches, key=lambda v: self.compare_versions(v, "0.0.0"))
+                                break
+                        
+                        if latest_version:
+                            debug_print(f"Found version via hardcoded URL: {latest_version}")
+                            
+                            # Check for patch.exe or installer.exe in the page
+                            patch_found = 'patch.exe' in content.lower()
+                            installer_found = 'installer.exe' in content.lower()
+                            
+                            return {
+                                'version': latest_version,
+                                'tag_name': f"v{latest_version}",
+                                'body': f"Update to version {latest_version} (via hardcoded URL)",
+                                'assets': [],
+                                'patch_asset': {'name': 'patch.exe'} if patch_found else None,
+                                'installer_asset': {'name': 'installer.exe'} if installer_found else None,
+                                'html_url': url,
+                                'method': 'hardcoded_url'
+                            }
+                        
+                except Exception as e:
+                    debug_print(f"Error with hardcoded URL {url}: {e}")
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"Error checking updates via hardcoded URLs: {e}")
             return None
     
     def _check_updates_via_releases_page(self):
@@ -6116,27 +6244,27 @@ class Y1HelperApp(tk.Tk):
             direction = direction_map[keycode]
             debug_print(f"D-pad key detected: {key} -> {direction}")
             if self.control_launcher and self.scroll_wheel_mode_var.get():
-                # Check if direction should be inverted (checkbox enabled)
-                should_invert = self.disable_dpad_swap_var.get()
+                # Check if direction should be inverted (Y1 launcher detected OR checkbox enabled)
+                should_invert = self.disable_dpad_swap_var.get() or self.y1_launcher_detected
                 
                 if should_invert:
-                    # Inverted direction - cross-map the directions
+                    # Inverted direction - remap D-pad axes (no direction reversal)
                     if keycode == 19:  # UP
-                        keycode = 21  # LEFT (up fires left)
-                        direction = 'left'
-                        debug_print("Scroll wheel mode: inverting up -> left")
-                    elif keycode == 20:  # DOWN
-                        keycode = 22  # RIGHT (down fires right)
+                        keycode = 22  # RIGHT (up becomes right)
                         direction = 'right'
-                        debug_print("Scroll wheel mode: inverting down -> right")
+                        debug_print("Scroll wheel mode: remapping up -> right (inverted)")
+                    elif keycode == 20:  # DOWN
+                        keycode = 21  # LEFT (down becomes left)
+                        direction = 'left'
+                        debug_print("Scroll wheel mode: remapping down -> left (inverted)")
                     elif keycode == 21:  # LEFT
-                        keycode = 19  # UP (left fires up)
-                        direction = 'up'
-                        debug_print("Scroll wheel mode: inverting left -> up")
-                    elif keycode == 22:  # RIGHT
-                        keycode = 20  # DOWN (right fires down)
+                        keycode = 20  # DOWN (left becomes down)
                         direction = 'down'
-                        debug_print("Scroll wheel mode: inverting right -> down")
+                        debug_print("Scroll wheel mode: remapping left -> down (inverted)")
+                    elif keycode == 22:  # RIGHT
+                        keycode = 19  # UP (right becomes up)
+                        direction = 'up'
+                        debug_print("Scroll wheel mode: remapping right -> up (inverted)")
                 else:
                     debug_print("Scroll wheel mode: using normal mapping")
                 
@@ -7879,7 +8007,7 @@ class Y1HelperApp(tk.Tk):
         
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
-        label = ttk.Label(frame, text="Turn off and unplug your Y1 then select a firmware to install:", font=("Segoe UI", 11))
+        label = ttk.Label(frame, text="Select a firmware to install:", font=("Segoe UI", 11))
         label.pack(pady=(0, 10))
         listbox = tk.Listbox(frame, font=("Segoe UI", 10))
         listbox.pack(fill=tk.BOTH, expand=True)
@@ -7948,7 +8076,7 @@ class Y1HelperApp(tk.Tk):
         
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
-        label = ttk.Label(frame, text="Turn off and unplug your Y1 then select a firmware to install:", font=("Segoe UI", 11))
+        label = ttk.Label(frame, text="Select a firmware to install:", font=("Segoe UI", 11))
         label.pack(pady=(0, 10))
         listbox = tk.Listbox(frame, font=("Segoe UI", 10))
         listbox.pack(fill=tk.BOTH, expand=True)
