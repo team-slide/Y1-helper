@@ -7879,7 +7879,7 @@ class Y1HelperApp(tk.Tk):
         
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
-        label = ttk.Label(frame, text="Select a firmware to install:", font=("Segoe UI", 11))
+        label = ttk.Label(frame, text="Turn off and unplug your Y1, then select a firmware to install:", font=("Segoe UI", 11))
         label.pack(pady=(0, 10))
         listbox = tk.Listbox(frame, font=("Segoe UI", 10))
         listbox.pack(fill=tk.BOTH, expand=True)
@@ -7948,7 +7948,7 @@ class Y1HelperApp(tk.Tk):
         
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
-        label = ttk.Label(frame, text="Select a firmware to install:", font=("Segoe UI", 11))
+        label = ttk.Label(frame, text="Turn off and unplug your Y1, then select a firmware to install:", font=("Segoe UI", 11))
         label.pack(pady=(0, 10))
         listbox = tk.Listbox(frame, font=("Segoe UI", 10))
         listbox.pack(fill=tk.BOTH, expand=True)
