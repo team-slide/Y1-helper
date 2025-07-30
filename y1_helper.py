@@ -6387,8 +6387,8 @@ class Y1HelperApp(tk.Tk):
                 f'"{rockbox_utility_path}"'
             ], shell=True)
             
-            self.status_var.set("Rockbox Utility launched with elevated privileges")
-            debug_print("Rockbox Utility launched successfully with elevated privileges")
+            self.status_var.set("Rockbox Utility launched")
+            debug_print("Rockbox Utility launched successfully")
         except Exception as e:
             debug_print(f"Error launching Rockbox Utility: {e}")
             messagebox.showerror("Error", f"Failed to launch Rockbox Utility: {e}")
@@ -6405,8 +6405,11 @@ class Y1HelperApp(tk.Tk):
                 return
             
             debug_print(f"Launching SP Flash Tool from: {flash_tool_path}")
+            
+            # Launch SP Flash Tool
             import subprocess
             subprocess.Popen([flash_tool_path], cwd=os.path.dirname(flash_tool_path))
+            
             self.status_var.set("SP Flash Tool launched")
             debug_print("SP Flash Tool launched successfully")
         except Exception as e:
@@ -8277,16 +8280,20 @@ class Y1HelperApp(tk.Tk):
             messagebox.showerror("Update Error", f"Failed to show startup update dialog: {str(e)}")
 
     def show_update_pill_if_needed(self):
-        """Show the update pill if update is available"""
+        """Show the update pill if update is available and has executables"""
         try:
             if hasattr(self, 'update_info') and self.update_info:
-                debug_print("Showing update pill")
-
-
-
-                self.update_pill.config(text="Y1 Helper Update Available")
-                self.help_menu_label = "Update Available"
-                self.menubar.entryconfig("Help", label=self.help_menu_label)
+                # Only show update pill if there are executables available
+                has_patch = self.update_info.get('patch_asset') is not None
+                has_installer = self.update_info.get('installer_asset') is not None
+                
+                if has_patch or has_installer:
+                    debug_print("Showing update pill - executables available")
+                    self.update_pill.config(text="Y1 Helper Update Available")
+                    self.help_menu_label = "Update Available"
+                    self.menubar.entryconfig("Help", label=self.help_menu_label)
+                else:
+                    debug_print("Update available but no executables found - hiding pill")
         except Exception as e:
             debug_print(f"Error in show_update_pill_if_needed: {e}")
 
@@ -8379,12 +8386,13 @@ class Y1HelperApp(tk.Tk):
                 if self.update_info.get('patch_asset'):
                     dialog.destroy()
                     self.download_and_run_patch(self.update_info['patch_asset'])
-                elif self.update_info.get('installer_asset'):
-                    # No patch available, automatically use installer instead
-                    dialog.destroy()
-                    self.download_and_run_installer(self.update_info['installer_asset'])
                 else:
-                    messagebox.showwarning("Quick Update", "No update files available.")
+                    # No patch available, redirect to full installer
+                    dialog.destroy()
+                    if self.update_info.get('installer_asset'):
+                        self.download_and_run_installer(self.update_info['installer_asset'])
+                    else:
+                        messagebox.showwarning("Update", "No update executables available.")
             
             def full_update():
                 if self.update_info.get('installer_asset'):
@@ -8396,19 +8404,13 @@ class Y1HelperApp(tk.Tk):
             def cancel():
                 dialog.destroy()
             
-            # Quick Update button (patch) - show if patch available, otherwise show as "Update" if only installer available
-            if self.update_info.get('patch_asset'):
-                quick_btn = ttk.Button(buttons_frame, text="Quick Update (Patch)", 
-                                      command=quick_update, style="TButton")
-                quick_btn.pack(fill=tk.X, pady=(0, 10))
-            elif self.update_info.get('installer_asset'):
-                # Only installer available, show as single update option
-                update_btn = ttk.Button(buttons_frame, text="Update", 
-                                       command=quick_update, style="TButton")
-                update_btn.pack(fill=tk.X, pady=(0, 10))
+            # Quick Update button (patch) - show even if no patch, will redirect to installer
+            quick_btn = ttk.Button(buttons_frame, text="Quick Update (Patch)", 
+                                  command=quick_update, style="TButton")
+            quick_btn.pack(fill=tk.X, pady=(0, 10))
             
-            # Full Update button (installer) - only show if both patch and installer are available
-            if self.update_info.get('patch_asset') and self.update_info.get('installer_asset'):
+            # Full Update button (installer)
+            if self.update_info.get('installer_asset'):
                 full_btn = ttk.Button(buttons_frame, text="Full Update (Installer)", 
                                      command=full_update, style="TButton")
                 full_btn.pack(fill=tk.X, pady=(0, 10))
