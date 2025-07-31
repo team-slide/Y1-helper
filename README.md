@@ -8,7 +8,7 @@ If your version has updated itself to 0.8.0, please reinstall the app from the H
 
 Y1 Helper is a package that includes the Y1 Helper app, an app that lets you update and factory restore your device with the latest Innioasis Y1 Software, take screenshots, set your Y1's time automatically and....
 
-![img](9kfjz2ex83gf1)
+![img]([9kfjz2ex83gf1](https://preview.redd.it/y1-helper-0-8-0-released-download-here-v0-9kfjz2ex83gf1.png?width=320&crop=smart&auto=webp&s=96031c1ebbb587c02d1db1af933dc7d9efd465ed))
 
 it also lets you install custom firmwares like Gallagher Core which include Rockbox-y1 which, while missing a few of the original Y1 features, like photo viewing, it offers a better music playback experience in a number of areas such as having gapless playback, scrolling titles and proper tags display.
 
