@@ -4856,7 +4856,7 @@ class Y1HelperApp(tk.Tk):
         help_menu.add_command(label="Run Older Version", command=self.launch_old_version)
         help_menu.add_separator()
         help_menu.add_command(label="r/innioasis", command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
-        help_menu.add_command(label="Project Gallagher Discord", command=lambda: webbrowser.open_new_tab("https://discord.gg/nAeFsqDB"))
+        help_menu.add_command(label="Modders' Discord", command=lambda: webbrowser.open_new_tab("https://discord.com/invite/Q8K4cTbf"))
         help_menu.add_separator()
         help_menu.add_command(label="Become a Patron", command=lambda: webbrowser.open_new_tab("https://www.patreon.com/c/TeamSlide"))
         menubar.add_cascade(label="Help", menu=help_menu)
