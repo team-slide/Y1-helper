@@ -140,7 +140,7 @@ def toggle_debug_mode():
 class Y1HelperApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        terminal_print("Starting Y1 Helper v0.8.0...")
+        terminal_print("Starting Y1 Helper v0.8.1...")
         terminal_print("Setting up directories and initializing...")
         debug_print("Initializing Y1HelperApp")
         
@@ -160,8 +160,8 @@ class Y1HelperApp(tk.Tk):
         # Pre-populate ROM directory with all required files from assets (except system.img)
         self.pre_populate_rom_directory()
         
-        # Cache settings - reduced to prevent over-reliance on cached data
-        self.cache_expiry_hours = 6  # Cache expires after 6 hours (reduced from 24)
+        # Cache settings - optimized for real-time updates with cached fallback
+        self.cache_expiry_hours = 2  # Cache expires after 2 hours for more responsive updates
         self.manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
         
         # Initialize API rate limiting
@@ -177,7 +177,7 @@ class Y1HelperApp(tk.Tk):
         self.last_api_check_time = None
         self.startup_timestamp = datetime.now()
         self.api_check_cooldown_minutes = 2  # Prevent API calls if app restarted within 2 minutes (reduced from 5)
-        self.cache_refresh_interval_minutes = 15  # Cache refresh interval when app is running (reduced from 30)
+        self.cache_refresh_interval_minutes = 5  # Cache refresh interval when app is running (more responsive)
         self.last_cache_refresh_time = None
         self.user_triggered_cache_refresh = False
         
@@ -205,7 +205,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.8.0"
+        self.version = "0.8.1"
         
         # Backup current y1_helper.py to .old directory at launch
         self.backup_current_version()
@@ -405,6 +405,9 @@ class Y1HelperApp(tk.Tk):
             
             # Check for updates at startup and show dialog if newer version available
             self.after(2000, self.startup_update_check)  # Check for updates after 2 seconds
+            
+            # Start periodic content checking for real-time updates
+            self.after(30000, self._start_periodic_content_check)  # Start after 30 seconds
             
             print("Y1 Helper is fully loaded and ready!")
             debug_print("Background initialization complete")
@@ -1438,6 +1441,19 @@ class Y1HelperApp(tk.Tk):
     
     def refresh_cache_if_needed(self):
         """Refresh cache if it's expired or doesn't exist with parallel processing"""
+        # Always refresh if user triggered it
+        if self.user_triggered_cache_refresh:
+            terminal_print("User requested cache refresh, refreshing in background...")
+            debug_print("User requested cache refresh, refreshing...")
+            self.user_triggered_cache_refresh = False
+            
+            # Refresh cache in background thread to prevent UI blocking
+            import threading
+            cache_thread = threading.Thread(target=self._refresh_cache_background, daemon=True)
+            cache_thread.start()
+            return
+        
+        # Check if cache is expired
         if not self.is_cache_valid():
             terminal_print("Cache expired or invalid, refreshing in background...")
             debug_print("Cache expired or invalid, refreshing...")
@@ -1462,11 +1478,11 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Error in background cache refresh: {e}")
     
     def _update_ui_from_cache(self):
-        """Update UI elements with fresh cache data"""
+        """Update UI elements with fresh cache data and real-time app list updates"""
         try:
             terminal_print("Updating UI with fresh cache data...")
             
-            # Refresh apps menu with cached data
+            # Refresh apps menu with cached data (includes real-time updates)
             self.safe_after(self, 1, self.refresh_apps)
             
             # Update update availability
@@ -1475,11 +1491,82 @@ class Y1HelperApp(tk.Tk):
             # Warm up cache for frequently accessed data
             self.safe_after(self, 1, self._warm_cache_background)
             
+            # Check for new app content and update app selection dialog if open
+            self.safe_after(self, 1, self._check_for_new_app_content)
+            
             terminal_print("UI updated with fresh cache data")
             
         except Exception as e:
             print(f"Error updating UI from cache: {e}")
             debug_print(f"Error updating UI from cache: {e}")
+    
+    def _check_for_new_app_content(self):
+        """Check for new app content and update UI if needed"""
+        try:
+            # If app selection dialog is open, refresh it with new content
+            if hasattr(self, '_app_selection_dialog') and self._app_selection_dialog:
+                try:
+                    if self._app_selection_dialog.winfo_exists():
+                        debug_print("App selection dialog is open, refreshing with new content...")
+                        # Get fresh manifest content
+                        manifest_content = self.get_cached_manifest()
+                        if manifest_content:
+                            app_options = self.parse_app_manifest(manifest_content)
+                            if app_options:
+                                # Update the dialog with new app options
+                                self._refresh_app_selection_dialog(app_options)
+                except Exception as e:
+                    debug_print(f"Error refreshing app selection dialog: {e}")
+        except Exception as e:
+            debug_print(f"Error checking for new app content: {e}")
+    
+    def _refresh_app_selection_dialog(self, app_options):
+        """Refresh the app selection dialog with new app options"""
+        try:
+            # This would need to be implemented based on how the dialog is structured
+            # For now, we'll just log that new content is available
+            debug_print(f"New app content available: {len(app_options)} apps")
+            terminal_print(f"New app content detected: {len(app_options)} apps available")
+        except Exception as e:
+            debug_print(f"Error refreshing app selection dialog: {e}")
+    
+    def _start_periodic_content_check(self):
+        """Start periodic checking for new content"""
+        try:
+            debug_print("Starting periodic content check...")
+            self._check_for_new_content_periodic()
+            
+            # Schedule next check (every 5 minutes)
+            self.after(300000, self._start_periodic_content_check)  # 5 minutes = 300000ms
+            
+        except Exception as e:
+            debug_print(f"Error starting periodic content check: {e}")
+    
+    def _check_for_new_content_periodic(self):
+        """Periodically check for new content in the background"""
+        try:
+            debug_print("Performing periodic content check...")
+            
+            # Check if cache needs refresh
+            if self.should_refresh_cache():
+                debug_print("Cache refresh needed during periodic check")
+                self.refresh_cache_if_needed()
+            
+            # Check for new app content if app selection dialog is open
+            if hasattr(self, '_app_selection_dialog') and self._app_selection_dialog:
+                try:
+                    if self._app_selection_dialog.winfo_exists():
+                        debug_print("App selection dialog open, checking for new content...")
+                        manifest_content = self.get_cached_manifest()
+                        if manifest_content:
+                            app_options = self.parse_app_manifest(manifest_content)
+                            if app_options:
+                                debug_print(f"Periodic check found {len(app_options)} apps available")
+                except Exception as e:
+                    debug_print(f"Error in periodic app content check: {e}")
+            
+        except Exception as e:
+            debug_print(f"Error in periodic content check: {e}")
     
     def _warm_cache_background(self):
         """Warm up cache with frequently accessed data in background"""
@@ -1726,12 +1813,14 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Failed to update widget colors: {e}")
     
     def parse_app_manifest(self, manifest_content):
-        """Parse the manifest XML to find app options with fallback to cache"""
+        """Parse the manifest XML to find app options with real-time updates and cached fallback"""
         try:
-            # Try to parse the provided manifest content first
+            app_options = []
+            fresh_apps = set()  # Track apps from fresh manifest
+            
+            # Try to parse the provided manifest content first (fresh data)
             if manifest_content:
                 root = ET.fromstring(manifest_content)
-                app_options = []
                 
                 # Look for package elements with handler type "App"
                 for package in root.findall('.//package'):
@@ -1746,7 +1835,8 @@ class Y1HelperApp(tk.Tk):
                             'name': name,
                             'repo': repo,
                             'url': url,
-                            'handler': handler
+                            'handler': handler,
+                            'source': 'fresh'  # Mark as fresh data
                         }
                         
                         # Try to get cached file URLs for this app
@@ -1756,32 +1846,46 @@ class Y1HelperApp(tk.Tk):
                             debug_print(f"Using cached file URLs for {name}: {len(cached_files)} files")
                         
                         app_options.append(app_info)
+                        fresh_apps.add(repo)  # Track this app as fresh
                 
                 if app_options:
-                    debug_print(f"Found {len(app_options)} app options from manifest")
-                    return app_options
+                    debug_print(f"Found {len(app_options)} app options from fresh manifest")
             
-            # Fallback to cache if no apps found in manifest
-            debug_print("No apps found in manifest, trying cache...")
+            # Get cached apps as fallback and for initial population
             cached_index = self.get_cached_index()
             if cached_index:
-                app_options = []
+                cached_app_options = []
                 for entry in cached_index.findall('.//apps/entry'):
-                    app_options.append({
-                        'name': entry.get('name', ''),
-                        'repo': entry.get('repo', ''),
-                        'url': entry.get('url', ''),
-                        'handler': entry.get('handler', ''),
-                        'release_url': entry.get('release_url', ''),
-                        'cached_files': self._get_cached_file_urls(entry.get('repo', ''), 'app')
-                    })
+                    repo = entry.get('repo', '')
+                    
+                    # Only add cached apps that aren't already in fresh data
+                    if repo not in fresh_apps:
+                        cached_app_info = {
+                            'name': entry.get('name', ''),
+                            'repo': repo,
+                            'url': entry.get('url', ''),
+                            'handler': entry.get('handler', ''),
+                            'release_url': entry.get('release_url', ''),
+                            'cached_files': self._get_cached_file_urls(repo, 'app'),
+                            'source': 'cached'  # Mark as cached data
+                        }
+                        cached_app_options.append(cached_app_info)
+                        debug_print(f"Added cached app: {cached_app_info['name']} (not in fresh manifest)")
                 
-                if app_options:
-                    debug_print(f"Found {len(app_options)} app options from cache")
-                    return app_options
+                # Combine fresh and cached apps, with fresh apps taking priority
+                app_options.extend(cached_app_options)
+                debug_print(f"Combined {len(app_options)} total apps ({len(fresh_apps)} fresh, {len(cached_app_options)} cached)")
             
-            debug_print("No apps found in manifest or cache")
-            return []
+            # If no apps found at all, show appropriate message
+            if not app_options:
+                debug_print("No apps found in manifest or cache")
+                return []
+            
+            # Sort apps with fresh apps first, then cached apps
+            app_options.sort(key=lambda x: (x.get('source', 'cached') == 'cached', x.get('name', '')))
+            
+            debug_print(f"Final app list: {len(app_options)} apps (fresh: {len(fresh_apps)}, cached: {len(app_options) - len(fresh_apps)})")
+            return app_options
             
         except Exception as e:
             debug_print(f"Error parsing app manifest: {e}")
@@ -1794,6 +1898,9 @@ class Y1HelperApp(tk.Tk):
         dialog.geometry("400x300")
         dialog.transient(self)
         dialog.grab_set()
+        
+        # Track the dialog for potential real-time updates
+        self._app_selection_dialog = dialog
         
         # Apply theme colors to dialog
         self.apply_dialog_theme(dialog)
@@ -1888,7 +1995,15 @@ class Y1HelperApp(tk.Tk):
         ttk.Button(button_frame, text="Install", command=on_select).pack(side=tk.RIGHT, padx=(5, 0))
         ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
         
+        # Clean up dialog reference when closed
+        def on_dialog_close():
+            self._app_selection_dialog = None
+        
+        dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
         dialog.wait_window()
+        
+        # Ensure dialog reference is cleared
+        self._app_selection_dialog = None
         return selected_app
 
 
@@ -1900,6 +2015,9 @@ class Y1HelperApp(tk.Tk):
         dialog.geometry("400x300")
         dialog.transient(self)
         dialog.grab_set()
+        
+        # Track the dialog for potential real-time updates
+        self._app_selection_dialog = dialog
         
         # Apply theme colors to dialog
         self.apply_dialog_theme(dialog)
@@ -1960,7 +2078,15 @@ class Y1HelperApp(tk.Tk):
         
         ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
         
+        # Clean up dialog reference when closed
+        def on_dialog_close():
+            self._app_selection_dialog = None
+        
+        dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
         dialog.wait_window()
+        
+        # Ensure dialog reference is cleared
+        self._app_selection_dialog = None
         return None
     
     def get_config_path(self):
@@ -4856,7 +4982,7 @@ class Y1HelperApp(tk.Tk):
         help_menu.add_command(label="Run Older Version", command=self.launch_old_version)
         help_menu.add_separator()
         help_menu.add_command(label="r/innioasis", command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
-        help_menu.add_command(label="Modders' Discord", command=lambda: webbrowser.open_new_tab("https://discord.com/invite/Q8K4cTbf"))
+        help_menu.add_command(label="Project Gallagher Discord", command=lambda: webbrowser.open_new_tab("https://discord.gg/nAeFsqDB"))
         help_menu.add_separator()
         help_menu.add_command(label="Become a Patron", command=lambda: webbrowser.open_new_tab("https://www.patreon.com/c/TeamSlide"))
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -6234,15 +6360,12 @@ class Y1HelperApp(tk.Tk):
             update_progress("Connecting to manifest server...")
             self.status_var.set("Fetching app manifest...")
             
-            # Refresh cache if needed and rebuild file URLs
-            self.refresh_cache_if_needed()
-            
-            # Try to get manifest content with fallback to cache
+            # Always try to get fresh manifest first for real-time updates
             manifest_content = None
             
-            # Method 1: Try to download fresh manifest
+            # Method 1: Try to download fresh manifest (always attempt for real-time updates)
             try:
-                debug_print("Attempting to download fresh manifest...")
+                debug_print("Attempting to download fresh manifest for real-time updates...")
                 response = self._make_github_request_with_retries(self.manifest_url)
                 if response and response.status_code == 200:
                     manifest_content = response.text
@@ -6254,13 +6377,13 @@ class Y1HelperApp(tk.Tk):
                     except Exception as e:
                         debug_print(f"Cache update failed: {e}")
                 else:
-                    debug_print("Fresh manifest download failed, using cache")
+                    debug_print("Fresh manifest download failed, will use cache")
             except Exception as e:
                 debug_print(f"Error downloading fresh manifest: {e}")
             
-            # Method 2: Fallback to cached manifest
+            # Method 2: Fallback to cached manifest if fresh download failed
             if not manifest_content:
-                debug_print("Using cached manifest...")
+                debug_print("Using cached manifest as fallback...")
                 manifest_content = self.get_cached_manifest()
             
             # Parse manifest to find app repositories
