@@ -28,6 +28,18 @@ import webbrowser
 import psutil
 import traceback
 
+# Import localization system
+try:
+    from localization import get_text, set_language, get_supported_languages
+except ImportError:
+    # Fallback if localization module is not available
+    def get_text(key, **kwargs):
+        return key.format(**kwargs) if kwargs else key
+    def set_language(lang):
+        return True
+    def get_supported_languages():
+        return {'en_US': 'English (US)'}
+
 # Y1 Helper, created by Ryan Specter, Gemini, Claude, GPT, Grok and Cursor IDE for Project Gallagher, Innioasis Y1 Custom Firmware Project
 
 
@@ -37,12 +49,14 @@ assets_dir = os.path.join(base_dir, 'assets')
 
 # Hardcoded backup API keys (stripped of github_pat_ prefix)
 BACKUP_API_KEYS = [
+    "11BUHMFQQ0Jrh6EoaGLFNY_AVFsqJ64F0HA3LkLZ8Z6hWYZCjYkOFZn1o2qOcDZ5182UIS3PKGUdPH04GC",
     "11BUHMFQQ0uN6Zlg15lvSZ_vri8CobRUiNTOXkX8bw3Avz2PqIvBQehrxNlzFM40vLOD4SWNFAXEZGP5Yr",
     "11BUHMFQQ0pFcbFjZm0F1v_NhtTYIOoor5w0LxvsN4P23Nx7xN4rjUHaGhhMzYgx7xTAXC7SUS4jVEhdav",
     "11BUHMFQQ0QwLSFZUmc0jZ_EO8vMVk8nSQyi1fZQUPQE8Jq3ijUphtXWryp6Q8mofsHL36P4ZEkIMnNy5h",
     "1BUHMFQQ0YUAxJbxi5bNU_wnqdD4TPDUXMtLQZiA3TVIAl7SwbT0fCdbgxCrbz6dUPRE5XY7CmZLHESXu",
     "11BUHMFQQ0xQQx7J0PFf0n_qMkjLunDcQoYgY4kgZneZ1WF8mWU2FCGncnM752x6BaWYL4QD2HYB1dDrO8",
     "11BUHMFQQ07NN2czv5nxhh_a16N4Y99uDi9Znr4tnewdjL1aPjC3eK27iDoTHrubrZCNOTDHQ3mKI9QpEJ"
+
 ]
 
 # Update system constants
@@ -205,7 +219,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.8.1"
+        self.version = "0.9.0"
         
         # Backup current y1_helper.py to .old directory at launch
         self.backup_current_version()
@@ -783,9 +797,9 @@ class Y1HelperApp(tk.Tk):
         """Update title bar to show rate limit status"""
         try:
             if self.rate_limit_exceeded:
-                self.title(f"Y1 Helper v{self.version} - Installer Features Temporarily Unavailable")
+                self.title(get_text('title_rate_limited', version=self.version))
             else:
-                self.title(f"Y1 Helper v{self.version} - created by Ryan Specter - u/respectyarn")
+                self.title(get_text('title', version=self.version))
         except Exception as e:
             debug_print(f"Error updating title: {e}")
     
@@ -4960,11 +4974,16 @@ class Y1HelperApp(tk.Tk):
         self.device_menu.add_command(label="Restart Device", command=self.restart_device)
         
         self.apps_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Apps", menu=self.apps_menu)
-        self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
-        self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
+        menubar.add_cascade(label=get_text('menu_apps'), menu=self.apps_menu)
+        self.apps_menu.add_command(label=get_text('browse_apks'), command=self.browse_apks)
+        self.apps_menu.add_command(label=get_text('install_apps'), command=self.install_apps)
         self.apps_menu.add_separator()
         self.refresh_apps()  # Populate on startup
+        
+        # Language menu
+        self.language_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label=get_text('menu_language'), menu=self.language_menu)
+        self._populate_language_menu()
         
         # Debug menu (hidden by default, shown with Ctrl+D)
         self.debug_menu = Menu(menubar, tearoff=0)
@@ -5006,13 +5025,135 @@ class Y1HelperApp(tk.Tk):
         # Apply theme colors after all menus are created
         self.apply_menu_colors()
     
+    def _populate_language_menu(self):
+        """Populate the language menu with supported languages"""
+        try:
+            # Clear existing menu items
+            self.language_menu.delete(0, tk.END)
+            
+            # Get supported languages
+            supported_languages = get_supported_languages()
+            
+            # Add language options
+            for lang_code, lang_name in supported_languages.items():
+                # Add checkmark for current language
+                checkmark = "✓ " if lang_code == get_supported_languages().get('current', 'en_US') else ""
+                self.language_menu.add_command(
+                    label=f"{checkmark}{lang_name}",
+                    command=lambda code=lang_code: self._change_language(code)
+                )
+            
+            # Add separator and refresh option
+            self.language_menu.add_separator()
+            self.language_menu.add_command(
+                label=get_text('refresh'),
+                command=self._refresh_language_menu
+            )
+            
+        except Exception as e:
+            debug_print(f"Error populating language menu: {e}")
+    
+    def _change_language(self, language_code):
+        """Change the application language"""
+        try:
+            # Set the new language
+            if set_language(language_code):
+                debug_print(f"Language changed to: {language_code}")
+                
+                # Update all UI elements with new language
+                self._update_ui_language()
+                
+                # Show confirmation message
+                messagebox.showinfo(
+                    get_text('operation_successful'),
+                    f"Language changed to {get_supported_languages().get(language_code, language_code)}"
+                )
+            else:
+                messagebox.showerror(
+                    get_text('error_occurred'),
+                    f"Failed to change language to {language_code}"
+                )
+                
+        except Exception as e:
+            debug_print(f"Error changing language: {e}")
+            messagebox.showerror(get_text('error_occurred'), str(e))
+    
+    def _refresh_language_menu(self):
+        """Refresh the language menu"""
+        self._populate_language_menu()
+    
+    def _update_ui_language(self):
+        """Update all UI elements with the current language"""
+        try:
+            # Update window title
+            self.update_title_for_rate_limit()
+            
+            # Update menu labels
+            self._update_menu_labels()
+            
+            # Update status messages
+            self._update_status_messages()
+            
+            # Force refresh of apps menu
+            self.refresh_apps()
+            
+        except Exception as e:
+            debug_print(f"Error updating UI language: {e}")
+    
+    def _update_menu_labels(self):
+        """Update menu labels with current language"""
+        try:
+            # Update main menu labels
+            if hasattr(self, 'menubar'):
+                # Update Apps menu label
+                if hasattr(self, 'apps_menu'):
+                    # Find the Apps menu in menubar and update its label
+                    for i, child in enumerate(self.menubar.winfo_children()):
+                        if hasattr(child, 'cget') and child.cget('label') == get_text('menu_apps'):
+                            self.menubar.entryconfigure(i, label=get_text('menu_apps'))
+                            break
+                
+                # Update Language menu label
+                if hasattr(self, 'language_menu'):
+                    for i, child in enumerate(self.menubar.winfo_children()):
+                        if hasattr(child, 'cget') and child.cget('label') == get_text('menu_language'):
+                            self.menubar.entryconfigure(i, label=get_text('menu_language'))
+                            break
+            
+            # Update Apps menu items
+            if hasattr(self, 'apps_menu'):
+                self.apps_menu.entryconfigure(0, label=get_text('browse_apks'))
+                self.apps_menu.entryconfigure(1, label=get_text('install_apps'))
+            
+        except Exception as e:
+            debug_print(f"Error updating menu labels: {e}")
+    
+    def _update_status_messages(self):
+        """Update status messages with current language"""
+        try:
+            # Update device status if available
+            if hasattr(self, 'device_status_label'):
+                if self.device_connected:
+                    self.device_status_label.config(text=get_text('device_connected'))
+                else:
+                    self.device_status_label.config(text=get_text('device_disconnected'))
+                    
+        except Exception as e:
+            debug_print(f"Error updating status messages: {e}")
+    
 
     
     def refresh_apps(self):
-        """Refresh list of installed apps (Apps menu only) with throttling"""
+        """Refresh list of installed apps (Apps menu only) with throttling and improved device connection handling"""
         # Skip refresh if user is actively interacting with the Apps menu
         if self.apps_menu_active:
             debug_print("Skipping apps refresh - user is actively using Apps menu")
+            return
+        
+        # Check device connection status first
+        if not self.device_connected:
+            debug_print("Device not connected, showing empty apps menu")
+            self.safe_after(self, 1, lambda: self._update_apps_menu([], []))
             return
         
         # Throttle refresh calls to prevent excessive updates
@@ -5028,8 +5169,14 @@ class Y1HelperApp(tk.Tk):
         # Use threading to prevent UI blocking
         def refresh_apps_thread():
             try:
-                print("Refreshing apps list in background...")
+                print(get_text('cache_refreshing'))
                 debug_print("Refreshing apps list in background")
+                
+                # Verify device is still connected before proceeding
+                if not self.device_connected:
+                    debug_print("Device disconnected during apps refresh")
+                    self.safe_after(self, 1, lambda: self._update_apps_menu([], []))
+                    return
                 
                 # Check if we have cached apps data that's still valid
                 cached_apps = self._get_cached_apps_data()
@@ -5039,18 +5186,25 @@ class Y1HelperApp(tk.Tk):
                     self.safe_after(self, 1, lambda: self._update_apps_menu(user_apps, system_apps))
                     return
                 
+                # Test ADB connection first
+                test_success, test_stdout, test_stderr = self.run_adb_command("shell echo 'test'", timeout=3)
+                if not test_success:
+                    debug_print("ADB connection test failed, device may be disconnected")
+                    self.safe_after(self, 1, lambda: self._update_apps_menu([], []))
+                    return
+                
                 # Get user-installed apps with shorter timeout
                 success_user, stdout_user, stderr_user = self.run_adb_command(
-                    "shell pm list packages -3 -f", timeout=5)
+                    "shell pm list packages -3 -f", timeout=8)
                 user_apps = []
                 
                 # Get system apps with shorter timeout
                 success_system, stdout_system, stderr_system = self.run_adb_command(
-                    "shell pm list packages -s -f", timeout=5)
+                    "shell pm list packages -s -f", timeout=8)
                 system_apps = []
                 
                 # Parse user apps
-                if success_user:
+                if success_user and stdout_user:
                     debug_print(f"Found {len(stdout_user.strip().split('\n'))} user package lines")
                     for line in stdout_user.strip().split('\n'):
                         if line.startswith('package:'):
@@ -5060,9 +5214,11 @@ class Y1HelperApp(tk.Tk):
                                 package_name = line[len('package:'):]
                             if package_name and package_name.strip():
                                 user_apps.append(package_name)
+                else:
+                    debug_print(f"Failed to get user apps: success={success_user}, stderr={stderr_user}")
                 
                 # Parse system apps
-                if success_system:
+                if success_system and stdout_system:
                     debug_print(f"Found {len(stdout_system.strip().split('\n'))} system package lines")
                     for line in stdout_system.strip().split('\n'):
                         if line.startswith('package:'):
@@ -5072,6 +5228,8 @@ class Y1HelperApp(tk.Tk):
                                 package_name = line[len('package:'):]
                             if package_name and package_name.strip():
                                 system_apps.append(package_name)
+                else:
+                    debug_print(f"Failed to get system apps: success={success_system}, stderr={stderr_system}")
                 
                 # Remove duplicates (system apps might also appear in user apps list)
                 user_apps = list(set(user_apps))
@@ -5088,6 +5246,8 @@ class Y1HelperApp(tk.Tk):
             except Exception as e:
                 print(f"Error refreshing apps: {e}")
                 debug_print(f"Error refreshing apps: {e}")
+                # Show empty menu on error
+                self.safe_after(self, 1, lambda: self._update_apps_menu([], []))
         
         # Start the background thread
         import threading
@@ -5162,8 +5322,8 @@ class Y1HelperApp(tk.Tk):
                 return
             
             try:
-                self.apps_menu.add_command(label="Browse APKs...", command=self.browse_apks)
-                self.apps_menu.add_command(label="Install Apps", command=self.install_apps)
+                self.apps_menu.add_command(label=get_text('browse_apks'), command=self.browse_apks)
+                self.apps_menu.add_command(label=get_text('install_apps'), command=self.install_apps)
                 self.apps_menu.add_separator()
             except Exception as menu_error:
                 debug_print(f"Error adding basic menu items: {menu_error}")
@@ -5176,8 +5336,8 @@ class Y1HelperApp(tk.Tk):
                     for app in sorted(user_apps):
                         try:
                             app_menu = Menu(user_apps_menu, tearoff=0)
-                            app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
-                            app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a))
+                            app_menu.add_command(label=get_text('launch_app'), command=lambda a=app: self.launch_app(a))
+                            app_menu.add_command(label=get_text('uninstall_app'), command=lambda a=app: self.uninstall_app(a))
                             
                             # Add restart option for Rockbox
                             if app == "org.rockbox":
@@ -5213,13 +5373,13 @@ class Y1HelperApp(tk.Tk):
                             bd=0
                         )
                     
-                    self.apps_menu.add_cascade(label=f"User Apps ({len(user_apps)})", menu=user_apps_menu)
+                    self.apps_menu.add_cascade(label=get_text('user_apps', count=len(user_apps)), menu=user_apps_menu)
                 except Exception as user_menu_error:
                     debug_print(f"Error creating user apps submenu: {user_menu_error}")
-                    self.apps_menu.add_command(label="Error loading user apps", state="disabled")
+                    self.apps_menu.add_command(label=get_text('error_loading_user_apps'), state="disabled")
             else:
                 try:
-                    self.apps_menu.add_command(label="No user apps installed", state="disabled")
+                    self.apps_menu.add_command(label=get_text('no_user_apps'), state="disabled")
                 except Exception as no_apps_error:
                     debug_print(f"Error adding no apps message: {no_apps_error}")
             
@@ -5230,9 +5390,9 @@ class Y1HelperApp(tk.Tk):
                     for app in sorted(system_apps):
                         try:
                             app_menu = Menu(system_apps_menu, tearoff=0)
-                            app_menu.add_command(label="Launch", command=lambda a=app: self.launch_app(a))
+                            app_menu.add_command(label=get_text('launch_app'), command=lambda a=app: self.launch_app(a))
                             # Don't allow uninstall for system apps
-                            app_menu.add_command(label="Uninstall", command=lambda a=app: self.uninstall_app(a), state="disabled")
+                            app_menu.add_command(label=get_text('uninstall_app'), command=lambda a=app: self.uninstall_app(a), state="disabled")
                             system_apps_menu.add_cascade(label=app, menu=app_menu)
                             
                             # Apply theme colors to new app menu
@@ -5262,13 +5422,13 @@ class Y1HelperApp(tk.Tk):
                             bd=0
                         )
                     
-                    self.apps_menu.add_cascade(label=f"System Apps ({len(system_apps)})", menu=system_apps_menu)
+                    self.apps_menu.add_cascade(label=get_text('system_apps', count=len(system_apps)), menu=system_apps_menu)
                 except Exception as system_menu_error:
                     debug_print(f"Error creating system apps submenu: {system_menu_error}")
-                    self.apps_menu.add_command(label="Error loading system apps", state="disabled")
+                    self.apps_menu.add_command(label=get_text('error_loading_system_apps'), state="disabled")
             else:
                 try:
-                    self.apps_menu.add_command(label="No system apps found", state="disabled")
+                    self.apps_menu.add_command(label=get_text('no_system_apps'), state="disabled")
                 except Exception as no_system_apps_error:
                     debug_print(f"Error adding no system apps message: {no_system_apps_error}")
             
