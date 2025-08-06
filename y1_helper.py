@@ -794,6 +794,711 @@ class Y1HelperApp(tk.Tk):
             return True  # Allow call if rate limit check fails
     
     def update_title_for_rate_limit(self):
+        """Update the window title to show rate limit status"""
+        pass
+        debug_print(f"Error updating launcher: {e}")
+        return False
+
+# Global debug flag - set to True when Ctrl+D is pressed
+DEBUG_MODE = False
+
+# Global debug output flag
+DEBUG_OUTPUT_ENABLED = True
+
+def debug_print(message):
+    """Print debug messages with timestamp only if debug mode is enabled, except for flash_tool.exe output"""
+    # Always show flash_tool.exe output regardless of debug mode
+    if "flash_tool.exe" in message or "Flash tool" in message:
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[DEBUG {timestamp}] {message}")
+        # Force flush to ensure output appears immediately
+        import sys
+        sys.stdout.flush()
+    elif DEBUG_MODE and DEBUG_OUTPUT_ENABLED:
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[DEBUG {timestamp}] {message}")
+        # Force flush to ensure output appears immediately
+        import sys
+        sys.stdout.flush()
+
+def terminal_print(message, force_output=False):
+    """Print messages to terminal with timestamp, ensuring output even if UI is frozen"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}")
+    # Force flush to ensure output appears immediately
+    import sys
+    sys.stdout.flush()
+    
+    # Also log to file for debugging
+    try:
+        log_file = os.path.join(base_dir, 'y1_helper.log')
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception as e:
+        # Don't let logging errors break the main functionality
+        pass
+
+def toggle_debug_output():
+    """Toggle debug output to terminal"""
+    global DEBUG_OUTPUT_ENABLED
+    DEBUG_OUTPUT_ENABLED = not DEBUG_OUTPUT_ENABLED
+    if DEBUG_OUTPUT_ENABLED:
+        print("[DEBUG] Debug output to terminal ENABLED")
+    else:
+        print("[DEBUG] Debug output to terminal DISABLED")
+
+def toggle_debug_mode():
+    """Toggle debug mode on/off"""
+    global DEBUG_MODE
+    DEBUG_MODE = not DEBUG_MODE
+    if DEBUG_MODE:
+        print("[DEBUG] Debug mode enabled - all debug output will be shown")
+    else:
+        print("[DEBUG] Debug mode disabled - debug output suppressed")
+
+class Y1HelperApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        terminal_print("Starting Y1 Helper v0.8.1...")
+        terminal_print("Setting up directories and initializing...")
+        debug_print("Initializing Y1HelperApp")
+        
+        # Base directory (for config file access)
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Initialize cache system
+        self.cache_dir = os.path.join(self.base_dir, ".cache")
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_index_file = os.path.join(self.cache_dir, "index.xml")
+        self.cache_manifest_file = os.path.join(self.cache_dir, "slidia_manifest.xml")
+        self.cache_last_update_file = os.path.join(self.cache_dir, "last_update.txt")
+        
+        # Clean up old cache files to prevent over-reliance on cached data
+        self.cleanup_cache_directory()
+        
+        # Pre-populate ROM directory with all required files from assets (except system.img)
+        self.pre_populate_rom_directory()
+        
+        # Cache settings - optimized for real-time updates with cached fallback
+        self.cache_expiry_hours = 2  # Cache expires after 2 hours for more responsive updates
+        self.manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
+        
+        # Initialize API rate limiting
+        self.api_rate_limits = {
+            'unauthenticated': {'calls': 0, 'reset_time': datetime.now() + timedelta(hours=1)},
+            'authenticated': {}  # Will store per-token limits
+        }
+        self.max_unauthenticated_calls = 40
+        self.max_authenticated_calls = 100
+        self.rate_limit_exceeded = False
+        
+        # API call optimization and startup tracking
+        self.last_api_check_time = None
+        self.startup_timestamp = datetime.now()
+        self.api_check_cooldown_minutes = 2  # Prevent API calls if app restarted within 2 minutes (reduced from 5)
+        self.cache_refresh_interval_minutes = 5  # Cache refresh interval when app is running (more responsive)
+        self.last_cache_refresh_time = None
+        self.user_triggered_cache_refresh = False
+        
+        # Apps menu interaction tracking
+        self.apps_menu_active = False
+        self.apps_menu_last_interaction = None  # Track if user manually triggered cache refresh
+        
+        terminal_print("Initializing cache system...")
+        # Initialize cache at startup
+        self.initialize_cache()
+        
+        # Load rate limit state from file if it exists
+        self.load_rate_limit_state()
+        
+        # Load startup tracking from file
+        self.load_startup_tracking()
+        
+        # Check for and apply launcher updates
+        launcher_updated = check_and_update_launcher()
+        if launcher_updated:
+            debug_print("Launcher was updated during startup")
+        
+        # Refresh config.ini from config.zip
+        debug_print("Refreshing config.ini...")
+        self.download_and_unpack_config()
+        
+        # Version information
+        self.version = "0.9.0"
+        
+        # Backup current y1_helper.py to .old directory at launch
+        self.backup_current_version()
+        
+        # Write version.txt file
+        self.write_version_file()
+        
+        # Clean up any existing system.img from previous sessions
+        system_img_path = os.path.join(assets_dir, "system.img")
+        if os.path.exists(system_img_path):
+            try:
+                os.remove(system_img_path)
+                debug_print("Cleaned up existing system.img from previous session")
+            except Exception as e:
+                debug_print(f"Failed to clean up system.img: {e}")
+        
+        # At launch: copy new.xml to assets/install_rom.xml if it exists, then delete new.xml
+        new_xml_path = os.path.join(self.base_dir, 'new.xml')
+        install_rom_path = os.path.join(assets_dir, 'install_rom.xml')
+        if os.path.exists(new_xml_path):
+            try:
+                shutil.copy2(new_xml_path, install_rom_path)
+                debug_print('Copied new.xml to assets/install_rom.xml')
+                os.remove(new_xml_path)
+                debug_print('Deleted new.xml from project directory')
+            except Exception as e:
+                debug_print(f'Failed to copy/delete new.xml: {e}')
+        
+        self.title(f"Y1 Helper v{self.version} - created by Ryan Specter - u/respectyarn")
+        self.geometry("520x800")  # Increased height for update status visibility
+        self.resizable(False, False)
+        
+        # Ensure window gets focus and appears in front
+        self.lift()  # Bring window to front
+        self.attributes('-topmost', True)  # Temporarily make topmost
+        self.after(100, lambda: self.attributes('-topmost', False))  # Remove topmost after 100ms
+        self.focus_force()  # Force focus to this window
+        
+        # Center window on screen
+        self.update_idletasks()  # Update window info
+        x = (self.winfo_screenwidth() // 2) - (520 // 2)
+        y = (self.winfo_screenheight() // 2) - (800 // 2)
+        self.geometry(f"520x800+{x}+{y}")
+        
+        # Detect Windows 11 theme
+        self.setup_windows_11_theme()
+        self.apply_theme_colors()
+        
+        # Device configuration
+        self.device_width = 480
+        self.device_height = 360
+        self.framebuffer_size = self.device_width * self.device_height * 4  # RGBA8888
+        
+        # Display scaling (75% of original size)
+        self.display_scale = 0.75
+        self.display_width = int(self.device_width * self.display_scale)  # 360
+        self.display_height = int(self.device_height * self.display_scale)  # 270
+        
+        # State variables
+        self.is_capturing = True  # Always capturing
+        self.capture_thread = None
+        self.current_app = None
+        self.control_launcher = False
+        self.last_screen_image = None
+        self.device_connected = False
+
+        self.firmware_installation_in_progress = False  # Track if firmware installation is in progress
+        self.firmware_manifest_url = "https://raw.githubusercontent.com/team-slide/slidia/refs/heads/main/slidia_manifest.xml"
+        self.prepare_prompt_refused = False  # Track if user refused the initial prepare prompt
+        self.prepare_prompt_shown = False  # Track if prepare prompt has been shown for current connection
+        
+        # Essential UI variables
+        self.status_var = tk.StringVar(value="Ready")
+        self.scroll_wheel_mode_var = tk.BooleanVar()  # Renamed from launcher_var
+        self.disable_dpad_swap_var = tk.BooleanVar()  # Variable for D-pad swap control (now "Invert Scroll Direction")
+        self.y1_launcher_detected = False  # Track if com.innioasis.y1 is detected
+        self.rgb_profile_var = tk.StringVar(value="BGRA8888")
+        
+        # Update system variables
+        self.update_check_interval = 1800000  # 30 minutes in milliseconds (increased for efficiency)
+        self.last_update_check = 0
+        self.update_available = False
+        self.update_info = None
+        self.update_button = None
+        self.patches_applied = os.environ.get('Y1_HELPER_PATCHES_APPLIED', '0') == '1'
+        
+        # Add input pacing: minimum delay between input events (in seconds)
+        self.input_pacing_interval = 0.1  # 100ms
+        self.last_input_time = 0
+        
+        # Scroll cursor variables
+        self.scroll_cursor_active = False
+        self.scroll_cursor_timer = None
+        self.scroll_cursor_duration = 25  # Very brief cursor display (25ms) - reduced for better responsiveness
+        
+        # Performance optimization variables
+        self.framebuffer_refresh_interval = 1.0  # Refresh every 1 second for better responsiveness
+        self.last_framebuffer_refresh = 0
+        self.unified_check_interval = 5  # Check device and refresh apps every 5 seconds (more frequent)
+        self.last_unified_check = 0
+        self.app_detection_interval = 10  # Check app every 10 seconds (increased from 5)
+        self.last_app_detection = 0
+        self.force_refresh_requested = False  # Flag for manual refresh requests
+        
+        # Activity detection variables
+        self.last_user_activity = time.time()
+        self.inactivity_threshold = 10.0  # 10 seconds of inactivity
+        self.slow_refresh_interval = 20.0  # 20 seconds during inactivity
+        self.last_app_change = time.time()
+        self.current_app_package = None
+        
+        # Device state tracking
+        self.device_stay_awake_set = False
+        self.last_blank_screen_detection = 0
+        self.blank_screen_threshold = 0.01  # 10ms of blank screen before showing placeholder
+        
+        # Enhanced device connection tracking
+        self.device_connection_lock = threading.Lock()  # Thread-safe device state management
+        self.menu_update_lock = threading.Lock()  # Thread-safe menu updates
+        self.last_device_check_time = 0
+        self.device_check_failures = 0
+        self.max_device_check_failures = 2  # Reduced failures before marking as disconnected (more responsive)
+        self.device_validation_interval = 3.0  # Validate device responsiveness every 3 seconds (more frequent)
+        self.last_device_validation = 0
+        self.consecutive_framebuffer_failures = 0  # Track consecutive framebuffer pull failures
+        self.max_framebuffer_failures = 3  # Max framebuffer failures before showing ready placeholder
+        self.input_command_in_progress = False  # Flag to track input commands
+        
+        # Input mode persistence
+        self.manual_mode_override = False  # Track if user manually changed mode
+        self.last_manual_mode_change = time.time()
+        
+        # Add a flag to the class
+        self.is_flashing_firmware = False
+        
+        # Update system variables
+        self.update_prompt_shown = False
+        self._shutting_down = False  # Flag to prevent operations during shutdown
+        
+        # Set up UI components immediately for instant responsiveness
+        debug_print("Setting up UI components")
+        self.setup_ui()
+        self.setup_menu()
+        self.setup_bindings()
+        
+        # Show placeholder immediately for instant user feedback
+        debug_print("Showing ready placeholder for instant feedback")
+        self.show_ready_placeholder()
+        
+        # Defer heavy operations to background
+        self.after(100, self._continue_initialization)
+        
+        debug_print("Y1HelperApp initialization complete")
+    
+    def _continue_initialization(self):
+        """Continue initialization in background to avoid blocking UI"""
+        try:
+            print("Checking for connected devices...")
+            debug_print("Continuing initialization in background...")
+            
+            # Check ADB connection
+            debug_print("Checking ADB connection")
+            self.unified_device_check()
+            
+            # Show appropriate placeholder based on device connection
+            if not hasattr(self, 'device_connected') or not self.device_connected:
+                print("No device connected - waiting for connection...")
+                debug_print("No device connected, keeping ready placeholder")
+            else:
+                print("Device connected! Setting up controls...")
+                # Device is connected, enable input bindings
+                debug_print("Device connected, enabling input bindings")
+                self.enable_input_bindings()
+                
+                # Set device to stay awake while charging
+                self.set_device_stay_awake()
+                
+                # Detect current app and set launcher control
+                print("Detecting current app and input mode...")
+                self.detect_current_app()
+            
+            print("Starting screen capture...")
+            # Start screen capture
+            self.start_screen_capture()
+            
+            print("Loading configuration and checking for updates...")
+            # Initialize config download and background updates
+            self.download_and_unpack_config()
+            self.update_config_background()
+            
+            # Check for updates in background after a short delay
+            self.after(5000, self.show_update_pill_if_needed)  # Check for updates after 5 seconds
+            
+            # Check for team-slide updates and show patch status
+            self.after(3000, self.check_and_show_team_slide_update)  # Check for team-slide updates after 3 seconds
+            self.after(1000, self.show_patch_status_message)  # Show patch status after 1 second
+            
+            # Check for updates at startup and show dialog if newer version available
+            self.after(2000, self.startup_update_check)  # Check for updates after 2 seconds
+            
+            # Start periodic content checking for real-time updates
+            self.after(30000, self._start_periodic_content_check)  # Start after 30 seconds
+            
+            print("Y1 Helper is fully loaded and ready!")
+            debug_print("Background initialization complete")
+            
+        except Exception as e:
+            debug_print(f"Error in background initialization: {e}")
+    
+    def write_version_file(self):
+        """Write version information to version.txt file"""
+        try:
+            version_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+            with open(version_file_path, 'w', encoding='utf-8') as f:
+                f.write(f"{self.version}\n")
+            debug_print(f"Version file written: {version_file_path}")
+        except Exception as e:
+            debug_print(f"Failed to write version file: {e}")
+    
+    def backup_current_version(self):
+        """Backup current y1_helper.py to .old directory with version subfolder"""
+        try:
+            # Create .old directory if it doesn't exist
+            old_dir = os.path.join(self.base_dir, ".old")
+            os.makedirs(old_dir, exist_ok=True)
+            
+            # Create version subfolder
+            version_folder = f"v{self.version}"
+            version_dir = os.path.join(old_dir, version_folder)
+            os.makedirs(version_dir, exist_ok=True)
+            
+            # Source file (current y1_helper.py)
+            source_file = os.path.join(self.base_dir, "y1_helper.py")
+            
+            # Destination file
+            dest_file = os.path.join(version_dir, "y1_helper.py")
+            
+            # Check if destination file exists and compare modification times
+            if os.path.exists(dest_file):
+                source_mtime = os.path.getmtime(source_file)
+                dest_mtime = os.path.getmtime(dest_file)
+                
+                # Only overwrite if source is newer
+                if source_mtime > dest_mtime:
+                    shutil.copy2(source_file, dest_file)
+                    debug_print(f"Updated backup of y1_helper.py to {version_dir} (source was newer)")
+                else:
+                    debug_print(f"Backup already exists and is up to date: {version_dir}")
+            else:
+                # File doesn't exist, create backup
+                shutil.copy2(source_file, dest_file)
+                debug_print(f"Created backup of y1_helper.py to {version_dir}")
+                
+        except Exception as e:
+            debug_print(f"Failed to backup current version: {e}")
+    
+    def initialize_cache(self):
+        """Initialize the cache system and clean up .old directory"""
+        try:
+            debug_print("Initializing cache system...")
+            
+            # Clean up .old directory (keep only y1_helper.py files)
+            self.cleanup_old_directory()
+            
+            # Create cache directory if it doesn't exist
+            os.makedirs(self.cache_dir, exist_ok=True)
+            
+            # Initialize cache if it doesn't exist or is expired
+            if not self.is_cache_valid():
+                self.update_cache()
+            else:
+                debug_print("Cache is valid, using existing cache")
+                
+        except Exception as e:
+            debug_print(f"Cache initialization failed: {e}")
+    
+    def cleanup_old_directory(self):
+        """Clean up .old directory to keep only y1_helper.py files"""
+        
+    def pre_populate_rom_directory(self):
+        """Replace ROM directory files with originals from assets and delete system.img at app startup"""
+        try:
+            debug_print("Replacing ROM directory files with originals from assets at startup...")
+            
+            # Ensure ROM directory exists
+            rom_dir = os.path.join(self.base_dir, "assets", "rom")
+            assets_dir = os.path.join(self.base_dir, "assets")
+            
+            os.makedirs(rom_dir, exist_ok=True)
+            
+            # Delete system.img if it exists (must come from downloaded ROM)
+            system_img_path = os.path.join(rom_dir, "system.img")
+            if os.path.exists(system_img_path):
+                os.remove(system_img_path)
+                debug_print("Deleted existing system.img from ROM directory")
+            
+            # Replace files with originals from assets (only if they exist in assets)
+            replaced_count = 0
+            
+            # List of files that should be in rom directory (based on current ideal structure)
+            rom_files = [
+                "boot.img", "cache.img", "DA_PL.bin", "DA_PL_CRYPTO20.bin",
+                "DA_SWSEC.bin", "DA_SWSEC_CRYPTO20.bin", "EBR1", "EBR2",
+                "kernel", "kernel_g368_nyx.bin", "lk.bin", "logo.bin",
+                "MBR", "MT6572_Android_scatter.txt", "MTK_AllInOne_DA.bin",
+                "preloader_g368_nyx.bin", "recovery.img", "secro.img", "userdata.img"
+            ]
+            
+            for file_name in rom_files:
+                src_path = os.path.join(assets_dir, file_name)
+                dest_path = os.path.join(rom_dir, file_name)
+                
+                if os.path.exists(src_path):
+                    # Always copy from assets to replace any existing file
+                    try:
+                        shutil.copy2(src_path, dest_path)
+                        replaced_count += 1
+                        debug_print(f"Replaced {file_name} with original from assets")
+                    except Exception as e:
+                        debug_print(f"Failed to replace {file_name}: {e}")
+                else:
+                    debug_print(f"File {file_name} not found in assets directory")
+            
+            debug_print(f"ROM directory startup cleanup completed: {replaced_count} files replaced with originals")
+            
+        except Exception as e:
+            debug_print(f"Error during ROM directory startup cleanup: {e}")
+    
+    def clear_rom_directory_for_firmware(self):
+        """Replace ROM directory files with originals from assets and delete system.img before firmware download"""
+        try:
+            rom_dir = os.path.join(self.base_dir, "assets", "rom")
+            assets_dir = os.path.join(self.base_dir, "assets")
+            
+            # Ensure ROM directory exists
+            os.makedirs(rom_dir, exist_ok=True)
+            
+            debug_print(f"Replacing ROM directory files with originals from assets: {rom_dir}")
+            
+            # Delete system.img if it exists (must come from downloaded ROM)
+            system_img_path = os.path.join(rom_dir, "system.img")
+            if os.path.exists(system_img_path):
+                os.remove(system_img_path)
+                debug_print("Deleted existing system.img from ROM directory")
+            
+            # Replace files with originals from assets (only if they exist in assets)
+            replaced_count = 0
+            
+            # List of files that should be in rom directory (based on current ideal structure)
+            rom_files = [
+                "boot.img", "cache.img", "DA_PL.bin", "DA_PL_CRYPTO20.bin",
+                "DA_SWSEC.bin", "DA_SWSEC_CRYPTO20.bin", "EBR1", "EBR2",
+                "kernel", "kernel_g368_nyx.bin", "lk.bin", "logo.bin",
+                "MBR", "MT6572_Android_scatter.txt", "MTK_AllInOne_DA.bin",
+                "preloader_g368_nyx.bin", "recovery.img", "secro.img", "userdata.img"
+            ]
+            
+            for file_name in rom_files:
+                src_path = os.path.join(assets_dir, file_name)
+                dest_path = os.path.join(rom_dir, file_name)
+                
+                if os.path.exists(src_path):
+                    # Always copy from assets to replace any existing file
+                    try:
+                        shutil.copy2(src_path, dest_path)
+                        replaced_count += 1
+                        debug_print(f"Replaced {file_name} with original from assets")
+                    except Exception as e:
+                        debug_print(f"Failed to replace {file_name}: {e}")
+                else:
+                    debug_print(f"File {file_name} not found in assets directory")
+            
+            debug_print(f"ROM directory cleanup completed: {replaced_count} files replaced with originals")
+                
+        except Exception as e:
+            debug_print(f"Error replacing ROM directory files: {e}")
+    
+    def _get_required_rom_files(self):
+        """Get list of required ROM files based on install_rom.xml reference"""
+        # This list is based on what install_rom.xml contains - the app doesn't parse the XML
+        return [
+            "preloader_g368_nyx.bin",
+            "MBR",
+            "EBR1", 
+            "EBR2",
+            "lk.bin",
+            "boot.img",
+            "recovery.img",
+            "secro.img",
+            "logo.bin",
+            "system.img",
+            "cache.img",
+            "userdata.img",
+            "MTK_AllInOne_DA.bin",
+            "MT6572_Android_scatter.txt",
+            "DA_PL.bin",
+            "DA_PL_CRYPTO20.bin",
+            "DA_SWSEC.bin",
+            "DA_SWSEC_CRYPTO20.bin",
+            "kernel",
+            "kernel_g368_nyx.bin"
+        ]
+    
+    def cleanup_cache_directory(self):
+        """Clean up old cache files to prevent accumulation and over-reliance on cached data"""
+        try:
+            debug_print("Cleaning up cache directory...")
+            
+            # Clean up old working tokens (older than 2 hours)
+            working_tokens_file = os.path.join(self.cache_dir, "working_tokens.json")
+            if os.path.exists(working_tokens_file):
+                try:
+                    with open(working_tokens_file, 'r') as f:
+                        data = json.load(f)
+                        cache_time = datetime.fromisoformat(data.get('cache_time', '1970-01-01T00:00:00'))
+                        if datetime.now() - cache_time > timedelta(hours=2):
+                            os.remove(working_tokens_file)
+                            debug_print("Removed old working tokens cache (older than 2 hours)")
+                except Exception as e:
+                    debug_print(f"Error cleaning up working tokens: {e}")
+            
+            # Clean up old rate limit state (older than 1 hour)
+            rate_limit_file = os.path.join(self.cache_dir, "rate_limits.json")
+            if os.path.exists(rate_limit_file):
+                try:
+                    file_time = datetime.fromtimestamp(os.path.getmtime(rate_limit_file))
+                    if datetime.now() - file_time > timedelta(hours=1):
+                        os.remove(rate_limit_file)
+                        debug_print("Removed old rate limit cache (older than 1 hour)")
+                except Exception as e:
+                    debug_print(f"Error cleaning up rate limit cache: {e}")
+            
+            # Clean up old startup tracking (older than 1 day)
+            startup_tracking_file = os.path.join(self.cache_dir, "startup_tracking.json")
+            if os.path.exists(startup_tracking_file):
+                try:
+                    file_time = datetime.fromtimestamp(os.path.getmtime(startup_tracking_file))
+                    if datetime.now() - file_time > timedelta(days=1):
+                        os.remove(startup_tracking_file)
+                        debug_print("Removed old startup tracking cache (older than 1 day)")
+                except Exception as e:
+                    debug_print(f"Error cleaning up startup tracking cache: {e}")
+            
+            debug_print("Cache cleanup completed")
+            
+        except Exception as e:
+            debug_print(f"Error during cache cleanup: {e}")
+        try:
+            old_dir = os.path.join(self.base_dir, ".old")
+            if not os.path.exists(old_dir):
+                return
+                
+            debug_print("Cleaning up .old directory...")
+            removed_count = 0
+            
+            for root, dirs, files in os.walk(old_dir):
+                for file in files:
+                    if file != "y1_helper.py":
+                        file_path = os.path.join(root, file)
+                        try:
+                            os.remove(file_path)
+                            removed_count += 1
+                            debug_print(f"Removed non-y1_helper.py file: {file_path}")
+                        except Exception as e:
+                            debug_print(f"Failed to remove {file_path}: {e}")
+                            
+            if removed_count > 0:
+                debug_print(f"Cleaned up {removed_count} non-y1_helper.py files from .old directory")
+                
+        except Exception as e:
+            debug_print(f"Error cleaning up .old directory: {e}")
+    
+    def is_cache_valid(self):
+        """Check if cache is still valid (not expired)"""
+        try:
+            if not os.path.exists(self.cache_last_update_file):
+                return False
+                
+            with open(self.cache_last_update_file, 'r') as f:
+                last_update_str = f.read().strip()
+                
+            if not last_update_str:
+                return False
+                
+            last_update = datetime.fromisoformat(last_update_str)
+            expiry_time = last_update + timedelta(hours=self.cache_expiry_hours)
+            
+            return datetime.now() < expiry_time
+            
+        except Exception as e:
+            debug_print(f"Error checking cache validity: {e}")
+            return False
+    
+    def update_cache(self):
+        """Update the cache with latest manifest and release data"""
+        try:
+            debug_print("Updating cache...")
+            
+            # Download latest manifest
+            manifest_content = self.download_manifest_with_fallback()
+            if manifest_content:
+                # Save manifest to cache
+                with open(self.cache_manifest_file, 'w', encoding='utf-8') as f:
+                    f.write(manifest_content)
+                
+                # Parse manifest and build comprehensive index with release URLs
+                self.build_cache_index_with_releases(manifest_content)
+                
+                # Update last update timestamp
+                with open(self.cache_last_update_file, 'w') as f:
+                    f.write(datetime.now().isoformat())
+                    
+                debug_print("Cache updated successfully")
+            else:
+                debug_print("Failed to download manifest for cache update")
+                
+        except Exception as e:
+            debug_print(f"Error updating cache: {e}")
+    
+    def check_rate_limits(self, token=None):
+        """Check if we can make an API call based on rate limits with conservative limits"""
+        try:
+            now = datetime.now()
+            
+            # Check unauthenticated limits (very conservative: 30 calls per hour)
+            if not token:
+                unauthenticated = self.api_rate_limits['unauthenticated']
+                if now > unauthenticated['reset_time']:
+                    # Reset counter
+                    unauthenticated['calls'] = 0
+                    unauthenticated['reset_time'] = now + timedelta(hours=1)
+                
+                # Use very conservative limit (GitHub allows 60, we use 30)
+                conservative_limit = min(self.max_unauthenticated_calls, 30)
+                
+                if unauthenticated['calls'] >= conservative_limit:
+                    self.rate_limit_exceeded = True
+                    self.update_title_for_rate_limit()
+                    debug_print(f"Unauthenticated API rate limit exceeded ({unauthenticated['calls']}/{conservative_limit})")
+                    return False
+                
+                unauthenticated['calls'] += 1
+                debug_print(f"Unauthenticated API call {unauthenticated['calls']}/{conservative_limit}")
+                return True
+            
+            # Check authenticated limits (conservative: 4000 calls per hour)
+            if token not in self.api_rate_limits['authenticated']:
+                self.api_rate_limits['authenticated'][token] = {
+                    'calls': 0, 
+                    'reset_time': now + timedelta(hours=1)
+                }
+            
+            token_limits = self.api_rate_limits['authenticated'][token]
+            if now > token_limits['reset_time']:
+                # Reset counter
+                token_limits['calls'] = 0
+                token_limits['reset_time'] = now + timedelta(hours=1)
+            
+            # Use conservative limit (GitHub allows 5000, we use 4000)
+            conservative_limit = min(self.max_authenticated_calls, 4000)
+            
+            if token_limits['calls'] >= conservative_limit:
+                debug_print(f"Authenticated API rate limit exceeded for token {token[:10]}... ({token_limits['calls']}/{conservative_limit})")
+                return False
+            
+            token_limits['calls'] += 1
+            debug_print(f"Authenticated API call for token {token[:10]}... ({token_limits['calls']}/{conservative_limit})")
+            return True
+            
+        except Exception as e:
+            debug_print(f"Error checking rate limits: {e}")
+            return True  # Allow call if rate limit check fails
+    
+    def update_title_for_rate_limit(self):
         """Update title bar to show rate limit status"""
         try:
             if self.rate_limit_exceeded:
@@ -1930,7 +2635,7 @@ class Y1HelperApp(tk.Tk):
         frame.pack(fill=tk.BOTH, expand=True)
         
         # Title label
-        title_label = ttk.Label(frame, text="Select an app to install:", font=("Segoe UI", 12, "bold"))
+        title_label = ttk.Label(frame, text=get_text('select_app_to_install'), font=("Segoe UI", 12, "bold"))
         title_label.pack(pady=(0, 10))
         
         # Create listbox with scrollbar
@@ -2006,8 +2711,8 @@ class Y1HelperApp(tk.Tk):
             selected_app = None
             dialog.destroy()
         
-        ttk.Button(button_frame, text="Install", command=on_select).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
+        ttk.Button(button_frame, text=get_text('install'), command=on_select).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(button_frame, text=get_text('cancel'), command=on_cancel).pack(side=tk.RIGHT)
         
         # Clean up dialog reference when closed
         def on_dialog_close():
@@ -2047,7 +2752,7 @@ class Y1HelperApp(tk.Tk):
         frame.pack(fill=tk.BOTH, expand=True)
         
         # Title label
-        title_label = ttk.Label(frame, text="Select an app to install:", font=("Segoe UI", 12, "bold"))
+        title_label = ttk.Label(frame, text=get_text('select_app_to_install'), font=("Segoe UI", 12, "bold"))
         title_label.pack(pady=(0, 10))
         
         # Create listbox with scrollbar
@@ -2084,13 +2789,13 @@ class Y1HelperApp(tk.Tk):
         button_frame.pack(fill=tk.X, pady=(10, 0))
         
         # Disable install button when error is shown
-        install_btn = ttk.Button(button_frame, text="Install", command=lambda: None, state='disabled')
+        install_btn = ttk.Button(button_frame, text=get_text('install'), command=lambda: None, state='disabled')
         install_btn.pack(side=tk.RIGHT, padx=(5, 0))
         
         def on_cancel():
             dialog.destroy()
         
-        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
+        ttk.Button(button_frame, text=get_text('cancel'), command=on_cancel).pack(side=tk.RIGHT)
         
         # Clean up dialog reference when closed
         def on_dialog_close():
@@ -4470,7 +5175,7 @@ class Y1HelperApp(tk.Tk):
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Screen viewer frame with modern styling
-        screen_frame = ttk.LabelFrame(main_frame, text="Mouse Input Panel (480x360)", padding=8)
+        screen_frame = ttk.LabelFrame(main_frame, text=get_text('mouse_input_panel'), padding=8)
         screen_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
         
         # Create canvas for screen display (scaled down to 75%) with modern styling
@@ -4481,7 +5186,7 @@ class Y1HelperApp(tk.Tk):
         self.screen_canvas.config(width=self.display_width, height=self.display_height)
         
         # Create controls display frame with modern styling
-        self.controls_frame = ttk.LabelFrame(screen_frame, text="Controls", padding=6)
+        self.controls_frame = ttk.LabelFrame(screen_frame, text=get_text('controls'), padding=6)
         self.controls_frame.pack(fill=tk.X, pady=(8, 0))
         
         # Controls display label with compact font
@@ -4504,7 +5209,7 @@ class Y1HelperApp(tk.Tk):
         # Input Mode toggle button with modern styling
         self.input_mode_btn = ttk.Button(
             row1_frame,
-            text="Touch Screen Mode",
+                            text=get_text('touch_screen_mode'),
             command=self.toggle_scroll_wheel_mode,
             style="TButton"
         )
@@ -4513,7 +5218,7 @@ class Y1HelperApp(tk.Tk):
         # Set Time button with modern styling
         self.set_time_btn = ttk.Button(
             row1_frame,
-            text="Set Time",
+                            text=get_text('set_time'),
             command=self.sync_device_time,
             style="TButton"
         )
@@ -4522,7 +5227,7 @@ class Y1HelperApp(tk.Tk):
         # Install Firmware button with modern styling
         self.install_firmware_btn = ttk.Button(
             row1_frame,
-            text="Install Firmware",
+                            text=get_text('install_firmware'),
             command=self.install_firmware,
             style="TButton"
         )
@@ -4531,7 +5236,7 @@ class Y1HelperApp(tk.Tk):
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
             row1_frame,
-            text="Screenshot",
+                            text=get_text('screenshot'),
             command=self.take_screenshot,
             style="TButton"
         )
@@ -4540,7 +5245,7 @@ class Y1HelperApp(tk.Tk):
         # Restart Rockbox button with modern styling (hidden by default)
         self.restart_rockbox_btn = ttk.Button(
             row1_frame,
-            text="Restart Rockbox",
+            text=get_text('restart_rockbox'),
             command=self.restart_rockbox,
             style="TButton"
         )
@@ -4550,7 +5255,7 @@ class Y1HelperApp(tk.Tk):
         # Update Available button (hidden by default, shown when update is available)
         self.update_btn = ttk.Button(
             row1_frame,
-            text="Update Available",
+            text=get_text('update_available'),
             command=self.check_and_show_update,
             style="TButton"
         )
@@ -4566,7 +5271,7 @@ class Y1HelperApp(tk.Tk):
         # Navigation buttons
         self.home_btn = ttk.Button(
             row2_frame,
-            text="Home",
+                            text=get_text('home'),
             command=self.go_home,
             style="TButton"
         )
@@ -4574,7 +5279,7 @@ class Y1HelperApp(tk.Tk):
         
         self.back_btn = ttk.Button(
             row2_frame,
-            text="Back",
+                            text=get_text('back'),
             command=self.send_back_key,
             style="TButton"
         )
@@ -4583,7 +5288,7 @@ class Y1HelperApp(tk.Tk):
         # Additional navigation buttons
         self.recent_btn = ttk.Button(
             row2_frame,
-            text="Recent",
+                            text=get_text('recent'),
             command=self.show_recent_apps,
             style="TButton"
         )
@@ -4591,7 +5296,7 @@ class Y1HelperApp(tk.Tk):
         
         self.menu_btn = ttk.Button(
             row2_frame,
-            text="Menu",
+                            text=get_text('menu'),
             command=self.nav_center,
             style="TButton"
         )
@@ -4600,7 +5305,7 @@ class Y1HelperApp(tk.Tk):
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
             row2_frame,
-            text="Invert Scroll Direction",
+            text=get_text('invert_scroll_direction'),
             variable=self.disable_dpad_swap_var,
             command=self.update_controls_display,
             style="TCheckbutton"
@@ -4613,7 +5318,7 @@ class Y1HelperApp(tk.Tk):
         dpad_frame.pack(fill=tk.X, pady=(8, 0))
         
         # D-pad label
-        dpad_label = ttk.Label(dpad_frame, text="D-pad Controls:", font=("Segoe UI", 9, "bold"))
+        dpad_label = ttk.Label(dpad_frame, text=get_text('dpad_controls') + ":", font=("Segoe UI", 9, "bold"))
         dpad_label.pack(side=tk.LEFT, anchor="w")
         
         # D-pad buttons in a cross layout
@@ -4623,7 +5328,7 @@ class Y1HelperApp(tk.Tk):
         # Up button
         self.dpad_up_btn = ttk.Button(
             dpad_buttons_frame,
-            text="Up",
+                            text=get_text('up'),
             command=self.nav_up,
             style="TButton",
             width=8
@@ -4636,7 +5341,7 @@ class Y1HelperApp(tk.Tk):
         
         self.dpad_left_btn = ttk.Button(
             middle_row,
-            text="Left",command=self.nav_left,
+                            text=get_text('left'),command=self.nav_left,
             style="TButton",
             width=8
         )
@@ -4644,7 +5349,7 @@ class Y1HelperApp(tk.Tk):
         
         self.dpad_center_btn = ttk.Button(
             middle_row,
-            text="OK",command=self.nav_center,
+                            text=get_text('ok'),command=self.nav_center,
             style="TButton",
             width=8
         )
@@ -4652,14 +5357,14 @@ class Y1HelperApp(tk.Tk):
         
         self.dpad_right_btn = ttk.Button(
             middle_row,
-            text="Right",command=self.nav_right,
+                            text=get_text('right'),command=self.nav_right,
             style="TButton",
             width=8
         )
         self.dpad_right_btn.pack(side=tk.LEFT, padx=(2, 0))
         
         # Down button
-        self.dpad_down_btn = ttk.Button(dpad_buttons_frame,text="Down",
+        self.dpad_down_btn = ttk.Button(dpad_buttons_frame,text=get_text('down'),
             command=self.nav_down,
             style="TButton",
             width=8
@@ -4669,7 +5374,7 @@ class Y1HelperApp(tk.Tk):
         # Update pill underneath dpad controls
         self.update_pill = tk.Label(
             dpad_buttons_frame,
-            text="Y1 Helper Update Available",
+            text=get_text('y1_helper_update_available'),
             bg="#0078D4",  # Windows blue
             fg="white",
             font=("Segoe UI", 9, "bold"),
@@ -4781,9 +5486,9 @@ class Y1HelperApp(tk.Tk):
         
         # Context menu with modern styling
         self.context_menu = Menu(self, tearoff=0)
-        self.context_menu.add_command(label="Go Home", command=self.go_home)
-        self.context_menu.add_command(label="Open Settings", command=self.launch_settings)
-        self.context_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
+        self.context_menu.add_command(label=get_text('go_home'), command=self.go_home)
+        self.context_menu.add_command(label=get_text('open_settings'), command=self.launch_settings)
+        self.context_menu.add_command(label=get_text('recent_apps'), command=self.show_recent_apps)
         
         # Controls frame is always visible now - no longer hidden based on device connection
         # self.hide_controls_frame()  # Removed - controls should always be visible
@@ -4863,31 +5568,31 @@ class Y1HelperApp(tk.Tk):
             if self.disable_dpad_swap_var.get() or self.y1_launcher_detected:
                 # Inverted scroll direction - show inverted mapping
                 controls_text = (
-                    "Scroll Wheel Mode (Inverted):\n"
-                    "Touch: Left Click | Back: Right Click\n"
-                    "Scroll: W/S or Up/Down Arrows sends DPAD_RIGHT/DPAD_LEFT\n"
-                    "D-pad: A/D or Left/Right Arrows sends DPAD_UP/DPAD_DOWN\n"
-                    "Enter: Wheel Click, Enter, E sends ENTER\n"
-                    "Toggle: Alt"
+                    f"{get_text('scroll_wheel_mode')} ({get_text('inverted')}):\n"
+                    f"{get_text('touch_left_click')} | {get_text('back_right_click')}\n"
+                    f"{get_text('scroll_instructions_inverted')}\n"
+                    f"{get_text('dpad_instructions_inverted')}\n"
+                    f"{get_text('enter_instructions')}\n"
+                    f"{get_text('toggle_alt')}"
                 )
             else:
                 # Normal scroll direction - show normal mapping
                 controls_text = (
-                    "Scroll Wheel Mode:\n"
-                    "Touch: Left Click | Back: Right Click\n"
-                    "Scroll: W/S or Up/Down Arrows sends DPAD_UP/DPAD_DOWN\n"
-                    "D-pad: A/D or Left/Right Arrows sends DPAD_LEFT/DPAD_RIGHT\n"
-                    "Enter: Wheel Click, Enter, E sends ENTER\n"
-                    "Toggle: Alt"
+                    f"{get_text('scroll_wheel_mode')}:\n"
+                    f"{get_text('touch_left_click')} | {get_text('back_right_click')}\n"
+                    f"{get_text('scroll_instructions')}\n"
+                    f"{get_text('dpad_instructions')}\n"
+                    f"{get_text('enter_instructions')}\n"
+                    f"{get_text('toggle_alt')}"
                 )
         else:
             # Touch Screen Mode controls - compact version
             controls_text = (
-                "Touch Screen Mode:\n"
-                "Touch: Left Click | Back: Right Click\n"
-                "D-pad: W/A/S/D or Arrow Keys sends DPAD_UP/DPAD_LEFT/DPAD_DOWN/DPAD_RIGHT\n"
-                "Enter: Wheel Click, Enter, E sends DPAD_CENTER\n"
-                "Toggle: Alt"
+                f"{get_text('touch_screen_mode')}:\n"
+                f"{get_text('touch_left_click')} | {get_text('back_right_click')}\n"
+                f"{get_text('dpad_instructions')}\n"
+                f"{get_text('enter_instructions')}\n"
+                f"{get_text('toggle_alt')}"
             )
         
         self.controls_label.config(text=controls_text)
@@ -4909,11 +5614,11 @@ class Y1HelperApp(tk.Tk):
         
         if is_scroll_wheel_mode:
             # Update button text to show current mode
-            self.input_mode_btn.config(text="Scroll Wheel Mode")
+            self.input_mode_btn.config(text=get_text('scroll_wheel_mode'))
             
             # Show the disable D-pad swap checkbox
             self.disable_swap_checkbox.pack(side=tk.LEFT, padx=(10, 0), anchor="w")
-            self.status_var.set("Scroll Wheel Mode enabled")
+            self.status_var.set(get_text('scroll_wheel_mode_enabled'))
             debug_print("Scroll Wheel Mode enabled")
             
             # Keep regular cursor for scroll wheel mode (only if not showing ready placeholder)
@@ -4922,11 +5627,11 @@ class Y1HelperApp(tk.Tk):
                 debug_print("Cursor set to regular for Scroll Wheel Mode")
         else:
             # Update button text to show current mode
-            self.input_mode_btn.config(text="Touch Screen Mode")
+            self.input_mode_btn.config(text=get_text('touch_screen_mode'))
             
             # Hide the disable D-pad swap checkbox
             self.disable_swap_checkbox.pack_forget()
-            self.status_var.set("Touch Screen Mode enabled")
+            self.status_var.set(get_text('touch_screen_mode_enabled'))
             debug_print("Touch Screen Mode enabled")
             
             # Set cursor to pointing hand for touch screen mode (only if not showing ready placeholder)
@@ -4951,27 +5656,28 @@ class Y1HelperApp(tk.Tk):
         menubar = Menu(self)
         self.config(menu=menubar)
         self.menubar = menubar  # Store reference for theme application
-        device_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Device", menu=device_menu)
-        self.device_menu = device_menu
+        # Device menu - hidden for now
+        # device_menu = Menu(menubar, tearoff=0)
+        # menubar.add_cascade(label=get_text('menu_device'), menu=device_menu)
+        # self.device_menu = device_menu
         
         # Add standard device menu items
-        self.device_menu.add_command(label=get_text('device_info'), command=self.show_device_info)
-        self.device_menu.add_command(label=get_text('adb_shell'), command=self.open_adb_shell)
+        # self.device_menu.add_command(label=get_text('device_info'), command=self.show_device_info)
+        # self.device_menu.add_command(label=get_text('adb_shell'), command=self.open_adb_shell)
         # File Explorer is hidden from menu but accessible via Ctrl+F
         # self.device_menu.add_command(label=get_text('file_explorer'), command=self.open_file_explorer)
-        self.device_menu.add_command(label=get_text('take_screenshot'), command=self.take_screenshot)
-        self.device_menu.add_command(label=get_text('recent_apps'), command=self.show_recent_apps)
-        self.device_menu.add_command(label=get_text('change_device_language'), command=self.change_device_language)
-        self.device_menu.add_command(label=get_text('sync_device_time'), command=self.sync_device_time)
-        self.device_menu.add_separator()
-        self.device_menu.add_command(label=get_text('install_firmware'), command=self.install_firmware)
+        # self.device_menu.add_command(label=get_text('take_screenshot'), command=self.take_screenshot)
+        # self.device_menu.add_command(label=get_text('recent_apps'), command=self.show_recent_apps)
+        # self.device_menu.add_command(label=get_text('change_device_language'), command=self.change_device_language)
+        # self.device_menu.add_command(label=get_text('sync_device_time'), command=self.sync_device_time)
+        # self.device_menu.add_separator()
+        # self.device_menu.add_command(label=get_text('install_firmware'), command=self.install_firmware)
         # self.device_menu.add_command(label=get_text('repair_device'), command=self.repair_device)  # Removed
-        self.device_menu.add_separator()
-        self.device_menu.add_command(label=get_text('rockbox_utility'), command=self.launch_rockbox_utility)
-        self.device_menu.add_command(label=get_text('sp_flash_tool'), command=self.launch_sp_flash_tool)
-        self.device_menu.add_separator()
-        self.device_menu.add_command(label=get_text('restart_device'), command=self.restart_device)
+        # self.device_menu.add_separator()
+        # self.device_menu.add_command(label=get_text('rockbox_utility'), command=self.launch_rockbox_utility)
+        # self.device_menu.add_command(label=get_text('sp_flash_tool'), command=self.launch_sp_flash_tool)
+        # self.device_menu.add_separator()
+        # self.device_menu.add_command(label=get_text('restart_device'), command=self.restart_device)
         
         self.apps_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label=get_text('menu_apps'), menu=self.apps_menu)
@@ -4980,10 +5686,10 @@ class Y1HelperApp(tk.Tk):
         self.apps_menu.add_separator()
         self.refresh_apps()  # Populate on startup
         
-        # Language menu
-        self.language_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label=get_text('menu_language'), menu=self.language_menu)
-        self._populate_language_menu()
+        # Language menu - hidden for now
+        # self.language_menu = Menu(menubar, tearoff=0)
+        # menubar.add_cascade(label=get_text('menu_language'), menu=self.language_menu)
+        # self._populate_language_menu()
         
         # Debug menu (hidden by default, shown with Ctrl+D)
         self.debug_menu = Menu(menubar, tearoff=0)
@@ -5000,8 +5706,8 @@ class Y1HelperApp(tk.Tk):
         help_menu.add_separator()
         help_menu.add_command(label=get_text('run_older_version'), command=self.launch_old_version)
         help_menu.add_separator()
-        help_menu.add_command(label="r/innioasis", command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
-        help_menu.add_command(label="Project Gallagher Discord", command=lambda: webbrowser.open_new_tab("https://discord.gg/nAeFsqDB"))
+        help_menu.add_command(label=get_text('r_innioasis'), command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
+        help_menu.add_command(label=get_text('innioasis_discord'), command=self.open_discord)
         help_menu.add_separator()
         help_menu.add_command(label=get_text('become_patron'), command=lambda: webbrowser.open_new_tab("https://www.patreon.com/c/TeamSlide"))
         menubar.add_cascade(label=get_text('menu_help'), menu=help_menu)
@@ -5028,6 +5734,10 @@ class Y1HelperApp(tk.Tk):
     def _populate_language_menu(self):
         """Populate the language menu with supported languages"""
         try:
+            # Check if language menu exists
+            if not hasattr(self, 'language_menu') or not self.language_menu:
+                return
+                
             # Clear existing menu items
             self.language_menu.delete(0, tk.END)
             
@@ -5104,6 +5814,12 @@ class Y1HelperApp(tk.Tk):
             # Update help menu items
             self._update_help_menu()
             
+            # Update button texts
+            self._update_button_texts()
+            
+            # Update control instructions
+            self.update_controls_display()
+            
             # Force refresh of apps menu
             self.refresh_apps()
             
@@ -5112,6 +5828,61 @@ class Y1HelperApp(tk.Tk):
             
         except Exception as e:
             debug_print(f"Error updating UI language: {e}")
+    
+    def _update_button_texts(self):
+        """Update all button texts with current language"""
+        try:
+            # Update main control buttons
+            if hasattr(self, 'input_mode_btn'):
+                if self.scroll_wheel_mode_var.get():
+                    self.input_mode_btn.config(text=get_text('scroll_wheel_mode'))
+                else:
+                    self.input_mode_btn.config(text=get_text('touch_screen_mode'))
+            
+            if hasattr(self, 'set_time_btn'):
+                self.set_time_btn.config(text=get_text('set_time'))
+            
+            if hasattr(self, 'install_firmware_btn'):
+                self.install_firmware_btn.config(text=get_text('install_firmware'))
+            
+            if hasattr(self, 'screenshot_btn'):
+                self.screenshot_btn.config(text=get_text('screenshot'))
+            
+            # Update navigation buttons
+            if hasattr(self, 'home_btn'):
+                self.home_btn.config(text=get_text('home'))
+            
+            if hasattr(self, 'back_btn'):
+                self.back_btn.config(text=get_text('back'))
+            
+            if hasattr(self, 'recent_btn'):
+                self.recent_btn.config(text=get_text('recent'))
+            
+            if hasattr(self, 'menu_btn'):
+                self.menu_btn.config(text=get_text('menu'))
+            
+            # Update D-pad buttons
+            if hasattr(self, 'dpad_up_btn'):
+                self.dpad_up_btn.config(text=get_text('up'))
+            
+            if hasattr(self, 'dpad_left_btn'):
+                self.dpad_left_btn.config(text=get_text('left'))
+            
+            if hasattr(self, 'dpad_center_btn'):
+                self.dpad_center_btn.config(text=get_text('ok'))
+            
+            if hasattr(self, 'dpad_right_btn'):
+                self.dpad_right_btn.config(text=get_text('right'))
+            
+            if hasattr(self, 'dpad_down_btn'):
+                self.dpad_down_btn.config(text=get_text('down'))
+            
+            # Update frame labels
+            if hasattr(self, 'controls_frame'):
+                self.controls_frame.config(text=get_text('controls'))
+            
+        except Exception as e:
+            debug_print(f"Error updating button texts: {e}")
     
     def _update_device_menu(self):
         """Update device menu items with current language"""
@@ -5133,7 +5904,8 @@ class Y1HelperApp(tk.Tk):
                 
                 for index, text in menu_items:
                     try:
-                        self.device_menu.entryconfigure(index, label=text)
+                        if hasattr(self, 'device_menu'):
+                            self.device_menu.entryconfigure(index, label=text)
                     except Exception as e:
                         debug_print(f"Error updating device menu item {index}: {e}")
                         
@@ -5549,7 +6321,7 @@ class Y1HelperApp(tk.Tk):
                         if not self.device_connected:
                             # Device just reconnected
                             self.device_connected = True
-                            self.status_var.set("Device connected")
+                            self.status_var.set(get_text('device_connected'))
                             
                             # Show controls frame and enable input bindings when device connects
                             self.show_controls_frame()
@@ -5568,7 +6340,7 @@ class Y1HelperApp(tk.Tk):
                         if self.device_check_failures >= self.max_device_check_failures:
                             if self.device_connected:
                                 self.device_connected = False
-                                self.status_var.set("Device disconnected - not responsive")
+                                self.status_var.set(get_text('device_disconnected_not_responsive'))
                                 
                                 # Disable input bindings but keep controls frame visible
                                 self.disable_input_bindings()
@@ -5576,7 +6348,7 @@ class Y1HelperApp(tk.Tk):
                     # Skip validation this time, but ensure device is marked as connected if it was before
                     if not self.device_connected:
                         self.device_connected = True
-                        self.status_var.set("Device connected")
+                        self.status_var.set(get_text('device_connected'))
                         
                         # Show controls frame and enable input bindings
                         self.show_controls_frame()
@@ -5595,7 +6367,7 @@ class Y1HelperApp(tk.Tk):
                 
                 if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
                     self.device_connected = False
-                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                    self.status_var.set(get_text('first_time_install_firmware'))
                     
                     # Disable input bindings but keep controls frame visible
                     self.disable_input_bindings()
@@ -5611,7 +6383,7 @@ class Y1HelperApp(tk.Tk):
             
             if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
                 self.device_connected = False
-                self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                self.status_var.set(get_text('first_time_install_firmware'))
                 self.disable_input_bindings()
         finally:
             self.device_connection_lock.release()
@@ -5726,7 +6498,7 @@ class Y1HelperApp(tk.Tk):
                 # Safely hide the disable D-pad swap checkbox when reverting to touch screen mode
                 self._safe_hide_disable_swap_checkbox()
                 
-                self.status_var.set("App detection failed - Touch Screen Mode active")
+                self.status_var.set(get_text('app_detection_failed_touch_mode'))
                 debug_print("App detection failed, keeping toggle visible but reverting to Touch Screen Mode")
                 
         except Exception as e:
@@ -5893,7 +6665,7 @@ class Y1HelperApp(tk.Tk):
             self.is_capturing = True
             self.capture_thread = threading.Thread(target=self.capture_screen_loop, daemon=True)
             self.capture_thread.start()
-            self.status_var.set("Screen capture started")
+            self.status_var.set(get_text('screen_capture_started'))
             debug_print("Screen capture thread started")
         else:
             debug_print("Screen capture already running")
@@ -6337,7 +7109,7 @@ class Y1HelperApp(tk.Tk):
             check_toolbox, out, err = self.run_adb_command('shell toolbox date')
             if not check_toolbox or 'not found' in out or 'not found' in err:
                 messagebox.showerror("Toolbox Not Found", "The 'toolbox' binary is not available on this device. Time sync cannot proceed.")
-                self.status_var.set("Toolbox not found on device")
+                self.status_var.set(get_text('toolbox_not_found'))
                 return
 
             # Set the system time using toolbox
@@ -6364,15 +7136,15 @@ class Y1HelperApp(tk.Tk):
                 debug_print("Sent home command")
                 
                 messagebox.showinfo("Time Sync Complete", f"Device time has been successfully set to:\n{current_time_str}\n\nRockbox has been restarted if it was running.")
-                self.status_var.set("Device time synced successfully")
+                self.status_var.set(get_text('device_time_synced'))
             else:
                 debug_print(f"Failed to sync device time: {stderr or stdout}")
                 messagebox.showwarning("Time Sync Failed", f"Unable to set the device time.\n\nADB output:\n{stderr or stdout}\n\nThis feature requires root access and toolbox support.")
-                self.status_var.set("Time sync failed")
+                self.status_var.set(get_text('time_sync_failed'))
         except Exception as e:
             debug_print(f"Exception syncing device time: {e}")
             messagebox.showerror("Time Sync Error", f"An error occurred while syncing device time:\n{str(e)}")
-            self.status_var.set("Time sync failed")
+            self.status_var.set(get_text('time_sync_failed'))
     
     def is_screen_blank(self, img):
         """Detect if the screen is blank/black (mostly dark with low variance)"""
@@ -6428,12 +7200,12 @@ class Y1HelperApp(tk.Tk):
         success, stdout, stderr = self.run_adb_command(
             "shell am start -n com.android.settings/.Settings")
         if success:
-            self.status_var.set("Settings launched")
+            self.status_var.set(get_text('settings_launched'))
             self.current_app = "com.android.settings"
             self.control_launcher = False  # Disable launcher control
             self.scroll_wheel_mode_var.set(False)  # Update UI checkbox
         else:
-            self.status_var.set(f"Failed to launch settings: {stderr}")
+            self.status_var.set(get_text('failed_to_launch_settings').format(error=stderr))
     
     def go_home(self):
         """Smart home button that restarts Rockbox if org.rockbox is installed but com.innioasis.y1 isn't, 
@@ -6459,7 +7231,7 @@ class Y1HelperApp(tk.Tk):
             if rockbox_installed and not y1_launcher_installed:
                 # Only Rockbox is installed - restart Rockbox
                 print("Only Rockbox installed - restarting Rockbox...")
-                self.status_var.set("Restarting Rockbox...")
+                self.status_var.set(get_text('restarting_rockbox'))
                 
                 # Force-stop Rockbox
                 success, stdout, stderr = self.run_adb_command("shell am force-stop org.rockbox")
@@ -6482,20 +7254,20 @@ class Y1HelperApp(tk.Tk):
             else:
                 # Either both are installed, or neither, or only Y1 launcher - send regular home signal
                 print("Sending regular Android home signal...")
-                self.status_var.set("Going home...")
+                self.status_var.set(get_text('going_home'))
                 
                 # Send home key event
                 success, stdout, stderr = self.run_adb_command("shell input keyevent 3")  # KEYCODE_HOME
                 if success:
-                    self.status_var.set("Home signal sent")
+                    self.status_var.set(get_text('home_signal_sent'))
                     print("Home signal sent successfully")
                 else:
-                    self.status_var.set(f"Failed to send home signal: {stderr}")
+                    self.status_var.set(get_text('failed_to_send_home_signal').format(error=stderr))
                     print(f"Failed to send home signal: {stderr}")
                     
         except Exception as e:
             print(f"Error in smart home button: {e}")
-            self.status_var.set(f"Home button error: {e}")
+            self.status_var.set(get_text('home_button_error').format(error=e))
             # Fallback to regular home signal
             self.run_adb_command("shell input keyevent 3")  # KEYCODE_HOME
     
@@ -6520,7 +7292,7 @@ class Y1HelperApp(tk.Tk):
                     debug_print(f"Progress update failed: {e}")
             
             update_progress("Preparing APK for installation...")
-            self.status_var.set("Installing APK...")
+            self.status_var.set(get_text('installing_apk'))
             
             # Convert to absolute path using platform-appropriate methods
             import os
@@ -6540,26 +7312,26 @@ class Y1HelperApp(tk.Tk):
                     debug_print(f"Error destroying progress dialog: {e}")
             
             if success:
-                self.status_var.set("APK installed successfully")
+                self.status_var.set(get_text('apk_installed_successfully'))
                 self.refresh_apps()
             else:
                 # Provide more detailed error information
                 error_msg = stderr.strip() if stderr else stdout.strip()
                 if "device not found" in error_msg.lower():
-                    self.status_var.set("APK installation failed: Device not connected")
+                    self.status_var.set(get_text('apk_installation_failed_device_disconnected'))
                 elif "permission denied" in error_msg.lower():
-                    self.status_var.set("APK installation failed: Permission denied - check USB debugging")
+                    self.status_var.set(get_text('apk_installation_failed_permission_denied'))
                 elif "failed to install" in error_msg.lower():
-                    self.status_var.set("APK installation failed: Incompatible APK or insufficient storage")
+                    self.status_var.set(get_text('apk_installation_failed_incompatible'))
                 else:
-                    self.status_var.set(f"APK installation failed: {error_msg}")
+                    self.status_var.set(get_text('apk_installation_failed').format(error=error_msg))
                 
                 # Show detailed error in console for debugging
                 print(f"APK Installation Error:")
                 print(f"  File: {file_path}")
                 print(f"  Error: {error_msg}")
         else:
-            self.status_var.set("APK installation cancelled")
+            self.status_var.set(get_text('apk_installation_cancelled'))
     
     def install_apps(self):
         """Install apps from the manifest"""
@@ -6588,7 +7360,7 @@ class Y1HelperApp(tk.Tk):
                     debug_print(f"Progress update failed: {e}")
             
             update_progress("Connecting to manifest server...")
-            self.status_var.set("Fetching app manifest...")
+            self.status_var.set(get_text('fetching_app_manifest'))
             
             # Always try to get fresh manifest first for real-time updates
             manifest_content = None
@@ -6638,7 +7410,7 @@ class Y1HelperApp(tk.Tk):
                 return
             
             # Download the selected app
-            self.status_var.set(f"Downloading {selected_app['name']}...")
+            self.status_var.set(get_text('downloading_app').format(app_name=selected_app['name']))
             debug_print(f"Starting download for app: {selected_app['name']}")
             app_path = self.download_app(selected_app)
             
@@ -6648,12 +7420,12 @@ class Y1HelperApp(tk.Tk):
                 return
             
             # Install the app using ADB
-            self.status_var.set("Installing app...")
+            self.status_var.set(get_text('installing_app'))
             success, error_msg = self.install_downloaded_app(app_path)
             
             if success:
                 messagebox.showinfo("Installation Complete", "App installation completed successfully!")
-                self.status_var.set("App installation complete")
+                self.status_var.set(get_text('app_installation_complete'))
                 self.refresh_apps()
             else:
                 # Check if the error is due to no device connection
@@ -6668,26 +7440,56 @@ class Y1HelperApp(tk.Tk):
                     user_friendly_error = f"App installation failed: {error_msg}"
                 
                 messagebox.showerror("Installation Failed", user_friendly_error)
-                self.status_var.set("App installation failed")
+                self.status_var.set(get_text('app_installation_failed'))
                 
         except Exception as e:
             debug_print(f"App installation error: {e}")
             messagebox.showerror("Installation Error", f"An error occurred during app installation: {str(e)}")
-            self.status_var.set("App installation error")
+            self.status_var.set(get_text('app_installation_error'))
     
     # prepare_device method removed - replaced with install_firmware
     
     def open_nova_launcher(self):
         self.run_adb_command("shell monkey -p com.teslacoilsw.launcher -c android.intent.category.LAUNCHER 1")
-        self.status_var.set("Nova Launcher opened")
+        self.status_var.set(get_text('nova_launcher_opened'))
 
     def open_keycode_disp(self):
         self.run_adb_command("shell monkey -p jp.ne.neko.freewing.KeyCodeDisp -c android.intent.category.LAUNCHER 1")
-        self.status_var.set("KeyCode Display app opened")
+        self.status_var.set(get_text('keycode_display_app_opened'))
+    
+    def open_discord(self):
+        """Open Discord with URL fetched from GitHub or fallback to local file"""
+        try:
+            # Try to fetch from GitHub first
+            url = "https://github.com/team-slide/Y1-helper/raw/master/invite_url.txt"
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                discord_url = response.text.strip()
+                debug_print(f"Fetched Discord URL from GitHub: {discord_url}")
+            else:
+                raise Exception(f"GitHub request failed with status {response.status_code}")
+        except Exception as e:
+            debug_print(f"Failed to fetch Discord URL from GitHub: {e}")
+            # Fallback to local file
+            try:
+                local_file = os.path.join(base_dir, 'invite_url.txt')
+                if os.path.exists(local_file):
+                    with open(local_file, 'r') as f:
+                        discord_url = f.read().strip()
+                    debug_print(f"Using local Discord URL: {discord_url}")
+                else:
+                    # Ultimate fallback
+                    discord_url = "https://discord.gg/nAeFsqDB"
+                    debug_print("Using hardcoded Discord URL fallback")
+            except Exception as local_error:
+                debug_print(f"Failed to read local Discord URL: {local_error}")
+                discord_url = "https://discord.gg/nAeFsqDB"
+        
+        webbrowser.open_new_tab(discord_url)
 
     def open_launcher(self, pkg):
         self.run_adb_command(f"shell monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
-        self.status_var.set(f"Launcher {pkg} opened")
+        self.status_var.set(get_text('launcher_opened').format(pkg=pkg))
     
     def launch_app(self, package_name):
         """Launch specified app and trigger app detection"""
@@ -6697,7 +7499,7 @@ class Y1HelperApp(tk.Tk):
             f"shell monkey -p {package_name} -c android.intent.category.LAUNCHER 1")
         if success:
             print(f"Successfully launched {package_name}")
-            self.status_var.set(f"Launched {package_name}")
+            self.status_var.set(get_text('launched_app').format(app_name=package_name))
             self.current_app = package_name
             
             # Clear manual override when launching app from Y1 helper
@@ -6711,7 +7513,7 @@ class Y1HelperApp(tk.Tk):
             self.refresh_apps()  # Ensure app list is up to date after launch
         else:
             print(f"Failed to launch {package_name}: {stderr}")
-            self.status_var.set(f"Failed to launch {package_name}: {stderr}")
+            self.status_var.set(get_text('failed_to_launch_app').format(app_name=package_name, error=stderr))
             debug_print(f"Failed to launch {package_name}: {stderr}")
     
     def uninstall_app(self, package_name):
@@ -6734,8 +7536,8 @@ class Y1HelperApp(tk.Tk):
             except Exception as e:
                 debug_print(f"Progress update failed: {e}")
         
-        update_progress(f"Uninstalling {package_name}...")
-        self.status_var.set(f"Uninstalling {package_name}...")
+        update_progress(get_text('uninstalling_app').format(app_name=package_name))
+        self.status_var.set(get_text('uninstalling_app').format(app_name=package_name))
         
         success, stdout, stderr = self.run_adb_command(f"uninstall {package_name}")
         
@@ -6747,11 +7549,11 @@ class Y1HelperApp(tk.Tk):
                 debug_print(f"Error destroying progress dialog: {e}")
         
         if success:
-            self.status_var.set(f"{package_name} uninstalled successfully")
+            self.status_var.set(get_text('app_uninstalled_successfully').format(app_name=package_name))
             debug_print(f"App {package_name} uninstalled successfully")
             self.refresh_apps()
         else:
-            self.status_var.set(f"Failed to uninstall {package_name}: {stderr}")
+            self.status_var.set(get_text('failed_to_uninstall_app').format(app_name=package_name, error=stderr))
             debug_print(f"Failed to uninstall {package_name}: {stderr}")
     
     def toggle_launcher_control_old(self, event=None):
@@ -6760,7 +7562,7 @@ class Y1HelperApp(tk.Tk):
         self.control_launcher = not self.control_launcher
         self.scroll_wheel_mode_var.set(self.control_launcher)
         status = "enabled" if self.control_launcher else "disabled"
-        self.status_var.set(f"Launcher control {status}")
+        self.status_var.set(get_text('launcher_control_status').format(status=status))
         debug_print(f"Launcher control {status}")
     
     def on_screen_click(self, event):
@@ -6803,10 +7605,10 @@ class Y1HelperApp(tk.Tk):
             
             if success:
                 debug_print(f"Touch tap sent to ({device_x}, {device_y})")
-                self.status_var.set(f"Tap: ({device_x}, {device_y})")
+                self.status_var.set(get_text('tap_coordinates').format(x=device_x, y=device_y))
             else:
                 debug_print(f"Failed to send touch tap: {stderr}")
-                self.status_var.set("Touch tap failed")
+                self.status_var.set(get_text('touch_tap_failed'))
         except Exception as e:
             debug_print(f"Error sending touch tap: {e}")
     
@@ -6825,10 +7627,10 @@ class Y1HelperApp(tk.Tk):
             
             if success:
                 debug_print(f"Touch swipe sent from ({device_start_x}, {device_start_y}) to ({device_end_x}, {device_end_y})")
-                self.status_var.set(f"Swipe: ({device_start_x},{device_start_y}) → ({device_end_x},{device_end_y})")
+                self.status_var.set(get_text('swipe_coordinates').format(start_x=device_start_x, start_y=device_start_y, end_x=device_end_x, end_y=device_end_y))
             else:
                 debug_print(f"Failed to send touch swipe: {stderr}")
-                self.status_var.set("Touch swipe failed")
+                self.status_var.set(get_text('touch_swipe_failed'))
         except Exception as e:
             debug_print(f"Error sending touch swipe: {e}")
     
@@ -6855,32 +7657,8 @@ class Y1HelperApp(tk.Tk):
         except Exception as e:
             debug_print(f"Error sending gesture swipe: {e}")
         
-        # Force framebuffer refresh before sending input
+        # Force framebuffer refresh after sending gesture
         self.force_framebuffer_refresh()
-        
-        if self.control_launcher and self.scroll_wheel_mode_var.get():
-            debug_print("Sending ENTER key (scroll wheel mode)")
-            success, stdout, stderr = self.run_adb_command("shell input keyevent 66")  # KEYCODE_ENTER
-            if success:
-                self.status_var.set("Enter key sent")
-                debug_print("ENTER key sent successfully")
-                # Force framebuffer refresh after sending input
-                self.after(100, self.force_framebuffer_refresh)
-            else:
-                self.status_var.set(f"Enter key failed: {stderr}")
-                debug_print(f"ENTER key failed: {stderr}")
-        else:
-            debug_print(f"Sending touch input to ({x}, {y})")
-            success, stdout, stderr = self.run_adb_command(
-                f"shell input tap {x} {y}")
-            if success:
-                self.status_var.set(f"Touch input sent to ({x}, {y})")
-                debug_print("Touch input sent successfully")
-                # Force framebuffer refresh after sending input
-                self.after(100, self.force_framebuffer_refresh)
-            else:
-                self.status_var.set(f"Touch input failed: {stderr}")
-                debug_print(f"Touch input failed: {stderr}")
     
     def on_screen_right_click(self, event):
         """Handle right click on screen (back button)"""
@@ -6898,12 +7676,12 @@ class Y1HelperApp(tk.Tk):
         debug_print("Sending BACK key")
         success, stdout, stderr = self.run_adb_command("shell input keyevent 4")  # KEYCODE_BACK
         if success:
-            self.status_var.set("Back button pressed")
+            self.status_var.set(get_text('back_button_pressed'))
             debug_print("BACK key sent successfully")
             # Force framebuffer refresh after sending input
             self.after(100, self.force_framebuffer_refresh)
         else:
-            self.status_var.set(f"Back button failed: {stderr}")
+            self.status_var.set(get_text('back_button_failed').format(error=stderr))
             debug_print(f"BACK key failed: {stderr}")
     
     def on_mouse_wheel(self, event):
@@ -6959,11 +7737,11 @@ class Y1HelperApp(tk.Tk):
             self.input_command_in_progress = False
             
             if success:
-                self.status_var.set(f"D-pad {dir_str} pressed")
+                self.status_var.set(get_text('dpad_pressed').format(direction=dir_str))
                 debug_print(f"D-pad {dir_str} sent successfully")
                 self.after(50, self.force_framebuffer_refresh)
             else:
-                self.status_var.set(f"D-pad {dir_str} failed: {stderr}")
+                self.status_var.set(get_text('dpad_failed').format(direction=dir_str, error=stderr))
                 debug_print(f"D-pad {dir_str} failed: {stderr}")
         else:
             # Touch screen mode - send gesture swipes
@@ -7000,12 +7778,12 @@ class Y1HelperApp(tk.Tk):
         self.input_command_in_progress = False
         
         if success:
-            self.status_var.set(f"Mouse wheel click: {action} pressed")
+            self.status_var.set(get_text('mouse_wheel_click').format(action=action))
             debug_print(f"Mouse wheel click ({action}) sent successfully")
             # Request framebuffer refresh after sending input (non-blocking)
             self.after(50, self.force_framebuffer_refresh)
         else:
-            self.status_var.set(f"Mouse wheel click failed: {stderr}")
+            self.status_var.set(get_text('mouse_wheel_click_failed').format(error=stderr))
             debug_print(f"Mouse wheel click failed: {stderr}")
             # Don't trigger device disconnection for input command failures
             # as they can be temporary and don't indicate device disconnection
@@ -7090,13 +7868,13 @@ class Y1HelperApp(tk.Tk):
         self.input_command_in_progress = False
         
         if success:
-            self.status_var.set(f"Key {direction} pressed")
+            self.status_var.set(get_text('key_pressed').format(direction=direction))
             debug_print(f"Key {direction} sent successfully")
             # Request framebuffer refresh after sending input (non-blocking)
             self.after(50, self.force_framebuffer_refresh)
-            self.after(1500, lambda: self.status_var.set("Ready"))
+            self.after(1500, lambda: self.status_var.set(get_text('ready')))
         else:
-            self.status_var.set(f"Key {direction} failed: {stderr}")
+            self.status_var.set(get_text('key_failed').format(direction=direction, error=stderr))
             debug_print(f"Key {direction} failed: {stderr}")
             # Don't trigger device disconnection for input command failures
             # as they can be temporary and don't indicate device disconnection
@@ -7135,21 +7913,21 @@ class Y1HelperApp(tk.Tk):
         self.force_framebuffer_refresh()
         self.run_adb_command("shell input keyevent 85")  # KEYCODE_MEDIA_PLAY_PAUSE
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def previous_track(self):
         """Send previous track key event"""
         self.force_framebuffer_refresh()
         self.run_adb_command("shell input keyevent 88")  # KEYCODE_MEDIA_PREVIOUS
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def next_track(self):
         """Send next track key event"""
         self.force_framebuffer_refresh()
         self.run_adb_command("shell input keyevent 87")  # KEYCODE_MEDIA_NEXT
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def _get_dpad_keycode(self, direction, check_invert=True):
         """Get the correct D-pad keycode based on direction and current mode/invert settings"""
@@ -7190,7 +7968,7 @@ class Y1HelperApp(tk.Tk):
         keycode = self._get_dpad_keycode('up')
         self.run_adb_command(f"shell input keyevent {keycode}")
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def nav_down(self):
         """Navigate down with unified mapping"""
@@ -7198,7 +7976,7 @@ class Y1HelperApp(tk.Tk):
         keycode = self._get_dpad_keycode('down')
         self.run_adb_command(f"shell input keyevent {keycode}")
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def nav_left(self):
         """Navigate left with unified mapping"""
@@ -7206,7 +7984,7 @@ class Y1HelperApp(tk.Tk):
         keycode = self._get_dpad_keycode('left')
         self.run_adb_command(f"shell input keyevent {keycode}")
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def nav_right(self):
         """Navigate right with unified mapping"""
@@ -7214,7 +7992,7 @@ class Y1HelperApp(tk.Tk):
         keycode = self._get_dpad_keycode('right')
         self.run_adb_command(f"shell input keyevent {keycode}")
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def nav_center(self):
         """Send center/select key event"""
@@ -7224,7 +8002,7 @@ class Y1HelperApp(tk.Tk):
         else:
             self.run_adb_command("shell input keyevent 23")  # KEYCODE_DPAD_CENTER
         self.after(100, self.force_framebuffer_refresh)
-        self.after(1500, lambda: self.status_var.set("Ready"))
+        self.after(1500, lambda: self.status_var.set(get_text('ready')))
 
     def open_adb_shell(self):
         """Open ADB shell in new window"""
@@ -7440,7 +8218,7 @@ class Y1HelperApp(tk.Tk):
         """Remove Rockbox Utility from the Device menu"""
         try:
             # Find and disable the Rockbox Utility menu item
-            if hasattr(self, 'device_menu'):
+            if hasattr(self, 'device_menu') and self.device_menu:
                 for i in range(self.device_menu.index('end') + 1):
                     try:
                         label = self.device_menu.entrycget(i, 'label')
@@ -7491,10 +8269,10 @@ class Y1HelperApp(tk.Tk):
             # Launch Rockbox
             success, stdout, stderr = self.run_adb_command("shell monkey -p org.rockbox -c android.intent.category.LAUNCHER 1")
             if success:
-                self.status_var.set("Rockbox restarted")
+                self.status_var.set(get_text('rockbox_restarted'))
                 debug_print("Rockbox restarted successfully")
             else:
-                self.status_var.set(f"Failed to restart Rockbox: {stderr}")
+                self.status_var.set(get_text('failed_to_restart_rockbox').format(error=stderr))
                 debug_print(f"Failed to restart Rockbox: {stderr}")
                 messagebox.showerror("Error", f"Failed to restart Rockbox: {stderr}")
         except Exception as e:
@@ -8241,7 +9019,7 @@ class Y1HelperApp(tk.Tk):
                         continue
             else:
                 # Add debug menu
-                menubar.add_cascade(label="Debug", menu=self.debug_menu)
+                menubar.add_cascade(label=get_text('debug'), menu=self.debug_menu)
                 self.apply_menu_colors()
                 
         except Exception as e:
