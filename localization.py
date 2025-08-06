@@ -149,7 +149,289 @@ class LocalizationManager:
                 'processing': 'Processing...',
                 'completed': 'Completed',
                 'failed': 'Failed',
-                'cancelled': 'Cancelled'
+                'cancelled': 'Cancelled',
+                
+                # Device menu items
+                'device_info': 'Device Info',
+                'adb_shell': 'ADB Shell',
+                'file_explorer': 'File Explorer',
+                'take_screenshot': 'Take Screenshot',
+                'recent_apps': 'Recent Apps',
+                'change_device_language': 'Change Device Language',
+                'sync_device_time': 'Sync Device Time',
+                'install_firmware': 'Install Firmware',
+                'rockbox_utility': 'Rockbox Utility',
+                'sp_flash_tool': 'SP Flash Tool',
+                'restart_device': 'Restart Device',
+                
+                # Help menu items
+                'reinstall_app': 'Reinstall App',
+                'update_app': 'Update App',
+                'run_older_version': 'Run Older Version',
+                'become_patron': 'Become a Patron',
+                
+                # Debug menu items
+                'toggle_debug_output': 'Toggle Debug Output',
+                'change_update_branch': 'Change Update Branch...',
+                'show_current_branch': 'Show Current Branch',
+                'run_updater': 'Run Updater',
+                
+                # App actions
+                'restart_rockbox': 'Restart Rockbox',
+                'app_info': 'App Info',
+                
+                # Dialog messages
+                'confirm_operation': 'Confirm Operation',
+                'operation_confirmation': 'Are you sure you want to perform this operation?',
+                'device_not_connected_warning': 'Device is not connected. Please connect a device first.',
+                'no_device_found': 'No device found. Please ensure your device is connected and USB debugging is enabled.',
+                'connection_failed': 'Connection failed. Please check your device connection.',
+                'operation_in_progress': 'Operation in progress. Please wait...',
+                'operation_completed': 'Operation completed successfully.',
+                'operation_failed_with_error': 'Operation failed: {error}',
+                
+                # File operations
+                'select_file': 'Select File',
+                'select_folder': 'Select Folder',
+                'file_selected': 'File selected: {filename}',
+                'folder_selected': 'Folder selected: {foldername}',
+                'no_file_selected': 'No file selected',
+                'file_not_found_error': 'File not found: {filename}',
+                'file_access_error': 'Cannot access file: {filename}',
+                
+                # Installation messages
+                'installing_app': 'Installing app...',
+                'app_installation_complete': 'App installation completed successfully',
+                'app_installation_failed': 'App installation failed',
+                'uninstalling_app': 'Uninstalling app...',
+                'app_uninstallation_complete': 'App uninstallation completed successfully',
+                'app_uninstallation_failed': 'App uninstallation failed',
+                
+                # Screenshot messages
+                'taking_screenshot': 'Taking screenshot...',
+                'screenshot_saved': 'Screenshot saved successfully',
+                'screenshot_failed': 'Failed to take screenshot',
+                
+                # Time sync messages
+                'syncing_device_time': 'Syncing device time...',
+                'device_time_synced': 'Device time synchronized successfully',
+                'device_time_sync_failed': 'Failed to sync device time',
+                
+                # Firmware messages
+                'selecting_firmware': 'Selecting firmware...',
+                'firmware_selected': 'Firmware selected: {filename}',
+                'firmware_validation_failed': 'Firmware validation failed',
+                'firmware_file_corrupted': 'Firmware file appears to be corrupted',
+                
+                # Update messages
+                'checking_for_updates': 'Checking for updates...',
+                'update_available_version': 'Update available: Version {version}',
+                'no_updates_available': 'No updates available. You are running the latest version.',
+                'update_download_failed': 'Failed to download update',
+                'update_installation_failed': 'Failed to install update',
+                'update_installation_complete': 'Update installed successfully. Please restart the application.',
+                
+                # Cache messages
+                'cache_initialization_failed': 'Cache initialization failed',
+                'cache_cleanup_failed': 'Cache cleanup failed',
+                'cache_corrupted': 'Cache appears to be corrupted and will be rebuilt',
+                
+                # API messages
+                'api_rate_limit_exceeded': 'API rate limit exceeded. Please wait before trying again.',
+                'api_authentication_failed': 'API authentication failed',
+                'api_connection_failed': 'API connection failed',
+                'api_request_failed': 'API request failed',
+                
+                # Network messages
+                'network_connection_failed': 'Network connection failed',
+                'network_timeout': 'Network timeout',
+                'network_unavailable': 'Network is currently unavailable',
+                
+                # System messages
+                'system_error': 'System error occurred',
+                'insufficient_permissions': 'Insufficient permissions to perform this operation',
+                'resource_unavailable': 'Required resource is unavailable',
+                'service_unavailable': 'Service is currently unavailable',
+                
+                # Validation messages
+                'invalid_device_id': 'Invalid device ID',
+                'invalid_file_format': 'Invalid file format',
+                'invalid_parameter': 'Invalid parameter provided',
+                'missing_required_field': 'Required field is missing',
+                
+                # Progress messages
+                'initializing': 'Initializing...',
+                'loading_configuration': 'Loading configuration...',
+                'connecting_to_device': 'Connecting to device...',
+                'disconnecting_from_device': 'Disconnecting from device...',
+                'refreshing_data': 'Refreshing data...',
+                'saving_settings': 'Saving settings...',
+                'loading_settings': 'Loading settings...',
+                
+                # Warning messages
+                'warning_device_disconnect': 'Warning: Device may disconnect during this operation',
+                'warning_data_loss': 'Warning: This operation may result in data loss',
+                'warning_unsaved_changes': 'Warning: You have unsaved changes',
+                'warning_experimental_feature': 'Warning: This is an experimental feature',
+                
+                # Information messages
+                'info_device_connected': 'Device connected successfully',
+                'info_device_disconnected': 'Device disconnected',
+                'info_operation_started': 'Operation started',
+                'info_operation_completed': 'Operation completed',
+                'info_settings_saved': 'Settings saved successfully',
+                'info_settings_loaded': 'Settings loaded successfully',
+                
+                # Error details
+                'error_details': 'Error Details',
+                'error_code': 'Error Code',
+                'error_message': 'Error Message',
+                'error_stack_trace': 'Stack Trace',
+                'error_time': 'Error Time',
+                'error_location': 'Error Location',
+                
+                # Common actions
+                'retry': 'Retry',
+                'ignore': 'Ignore',
+                'continue': 'Continue',
+                'skip': 'Skip',
+                'back': 'Back',
+                'next': 'Next',
+                'finish': 'Finish',
+                'abort': 'Abort',
+                'restart': 'Restart',
+                'reset': 'Reset',
+                'clear': 'Clear',
+                'refresh': 'Refresh',
+                'reload': 'Reload',
+                'restore': 'Restore',
+                'backup': 'Backup',
+                'export': 'Export',
+                'import': 'Import',
+                'download': 'Download',
+                'upload': 'Upload',
+                'copy': 'Copy',
+                'paste': 'Paste',
+                'cut': 'Cut',
+                'delete': 'Delete',
+                'rename': 'Rename',
+                'move': 'Move',
+                'create': 'Create',
+                'edit': 'Edit',
+                'view': 'View',
+                'search': 'Search',
+                'find': 'Find',
+                'replace': 'Replace',
+                'select_all': 'Select All',
+                'deselect_all': 'Deselect All',
+                'invert_selection': 'Invert Selection',
+                
+                # Time and date
+                'today': 'Today',
+                'yesterday': 'Yesterday',
+                'tomorrow': 'Tomorrow',
+                'this_week': 'This Week',
+                'last_week': 'Last Week',
+                'next_week': 'Next Week',
+                'this_month': 'This Month',
+                'last_month': 'Last Month',
+                'next_month': 'Next Month',
+                'this_year': 'This Year',
+                'last_year': 'Last Year',
+                'next_year': 'Next Year',
+                
+                # File sizes
+                'bytes': 'bytes',
+                'kilobytes': 'KB',
+                'megabytes': 'MB',
+                'gigabytes': 'GB',
+                'terabytes': 'TB',
+                
+                # Time units
+                'seconds': 'seconds',
+                'minutes': 'minutes',
+                'hours': 'hours',
+                'days': 'days',
+                'weeks': 'weeks',
+                'months': 'months',
+                'years': 'years',
+                
+                # Status indicators
+                'online': 'Online',
+                'offline': 'Offline',
+                'connected': 'Connected',
+                'disconnected': 'Disconnected',
+                'enabled': 'Enabled',
+                'disabled': 'Disabled',
+                'active': 'Active',
+                'inactive': 'Inactive',
+                'running': 'Running',
+                'stopped': 'Stopped',
+                'paused': 'Paused',
+                'resumed': 'Resumed',
+                'starting': 'Starting',
+                'stopping': 'Stopping',
+                'loading': 'Loading',
+                'saving': 'Saving',
+                'updating': 'Updating',
+                'installing': 'Installing',
+                'uninstalling': 'Uninstalling',
+                'downloading': 'Downloading',
+                'uploading': 'Uploading',
+                'copying': 'Copying',
+                'moving': 'Moving',
+                'deleting': 'Deleting',
+                'creating': 'Creating',
+                'editing': 'Editing',
+                'searching': 'Searching',
+                'scanning': 'Scanning',
+                'validating': 'Validating',
+                'checking': 'Checking',
+                'testing': 'Testing',
+                'configuring': 'Configuring',
+                'initializing': 'Initializing',
+                'connecting': 'Connecting',
+                'disconnecting': 'Disconnecting',
+                'synchronizing': 'Synchronizing',
+                'backing_up': 'Backing up',
+                'restoring': 'Restoring',
+                'exporting': 'Exporting',
+                'importing': 'Importing',
+                'compressing': 'Compressing',
+                'decompressing': 'Decompressing',
+                'encrypting': 'Encrypting',
+                'decrypting': 'Decrypting',
+                'verifying': 'Verifying',
+                'repairing': 'Repairing',
+                'optimizing': 'Optimizing',
+                'cleaning': 'Cleaning',
+                'rebuilding': 'Rebuilding',
+                'refreshing': 'Refreshing',
+                'reloading': 'Reloading',
+                'restarting': 'Restarting',
+                'resetting': 'Resetting',
+                'clearing': 'Clearing',
+                'restoring': 'Restoring',
+                'backing_up': 'Backing up',
+                'exporting': 'Exporting',
+                'importing': 'Importing',
+                'downloading': 'Downloading',
+                'uploading': 'Uploading',
+                'copying': 'Copying',
+                'pasting': 'Pasting',
+                'cutting': 'Cutting',
+                'deleting': 'Deleting',
+                'renaming': 'Renaming',
+                'moving': 'Moving',
+                'creating': 'Creating',
+                'editing': 'Editing',
+                'viewing': 'Viewing',
+                'searching': 'Searching',
+                'finding': 'Finding',
+                'replacing': 'Replacing',
+                'selecting_all': 'Selecting all',
+                'deselecting_all': 'Deselecting all',
+                'inverting_selection': 'Inverting selection'
             },
             
             'en_GB': {
@@ -392,7 +674,289 @@ class LocalizationManager:
                 'processing': 'Traitement...',
                 'completed': 'Terminé',
                 'failed': 'Échoué',
-                'cancelled': 'Annulé'
+                'cancelled': 'Annulé',
+                
+                # Device menu items
+                'device_info': 'Informations sur l\'appareil',
+                'adb_shell': 'Shell ADB',
+                'file_explorer': 'Explorateur de fichiers',
+                'take_screenshot': 'Prendre une capture d\'écran',
+                'recent_apps': 'Applications récentes',
+                'change_device_language': 'Changer la langue de l\'appareil',
+                'sync_device_time': 'Synchroniser l\'heure de l\'appareil',
+                'install_firmware': 'Installer le firmware',
+                'rockbox_utility': 'Utilitaire Rockbox',
+                'sp_flash_tool': 'Outil SP Flash',
+                'restart_device': 'Redémarrer l\'appareil',
+                
+                # Help menu items
+                'reinstall_app': 'Réinstaller l\'application',
+                'update_app': 'Mettre à jour l\'application',
+                'run_older_version': 'Exécuter une version antérieure',
+                'become_patron': 'Devenir un mécène',
+                
+                # Debug menu items
+                'toggle_debug_output': 'Basculer la sortie de débogage',
+                'change_update_branch': 'Changer la branche de mise à jour...',
+                'show_current_branch': 'Afficher la branche actuelle',
+                'run_updater': 'Exécuter le programme de mise à jour',
+                
+                # App actions
+                'restart_rockbox': 'Redémarrer Rockbox',
+                'app_info': 'Informations sur l\'application',
+                
+                # Dialog messages
+                'confirm_operation': 'Confirmer l\'opération',
+                'operation_confirmation': 'Êtes-vous sûr de vouloir effectuer cette opération ?',
+                'device_not_connected_warning': 'L\'appareil n\'est pas connecté. Veuillez connecter un appareil d\'abord.',
+                'no_device_found': 'Aucun appareil trouvé. Veuillez vous assurer que votre appareil est connecté et que le débogage USB est activé.',
+                'connection_failed': 'Échec de la connexion. Veuillez vérifier la connexion de votre appareil.',
+                'operation_in_progress': 'Opération en cours. Veuillez patienter...',
+                'operation_completed': 'Opération terminée avec succès.',
+                'operation_failed_with_error': 'Opération échouée : {error}',
+                
+                # File operations
+                'select_file': 'Sélectionner un fichier',
+                'select_folder': 'Sélectionner un dossier',
+                'file_selected': 'Fichier sélectionné : {filename}',
+                'folder_selected': 'Dossier sélectionné : {foldername}',
+                'no_file_selected': 'Aucun fichier sélectionné',
+                'file_not_found_error': 'Fichier non trouvé : {filename}',
+                'file_access_error': 'Impossible d\'accéder au fichier : {filename}',
+                
+                # Installation messages
+                'installing_app': 'Installation de l\'application...',
+                'app_installation_complete': 'Installation de l\'application terminée avec succès',
+                'app_installation_failed': 'Échec de l\'installation de l\'application',
+                'uninstalling_app': 'Désinstallation de l\'application...',
+                'app_uninstallation_complete': 'Désinstallation de l\'application terminée avec succès',
+                'app_uninstallation_failed': 'Échec de la désinstallation de l\'application',
+                
+                # Screenshot messages
+                'taking_screenshot': 'Prise de capture d\'écran...',
+                'screenshot_saved': 'Capture d\'écran enregistrée avec succès',
+                'screenshot_failed': 'Échec de la prise de capture d\'écran',
+                
+                # Time sync messages
+                'syncing_device_time': 'Synchronisation de l\'heure de l\'appareil...',
+                'device_time_synced': 'Heure de l\'appareil synchronisée avec succès',
+                'device_time_sync_failed': 'Échec de la synchronisation de l\'heure de l\'appareil',
+                
+                # Firmware messages
+                'selecting_firmware': 'Sélection du firmware...',
+                'firmware_selected': 'Firmware sélectionné : {filename}',
+                'firmware_validation_failed': 'Échec de la validation du firmware',
+                'firmware_file_corrupted': 'Le fichier firmware semble être corrompu',
+                
+                # Update messages
+                'checking_for_updates': 'Vérification des mises à jour...',
+                'update_available_version': 'Mise à jour disponible : Version {version}',
+                'no_updates_available': 'Aucune mise à jour disponible. Vous utilisez la dernière version.',
+                'update_download_failed': 'Échec du téléchargement de la mise à jour',
+                'update_installation_failed': 'Échec de l\'installation de la mise à jour',
+                'update_installation_complete': 'Mise à jour installée avec succès. Veuillez redémarrer l\'application.',
+                
+                # Cache messages
+                'cache_initialization_failed': 'Échec de l\'initialisation du cache',
+                'cache_cleanup_failed': 'Échec du nettoyage du cache',
+                'cache_corrupted': 'Le cache semble être corrompu et sera reconstruit',
+                
+                # API messages
+                'api_rate_limit_exceeded': 'Limite de taux API dépassée. Veuillez attendre avant de réessayer.',
+                'api_authentication_failed': 'Échec de l\'authentification API',
+                'api_connection_failed': 'Échec de la connexion API',
+                'api_request_failed': 'Échec de la requête API',
+                
+                # Network messages
+                'network_connection_failed': 'Échec de la connexion réseau',
+                'network_timeout': 'Délai d\'attente réseau',
+                'network_unavailable': 'Le réseau est actuellement indisponible',
+                
+                # System messages
+                'system_error': 'Erreur système survenue',
+                'insufficient_permissions': 'Permissions insuffisantes pour effectuer cette opération',
+                'resource_unavailable': 'La ressource requise est indisponible',
+                'service_unavailable': 'Le service est actuellement indisponible',
+                
+                # Validation messages
+                'invalid_device_id': 'ID d\'appareil invalide',
+                'invalid_file_format': 'Format de fichier invalide',
+                'invalid_parameter': 'Paramètre invalide fourni',
+                'missing_required_field': 'Le champ requis est manquant',
+                
+                # Progress messages
+                'initializing': 'Initialisation...',
+                'loading_configuration': 'Chargement de la configuration...',
+                'connecting_to_device': 'Connexion à l\'appareil...',
+                'disconnecting_from_device': 'Déconnexion de l\'appareil...',
+                'refreshing_data': 'Actualisation des données...',
+                'saving_settings': 'Enregistrement des paramètres...',
+                'loading_settings': 'Chargement des paramètres...',
+                
+                # Warning messages
+                'warning_device_disconnect': 'Avertissement : L\'appareil peut se déconnecter pendant cette opération',
+                'warning_data_loss': 'Avertissement : Cette opération peut entraîner une perte de données',
+                'warning_unsaved_changes': 'Avertissement : Vous avez des modifications non enregistrées',
+                'warning_experimental_feature': 'Avertissement : Ceci est une fonctionnalité expérimentale',
+                
+                # Information messages
+                'info_device_connected': 'Appareil connecté avec succès',
+                'info_device_disconnected': 'Appareil déconnecté',
+                'info_operation_started': 'Opération démarrée',
+                'info_operation_completed': 'Opération terminée',
+                'info_settings_saved': 'Paramètres enregistrés avec succès',
+                'info_settings_loaded': 'Paramètres chargés avec succès',
+                
+                # Error details
+                'error_details': 'Détails de l\'erreur',
+                'error_code': 'Code d\'erreur',
+                'error_message': 'Message d\'erreur',
+                'error_stack_trace': 'Trace de la pile',
+                'error_time': 'Heure de l\'erreur',
+                'error_location': 'Emplacement de l\'erreur',
+                
+                # Common actions
+                'retry': 'Réessayer',
+                'ignore': 'Ignorer',
+                'continue': 'Continuer',
+                'skip': 'Passer',
+                'back': 'Retour',
+                'next': 'Suivant',
+                'finish': 'Terminer',
+                'abort': 'Abandonner',
+                'restart': 'Redémarrer',
+                'reset': 'Réinitialiser',
+                'clear': 'Effacer',
+                'refresh': 'Actualiser',
+                'reload': 'Recharger',
+                'restore': 'Restaurer',
+                'backup': 'Sauvegarde',
+                'export': 'Exporter',
+                'import': 'Importer',
+                'download': 'Télécharger',
+                'upload': 'Téléverser',
+                'copy': 'Copier',
+                'paste': 'Coller',
+                'cut': 'Couper',
+                'delete': 'Supprimer',
+                'rename': 'Renommer',
+                'move': 'Déplacer',
+                'create': 'Créer',
+                'edit': 'Modifier',
+                'view': 'Afficher',
+                'search': 'Rechercher',
+                'find': 'Trouver',
+                'replace': 'Remplacer',
+                'select_all': 'Tout sélectionner',
+                'deselect_all': 'Tout désélectionner',
+                'invert_selection': 'Inverser la sélection',
+                
+                # Time and date
+                'today': 'Aujourd\'hui',
+                'yesterday': 'Hier',
+                'tomorrow': 'Demain',
+                'this_week': 'Cette semaine',
+                'last_week': 'La semaine dernière',
+                'next_week': 'La semaine prochaine',
+                'this_month': 'Ce mois',
+                'last_month': 'Le mois dernier',
+                'next_month': 'Le mois prochain',
+                'this_year': 'Cette année',
+                'last_year': 'L\'année dernière',
+                'next_year': 'L\'année prochaine',
+                
+                # File sizes
+                'bytes': 'octets',
+                'kilobytes': 'Ko',
+                'megabytes': 'Mo',
+                'gigabytes': 'Go',
+                'terabytes': 'To',
+                
+                # Time units
+                'seconds': 'secondes',
+                'minutes': 'minutes',
+                'hours': 'heures',
+                'days': 'jours',
+                'weeks': 'semaines',
+                'months': 'mois',
+                'years': 'années',
+                
+                # Status indicators
+                'online': 'En ligne',
+                'offline': 'Hors ligne',
+                'connected': 'Connecté',
+                'disconnected': 'Déconnecté',
+                'enabled': 'Activé',
+                'disabled': 'Désactivé',
+                'active': 'Actif',
+                'inactive': 'Inactif',
+                'running': 'En cours d\'exécution',
+                'stopped': 'Arrêté',
+                'paused': 'En pause',
+                'resumed': 'Repris',
+                'starting': 'Démarrage',
+                'stopping': 'Arrêt',
+                'loading': 'Chargement',
+                'saving': 'Enregistrement',
+                'updating': 'Mise à jour',
+                'installing': 'Installation',
+                'uninstalling': 'Désinstallation',
+                'downloading': 'Téléchargement',
+                'uploading': 'Téléversement',
+                'copying': 'Copie',
+                'moving': 'Déplacement',
+                'deleting': 'Suppression',
+                'creating': 'Création',
+                'editing': 'Modification',
+                'searching': 'Recherche',
+                'scanning': 'Analyse',
+                'validating': 'Validation',
+                'checking': 'Vérification',
+                'testing': 'Test',
+                'configuring': 'Configuration',
+                'initializing': 'Initialisation',
+                'connecting': 'Connexion',
+                'disconnecting': 'Déconnexion',
+                'synchronizing': 'Synchronisation',
+                'backing_up': 'Sauvegarde',
+                'restoring': 'Restauration',
+                'exporting': 'Exportation',
+                'importing': 'Importation',
+                'compressing': 'Compression',
+                'decompressing': 'Décompression',
+                'encrypting': 'Chiffrement',
+                'decrypting': 'Déchiffrement',
+                'verifying': 'Vérification',
+                'repairing': 'Réparation',
+                'optimizing': 'Optimisation',
+                'cleaning': 'Nettoyage',
+                'rebuilding': 'Reconstruction',
+                'refreshing': 'Actualisation',
+                'reloading': 'Rechargement',
+                'restarting': 'Redémarrage',
+                'resetting': 'Réinitialisation',
+                'clearing': 'Effacement',
+                'restoring': 'Restauration',
+                'backing_up': 'Sauvegarde',
+                'exporting': 'Exportation',
+                'importing': 'Importation',
+                'downloading': 'Téléchargement',
+                'uploading': 'Téléversement',
+                'copying': 'Copie',
+                'pasting': 'Collage',
+                'cutting': 'Découpage',
+                'deleting': 'Suppression',
+                'renaming': 'Renommage',
+                'moving': 'Déplacement',
+                'creating': 'Création',
+                'editing': 'Modification',
+                'viewing': 'Affichage',
+                'searching': 'Recherche',
+                'finding': 'Recherche',
+                'replacing': 'Remplacement',
+                'selecting_all': 'Sélection de tout',
+                'deselecting_all': 'Désélection de tout',
+                'inverting_selection': 'Inversion de la sélection'
             },
             
             'es_ES': {
@@ -752,17 +1316,21 @@ class LocalizationManager:
             return key
     
     def get_supported_languages(self) -> Dict[str, str]:
-        """Get list of supported languages with their display names"""
-        return {
-            'en_US': self.get_text('language_english_us'),
-            'en_GB': self.get_text('language_english_uk'),
-            'en_INT': self.get_text('language_english_international'),
-            'fr_FR': self.get_text('language_french'),
-            'es_ES': self.get_text('language_spanish'),
-            'zh_CN': self.get_text('language_chinese'),
-            'ru_RU': self.get_text('language_russian'),
-            'ja_JP': self.get_text('language_japanese')
+        """Get list of supported languages with their display names in native language"""
+        # Return native language names to help users navigate back to their language
+        languages = {
+            'en_US': 'English',
+            'en_GB': 'English',
+            'en_INT': 'English',
+            'fr_FR': 'Français',
+            'es_ES': 'Español',
+            'zh_CN': '中文',
+            'ru_RU': 'Русский',
+            'ja_JP': '日本語'
         }
+        # Add current language indicator
+        languages['current'] = self.current_language
+        return languages
     
     def get_current_language(self) -> str:
         """Get current language code"""

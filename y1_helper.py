@@ -4956,22 +4956,22 @@ class Y1HelperApp(tk.Tk):
         self.device_menu = device_menu
         
         # Add standard device menu items
-        self.device_menu.add_command(label="Device Info", command=self.show_device_info)
-        self.device_menu.add_command(label="ADB Shell", command=self.open_adb_shell)
+        self.device_menu.add_command(label=get_text('device_info'), command=self.show_device_info)
+        self.device_menu.add_command(label=get_text('adb_shell'), command=self.open_adb_shell)
         # File Explorer is hidden from menu but accessible via Ctrl+F
-        # self.device_menu.add_command(label="File Explorer", command=self.open_file_explorer)
-        self.device_menu.add_command(label="Take Screenshot", command=self.take_screenshot)
-        self.device_menu.add_command(label="Recent Apps", command=self.show_recent_apps)
-        self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
-        self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
+        # self.device_menu.add_command(label=get_text('file_explorer'), command=self.open_file_explorer)
+        self.device_menu.add_command(label=get_text('take_screenshot'), command=self.take_screenshot)
+        self.device_menu.add_command(label=get_text('recent_apps'), command=self.show_recent_apps)
+        self.device_menu.add_command(label=get_text('change_device_language'), command=self.change_device_language)
+        self.device_menu.add_command(label=get_text('sync_device_time'), command=self.sync_device_time)
         self.device_menu.add_separator()
-        self.device_menu.add_command(label="Install Firmware", command=self.install_firmware)
-        # self.device_menu.add_command(label="Repair Device", command=self.repair_device)  # Removed
+        self.device_menu.add_command(label=get_text('install_firmware'), command=self.install_firmware)
+        # self.device_menu.add_command(label=get_text('repair_device'), command=self.repair_device)  # Removed
         self.device_menu.add_separator()
-        self.device_menu.add_command(label="Rockbox Utility", command=self.launch_rockbox_utility)
-        self.device_menu.add_command(label="SP Flash Tool", command=self.launch_sp_flash_tool)
+        self.device_menu.add_command(label=get_text('rockbox_utility'), command=self.launch_rockbox_utility)
+        self.device_menu.add_command(label=get_text('sp_flash_tool'), command=self.launch_sp_flash_tool)
         self.device_menu.add_separator()
-        self.device_menu.add_command(label="Restart Device", command=self.restart_device)
+        self.device_menu.add_command(label=get_text('restart_device'), command=self.restart_device)
         
         self.apps_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label=get_text('menu_apps'), menu=self.apps_menu)
@@ -4987,24 +4987,24 @@ class Y1HelperApp(tk.Tk):
         
         # Debug menu (hidden by default, shown with Ctrl+D)
         self.debug_menu = Menu(menubar, tearoff=0)
-        self.debug_menu.add_command(label="Toggle Debug Output", command=toggle_debug_output)
+        self.debug_menu.add_command(label=get_text('toggle_debug_output'), command=toggle_debug_output)
         self.debug_menu.add_separator()
-        self.debug_menu.add_command(label="Change Update Branch...", command=self.change_update_branch)
-        self.debug_menu.add_command(label="Show Current Branch", command=self.show_current_branch)
+        self.debug_menu.add_command(label=get_text('change_update_branch'), command=self.change_update_branch)
+        self.debug_menu.add_command(label=get_text('show_current_branch'), command=self.show_current_branch)
         self.debug_menu.add_separator()
-        self.debug_menu.add_command(label="Run Updater", command=self.run_updater)
+        self.debug_menu.add_command(label=get_text('run_updater'), command=self.run_updater)
         
         help_menu = Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Reinstall App", command=self.menu_reinstall_app)
-        help_menu.add_command(label="Update App", command=self.menu_update_app)
+        help_menu.add_command(label=get_text('reinstall_app'), command=self.menu_reinstall_app)
+        help_menu.add_command(label=get_text('update_app'), command=self.menu_update_app)
         help_menu.add_separator()
-        help_menu.add_command(label="Run Older Version", command=self.launch_old_version)
+        help_menu.add_command(label=get_text('run_older_version'), command=self.launch_old_version)
         help_menu.add_separator()
         help_menu.add_command(label="r/innioasis", command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
         help_menu.add_command(label="Project Gallagher Discord", command=lambda: webbrowser.open_new_tab("https://discord.gg/nAeFsqDB"))
         help_menu.add_separator()
-        help_menu.add_command(label="Become a Patron", command=lambda: webbrowser.open_new_tab("https://www.patreon.com/c/TeamSlide"))
-        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label=get_text('become_patron'), command=lambda: webbrowser.open_new_tab("https://www.patreon.com/c/TeamSlide"))
+        menubar.add_cascade(label=get_text('menu_help'), menu=help_menu)
         self.help_menu = help_menu  # Store reference for theme application
         
         # Store reference to help menu for dynamic label updates
@@ -5033,11 +5033,12 @@ class Y1HelperApp(tk.Tk):
             
             # Get supported languages
             supported_languages = get_supported_languages()
+            current_language = get_supported_languages().get('current', 'en_US')
             
             # Add language options
             for lang_code, lang_name in supported_languages.items():
                 # Add checkmark for current language
-                checkmark = "✓ " if lang_code == get_supported_languages().get('current', 'en_US') else ""
+                checkmark = "✓ " if lang_code == current_language else ""
                 self.language_menu.add_command(
                     label=f"{checkmark}{lang_name}",
                     command=lambda code=lang_code: self._change_language(code)
@@ -5060,8 +5061,11 @@ class Y1HelperApp(tk.Tk):
             if set_language(language_code):
                 debug_print(f"Language changed to: {language_code}")
                 
-                # Update all UI elements with new language
+                # Update all UI elements with new language immediately
                 self._update_ui_language()
+                
+                # Refresh the language menu to show current selection
+                self._populate_language_menu()
                 
                 # Show confirmation message
                 messagebox.showinfo(
@@ -5094,11 +5098,77 @@ class Y1HelperApp(tk.Tk):
             # Update status messages
             self._update_status_messages()
             
+            # Update device menu items
+            self._update_device_menu()
+            
+            # Update help menu items
+            self._update_help_menu()
+            
             # Force refresh of apps menu
             self.refresh_apps()
             
+            # Update any open dialogs or windows
+            self._update_open_dialogs()
+            
         except Exception as e:
             debug_print(f"Error updating UI language: {e}")
+    
+    def _update_device_menu(self):
+        """Update device menu items with current language"""
+        try:
+            if hasattr(self, 'device_menu'):
+                # Update device menu items
+                menu_items = [
+                    (0, get_text('device_info')),
+                    (1, get_text('adb_shell')),
+                    (3, get_text('take_screenshot')),
+                    (4, get_text('recent_apps')),
+                    (5, get_text('change_device_language')),
+                    (6, get_text('sync_device_time')),
+                    (8, get_text('install_firmware')),
+                    (10, get_text('rockbox_utility')),
+                    (11, get_text('sp_flash_tool')),
+                    (13, get_text('restart_device'))
+                ]
+                
+                for index, text in menu_items:
+                    try:
+                        self.device_menu.entryconfigure(index, label=text)
+                    except Exception as e:
+                        debug_print(f"Error updating device menu item {index}: {e}")
+                        
+        except Exception as e:
+            debug_print(f"Error updating device menu: {e}")
+    
+    def _update_help_menu(self):
+        """Update help menu items with current language"""
+        try:
+            if hasattr(self, 'help_menu'):
+                # Update help menu items
+                menu_items = [
+                    (0, get_text('reinstall_app')),
+                    (1, get_text('update_app')),
+                    (3, get_text('run_older_version'))
+                ]
+                
+                for index, text in menu_items:
+                    try:
+                        self.help_menu.entryconfigure(index, label=text)
+                    except Exception as e:
+                        debug_print(f"Error updating help menu item {index}: {e}")
+                        
+        except Exception as e:
+            debug_print(f"Error updating help menu: {e}")
+    
+    def _update_open_dialogs(self):
+        """Update any open dialogs with current language"""
+        try:
+            # This would update any open dialogs, but for now we'll just
+            # force a refresh of the main window
+            self.update()
+            
+        except Exception as e:
+            debug_print(f"Error updating open dialogs: {e}")
     
     def _update_menu_labels(self):
         """Update menu labels with current language"""
@@ -5342,7 +5412,7 @@ class Y1HelperApp(tk.Tk):
                             # Add restart option for Rockbox
                             if app == "org.rockbox":
                                 app_menu.add_separator()
-                                app_menu.add_command(label="Restart Rockbox", command=self.restart_rockbox)
+                                app_menu.add_command(label=get_text('restart_rockbox'), command=self.restart_rockbox)
                             
                             user_apps_menu.add_cascade(label=app, menu=app_menu)
                             
