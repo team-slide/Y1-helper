@@ -140,7 +140,7 @@ def toggle_debug_mode():
 class Y1HelperApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        terminal_print("Starting Y1 Helper v0.8.0...")
+        terminal_print("Starting Y1 Helper v0.8.1...")
         terminal_print("Setting up directories and initializing...")
         debug_print("Initializing Y1HelperApp")
         
