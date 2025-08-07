@@ -2,7 +2,7 @@ RequestExecutionLevel admin
 
 !define APPNAME "Y1 Helper"
 !define COMPANYNAME "Y1"
-!define VERSION "0.9.0"
+!define VERSION "0.9.1"
 
 ; Set install directory to %LOCALAPPDATA%\Y1 Helper
 InstallDir "$LOCALAPPDATA\${APPNAME}"
