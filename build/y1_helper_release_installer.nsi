@@ -169,6 +169,31 @@ Function DownloadFromGitHub
         ${EndIf}
     ${EndIf}
     
+    ; Download localization files
+    DetailPrint "Downloading localization.py from GitHub..."
+    nsExec::ExecToLog '"${CURL_EXE}" -k -L -o "$INSTDIR\localization.py" "https://raw.githubusercontent.com/team-slide/Y1-helper/refs/heads/master/localization.py"'
+    Pop $0
+    ${If} $0 == 0
+        DetailPrint "Successfully downloaded localization.py from GitHub"
+    ${Else}
+        DetailPrint "Failed to download localization.py from GitHub, using local fallback"
+        ${If} ${FileExists} "..\localization.py"
+            File "..\localization.py"
+        ${EndIf}
+    ${EndIf}
+    
+    DetailPrint "Downloading invite_url.txt from GitHub..."
+    nsExec::ExecToLog '"${CURL_EXE}" -k -L -o "$INSTDIR\invite_url.txt" "https://raw.githubusercontent.com/team-slide/Y1-helper/refs/heads/master/invite_url.txt"'
+    Pop $0
+    ${If} $0 == 0
+        DetailPrint "Successfully downloaded invite_url.txt from GitHub"
+    ${Else}
+        DetailPrint "Failed to download invite_url.txt from GitHub, using local fallback"
+        ${If} ${FileExists} "..\invite_url.txt"
+            File "..\invite_url.txt"
+        ${EndIf}
+    ${EndIf}
+    
     ; Always install local image files (not on GitHub)
     DetailPrint "Installing local image files..."
     File "..\icon.ico"
@@ -202,6 +227,12 @@ Function InstallLocalFiles
     ${EndIf}
     ${If} ${FileExists} "..\.gitignore"
         File "..\.gitignore"
+    ${EndIf}
+    ${If} ${FileExists} "..\localization.py"
+        File "..\localization.py"
+    ${EndIf}
+    ${If} ${FileExists} "..\invite_url.txt"
+        File "..\invite_url.txt"
     ${EndIf}
 FunctionEnd
 
