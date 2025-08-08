@@ -54,7 +54,7 @@ and this is great for anyone that wants to live life on the wild side with Proje
 
 If after clicking Device > Install Firmware >Install Project Gallagher Core to setup Rockbox on your Y1 you find there's an issue, please use the Rockbox Feedback Thread pinned on the subreddit or report an issue at [github.com/rockbox-y1/rockbox](http://github.com/rockbox-y1/rockbox)
 
-# What something breaks?
+# What if something breaks?
 
 ![img](c7fedpv4c3gf1 "You can always install the latest software on your Y1 and make it work just like it originally did.")
 
