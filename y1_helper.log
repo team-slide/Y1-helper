@@ -223,3 +223,351 @@
 [13:28:39] App type analysis - Y1 Launcher: False, Rockbox: True, Other Y1: False, System: False
 [13:28:48] Detecting app type for: org.rockbox
 [13:28:48] App type analysis - Y1 Launcher: False, Rockbox: True, Other Y1: False, System: False
+[08:35:53] Starting Y1 Helper v0.8.1...
+[08:35:53] Setting up directories and initializing...
+[08:35:53] Initializing cache system...
+[10:15:17] Starting Y1 Helper v0.8.1...
+[10:15:17] Setting up directories and initializing...
+[10:15:17] Initializing cache system...
+[10:15:21] Detecting app type for: com.limelight.root
+[10:15:21] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[12:34:58] Starting Y1 Helper v0.8.1...
+[12:34:58] Setting up directories and initializing...
+[12:34:58] Initializing cache system...
+[12:35:56] Launching firmware installer...
+[12:35:56] Using cached firmware manifest for immediate response
+[12:35:59] Launching firmware installer...
+[12:35:59] Using cached firmware manifest for immediate response
+[12:36:01] Launching firmware installer...
+[12:36:01] Using cached firmware manifest for immediate response
+[12:36:04] Starting firmware download and flash process...
+[12:36:04] Clearing ROM directory for fresh firmware...
+[12:36:35] Starting enhanced flash process with real-time output relay...
+[13:02:37] Starting Y1 Helper v0.8.1...
+[13:02:37] Setting up directories and initializing...
+[13:02:37] Initializing cache system...
+[13:03:21] Launching firmware installer...
+[13:03:21] Using cached firmware manifest for immediate response
+[13:03:28] Starting firmware download and flash process...
+[13:03:28] Clearing ROM directory for fresh firmware...
+[13:04:04] Starting enhanced flash process with real-time output relay...
+[17:18:50] Starting Y1 Helper v0.8.1...
+[17:18:50] Setting up directories and initializing...
+[17:18:50] Initializing cache system...
+[17:18:57] Detecting app type for: com.innioasis.y1
+[17:18:57] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:05] Detecting app type for: com.innioasis.y1
+[17:19:05] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:11] Detecting app type for: com.innioasis.y1
+[17:19:11] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:17] Detecting app type for: com.innioasis.y1
+[17:19:17] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:24] Detecting app type for: com.innioasis.y1
+[17:19:24] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:30] Detecting app type for: com.innioasis.y1
+[17:19:30] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:37] Detecting app type for: com.innioasis.y1
+[17:19:37] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:43] Detecting app type for: com.innioasis.y1
+[17:19:43] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:49] Detecting app type for: com.innioasis.y1
+[17:19:49] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:19:56] Detecting app type for: com.innioasis.y1
+[17:19:56] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:20:02] Detecting app type for: com.innioasis.y1
+[17:20:02] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:20:08] Detecting app type for: com.innioasis.y1
+[17:20:08] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:20:14] Detecting app type for: com.innioasis.y1
+[17:20:14] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:20:21] Detecting app type for: com.innioasis.y1
+[17:20:21] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:20:28] Detecting app type for: com.innioasis.y1
+[17:20:28] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:20:36] Detecting app type for: com.innioasis.y1
+[17:20:36] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:20:43] Detecting app type for: org.rockbox
+[17:20:43] App type analysis - Y1 Launcher: False, Rockbox: True, Other Y1: False, System: False
+[17:20:49] Detecting app type for: org.rockbox
+[17:20:49] App type analysis - Y1 Launcher: False, Rockbox: True, Other Y1: False, System: False
+[17:20:56] Detecting app type for: com.innioasis.y1
+[17:20:56] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:02] Detecting app type for: com.innioasis.y1
+[17:21:02] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:08] Detecting app type for: com.innioasis.y1
+[17:21:08] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:14] Detecting app type for: com.innioasis.y1
+[17:21:14] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:21] Detecting app type for: com.innioasis.y1
+[17:21:21] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:27] Detecting app type for: com.innioasis.y1
+[17:21:27] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:33] Detecting app type for: com.innioasis.y1
+[17:21:33] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:40] Detecting app type for: com.innioasis.y1
+[17:21:40] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:46] Detecting app type for: com.innioasis.y1
+[17:21:46] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:52] Detecting app type for: com.innioasis.y1
+[17:21:52] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:21:58] Detecting app type for: com.innioasis.y1
+[17:21:58] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:05] Detecting app type for: com.innioasis.y1
+[17:22:05] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:11] Detecting app type for: com.innioasis.y1
+[17:22:11] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:17] Detecting app type for: com.innioasis.y1
+[17:22:17] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:23] Detecting app type for: com.innioasis.y1
+[17:22:23] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:30] Detecting app type for: com.innioasis.y1
+[17:22:30] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:36] Detecting app type for: com.innioasis.y1
+[17:22:36] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:42] Detecting app type for: com.innioasis.y1
+[17:22:42] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:48] Detecting app type for: com.innioasis.y1
+[17:22:48] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:22:55] Detecting app type for: com.innioasis.y1
+[17:22:55] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:01] Detecting app type for: com.innioasis.y1
+[17:23:01] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:07] Detecting app type for: com.innioasis.y1
+[17:23:07] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:14] Detecting app type for: com.innioasis.y1
+[17:23:14] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:20] Detecting app type for: com.innioasis.y1
+[17:23:20] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:26] Detecting app type for: com.innioasis.y1
+[17:23:26] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:32] Detecting app type for: com.innioasis.y1
+[17:23:32] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:39] Detecting app type for: com.innioasis.y1
+[17:23:39] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:45] Detecting app type for: com.innioasis.y1
+[17:23:45] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:51] Detecting app type for: com.innioasis.y1
+[17:23:51] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:23:58] Detecting app type for: com.innioasis.y1
+[17:23:58] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:04] Detecting app type for: com.innioasis.y1
+[17:24:04] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:10] Detecting app type for: com.innioasis.y1
+[17:24:10] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:17] Detecting app type for: com.innioasis.y1
+[17:24:17] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:23] Detecting app type for: com.innioasis.y1
+[17:24:23] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:29] Detecting app type for: com.innioasis.y1
+[17:24:29] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:35] Detecting app type for: com.innioasis.y1
+[17:24:35] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:42] Detecting app type for: com.innioasis.y1
+[17:24:42] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:48] Detecting app type for: com.innioasis.y1
+[17:24:48] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:24:54] Detecting app type for: com.innioasis.y1
+[17:24:54] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:25:00] Detecting app type for: com.innioasis.y1
+[17:25:00] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:25:07] Detecting app type for: com.innioasis.y1
+[17:25:07] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:25:14] Detecting app type for: com.innioasis.y1
+[17:25:14] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:25:21] Detecting app type for: android
+[17:25:21] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:25:28] Detecting app type for: android
+[17:25:28] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:25:34] Detecting app type for: android
+[17:25:34] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:25:40] Detecting app type for: com.innioasis.y1
+[17:25:40] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:25:46] Detecting app type for: com.innioasis.y1
+[17:25:46] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:25:52] Detecting app type for: com.innioasis.y1
+[17:25:52] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:25:59] Detecting app type for: com.innioasis.y1
+[17:25:59] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:05] Detecting app type for: com.innioasis.y1
+[17:26:05] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:11] Detecting app type for: com.innioasis.y1
+[17:26:11] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:18] Detecting app type for: com.innioasis.y1
+[17:26:18] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:24] Detecting app type for: com.innioasis.y1
+[17:26:24] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:30] Detecting app type for: com.innioasis.y1
+[17:26:30] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:37] Detecting app type for: com.innioasis.y1
+[17:26:37] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:43] Detecting app type for: com.innioasis.y1
+[17:26:43] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:49] Detecting app type for: com.innioasis.y1
+[17:26:49] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:26:56] Detecting app type for: com.innioasis.y1
+[17:26:56] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:02] Detecting app type for: com.innioasis.y1
+[17:27:02] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:08] Detecting app type for: com.innioasis.y1
+[17:27:08] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:14] Detecting app type for: com.innioasis.y1
+[17:27:14] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:21] Detecting app type for: com.innioasis.y1
+[17:27:21] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:27] Detecting app type for: com.innioasis.y1
+[17:27:27] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:33] Detecting app type for: android
+[17:27:33] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:27:39] Detecting app type for: com.innioasis.y1
+[17:27:39] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:46] Detecting app type for: com.innioasis.y1
+[17:27:46] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:52] Detecting app type for: com.innioasis.y1
+[17:27:52] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:27:58] Detecting app type for: com.innioasis.y1
+[17:27:58] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:04] Detecting app type for: com.innioasis.y1
+[17:28:04] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:11] Detecting app type for: com.innioasis.y1
+[17:28:11] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:17] Detecting app type for: com.innioasis.y1
+[17:28:17] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:24] Detecting app type for: com.innioasis.y1
+[17:28:24] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:30] Detecting app type for: com.innioasis.y1
+[17:28:30] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:36] Detecting app type for: com.innioasis.y1
+[17:28:36] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:42] Detecting app type for: com.innioasis.y1
+[17:28:42] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:48] Detecting app type for: com.innioasis.y1
+[17:28:48] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:28:55] Detecting app type for: com.innioasis.y1
+[17:28:55] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:02] Detecting app type for: com.innioasis.y1
+[17:29:02] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:08] Detecting app type for: com.innioasis.y1
+[17:29:08] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:15] Detecting app type for: com.innioasis.y1
+[17:29:15] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:21] Detecting app type for: com.innioasis.y1
+[17:29:21] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:27] Detecting app type for: com.innioasis.y1
+[17:29:27] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:33] Detecting app type for: com.innioasis.y1
+[17:29:33] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:40] Detecting app type for: com.innioasis.y1
+[17:29:40] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:29:46] Detecting app type for: android
+[17:29:46] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:29:53] Detecting app type for: com.innioasis.y1
+[17:29:53] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:30:00] Detecting app type for: com.innioasis.y1
+[17:30:00] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:30:06] Detecting app type for: android
+[17:30:06] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:30:12] Detecting app type for: android
+[17:30:12] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:30:18] Detecting app type for: android
+[17:30:18] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:30:24] Detecting app type for: android
+[17:30:24] App type analysis - Y1 Launcher: False, Rockbox: False, Other Y1: False, System: False
+[17:30:31] Detecting app type for: com.innioasis.y1
+[17:30:31] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:30:37] Detecting app type for: com.innioasis.y1
+[17:30:37] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:30:43] Detecting app type for: com.innioasis.y1
+[17:30:43] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:30:49] Detecting app type for: com.innioasis.y1
+[17:30:49] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:30:56] Detecting app type for: com.innioasis.y1
+[17:30:56] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:02] Detecting app type for: com.innioasis.y1
+[17:31:02] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:08] Detecting app type for: com.innioasis.y1
+[17:31:08] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:14] Detecting app type for: com.innioasis.y1
+[17:31:14] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:21] Detecting app type for: com.innioasis.y1
+[17:31:21] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:27] Detecting app type for: com.innioasis.y1
+[17:31:27] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:33] Detecting app type for: com.innioasis.y1
+[17:31:33] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:40] Detecting app type for: com.innioasis.y1
+[17:31:40] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[17:31:46] Detecting app type for: com.innioasis.y1
+[17:31:46] App type analysis - Y1 Launcher: True, Rockbox: False, Other Y1: False, System: False
+[23:58:09] Starting Y1 Helper v0.8.1...
+[23:58:09] Setting up directories and initializing...
+[23:58:09] Initializing cache system...
+[23:58:38] Starting Y1 Helper v0.8.1...
+[23:58:38] Setting up directories and initializing...
+[23:58:38] Initializing cache system...
+[00:14:21] Starting Y1 Helper v0.8.1...
+[00:14:21] Setting up directories and initializing...
+[00:14:21] Initializing cache system...
+[00:30:35] Starting Y1 Helper v0.8.1...
+[00:30:35] Setting up directories and initializing...
+[00:30:35] Initializing cache system...
+[00:32:25] Starting Y1 Helper v0.8.1...
+[00:32:25] Setting up directories and initializing...
+[00:32:25] Initializing cache system...
+[00:32:38] Starting Y1 Helper v0.8.1...
+[00:32:38] Setting up directories and initializing...
+[00:32:38] Initializing cache system...
+[00:35:36] Starting Y1 Helper v0.8.1...
+[00:35:36] Setting up directories and initializing...
+[00:35:36] Initializing cache system...
+[00:35:47] Starting Y1 Helper v0.8.1...
+[00:35:47] Setting up directories and initializing...
+[00:35:47] Initializing cache system...
+[00:38:00] Starting Y1 Helper v0.8.1...
+[00:38:00] Setting up directories and initializing...
+[00:38:00] Initializing cache system...
+[00:38:29] Starting Y1 Helper v0.8.1...
+[00:38:29] Setting up directories and initializing...
+[00:38:29] Initializing cache system...
+[00:40:57] Starting Y1 Helper v0.8.1...
+[00:40:57] Setting up directories and initializing...
+[00:40:57] Initializing cache system...
+[03:58:20] Starting Y1 Helper v0.8.1...
+[03:58:20] Setting up directories and initializing...
+[03:58:20] Initializing cache system...
+[04:00:01] Launching firmware installer...
+[04:00:01] Using cached firmware manifest for immediate response
+[04:23:23] Starting Y1 Helper v0.8.1...
+[04:23:23] Setting up directories and initializing...
+[04:23:23] Initializing cache system...
+[04:27:26] Starting Y1 Helper v0.8.1...
+[04:27:26] Setting up directories and initializing...
+[04:27:26] Initializing cache system...
+[04:33:57] Starting Y1 Helper v0.8.1...
+[04:33:57] Setting up directories and initializing...
+[04:33:57] Initializing cache system...
+[04:34:43] Starting Y1 Helper v0.8.1...
+[04:34:43] Setting up directories and initializing...
+[04:34:43] Initializing cache system...
+[04:37:34] Starting Y1 Helper v0.8.1...
+[04:37:34] Setting up directories and initializing...
+[04:37:35] Initializing cache system...
+[04:37:37] Starting Y1 Helper v0.8.1...
+[04:37:37] Setting up directories and initializing...
+[04:37:37] Initializing cache system...
+[04:37:40] Starting Y1 Helper v0.8.1...
+[04:37:40] Setting up directories and initializing...
+[04:37:40] Initializing cache system...
+[04:38:10] Starting Y1 Helper v0.8.1...
+[04:38:10] Setting up directories and initializing...
+[04:38:11] Initializing cache system...
+[04:39:56] Launching firmware installer...
+[04:39:56] Using cached firmware manifest for immediate response
+[04:40:06] Starting firmware download and flash process...
+[04:40:06] Clearing ROM directory for fresh firmware...
+[04:40:33] Starting enhanced flash process with real-time output relay...
+[04:40:54] Starting Y1 Helper v0.8.1...
+[04:40:54] Setting up directories and initializing...
+[04:40:54] Initializing cache system...
+[04:43:02] Starting Y1 Helper v0.8.1...
+[04:43:02] Setting up directories and initializing...
+[04:43:03] Initializing cache system...

@@ -30,37 +30,11 @@ import traceback
 
 # Import localization system
 try:
-    from localization import get_text as loc_get_text, set_language, get_supported_languages
-
-    def get_text(key, **kwargs):
-        """Get localized text with comprehensive fallback to English"""
-        try:
-            result = loc_get_text(key, **kwargs)
-            # If localization returns the key itself, use our hardwired fallback
-            if result == key and key in ENGLISH_FALLBACKS:
-                result = ENGLISH_FALLBACKS[key]
-            return result
-        except Exception as e:
-            debug_print(f"Localization error for key '{key}': {e}")
-            # Use hardwired fallback if available
-            if key in ENGLISH_FALLBACKS:
-                try:
-                    return ENGLISH_FALLBACKS[key].format(**kwargs)
-                except Exception:
-                    return ENGLISH_FALLBACKS[key]
-            # Return the key itself as final fallback
-            return key
+    from localization import get_text, set_language, get_supported_languages
 except ImportError:
     # Fallback if localization module is not available
     def get_text(key, **kwargs):
-        """Fallback get_text when localization module is not available"""
-        if key in ENGLISH_FALLBACKS:
-            try:
-                return ENGLISH_FALLBACKS[key].format(**kwargs)
-            except Exception:
-                return ENGLISH_FALLBACKS[key]
         return key.format(**kwargs) if kwargs else key
-    
     def set_language(lang):
         return True
     def get_supported_languages():
@@ -93,229 +67,6 @@ INSTALLER_FALLBACK_URL = "https://github.com/team-slide/y1-helper/releases/lates
 PATCH_FALLBACK_URL = "https://github.com/team-slide/y1-helper/releases/latest/download/patch.exe"
 
 # This comment proves the patcher worked for Ryan
-
-# Hardwired English fallback strings for critical user-facing text
-ENGLISH_FALLBACKS = {
-    # Window titles
-    'title': 'Y1 Helper v{version} - created by Ryan Specter - u/respectyarn',
-    'title_rate_limited': 'Y1 Helper v{version} - Installer Features Temporarily Unavailable',
-    
-    # Status messages
-    'device_connected': 'Device Connected',
-    'device_disconnected': 'Device Disconnected',
-    'ready': 'Ready',
-    'busy': 'Busy',
-    'processing': 'Processing...',
-    'completed': 'Completed',
-    'failed': 'Failed',
-    'error_occurred': 'An error occurred',
-    'operation_successful': 'Operation successful',
-    
-    # Menu items
-    'menu_device': 'Device',
-    'menu_apps': 'Apps',
-    'menu_language': 'Language',
-    'menu_help': 'Help',
-    
-    # Device menu
-    'device_info': 'Device Info',
-    'adb_shell': 'ADB Shell',
-    'take_screenshot': 'Take Screenshot',
-    'recent_apps': 'Recent Apps',
-    'change_device_language': 'Change Device Language',
-    'sync_device_time': 'Sync Device Time',
-    'install_firmware': 'Install Firmware',
-    'rockbox_utility': 'Rockbox Utility',
-    'sp_flash_tool': 'SP Flash Tool',
-    'restart_device': 'Restart Device',
-    
-    # Apps menu
-    'browse_apks': 'Browse APKs',
-    'install_apps': 'Install Apps',
-    'refresh': 'Refresh',
-    
-    # Help menu
-    'reinstall_app': 'Reinstall App',
-    'update_app': 'Update App',
-    'run_older_version': 'Run Older Version',
-    'r_innioasis': 'r/innioasis',
-    'innioasis_discord': 'Innioasis / Timmkoo Discord',
-    'become_patron': 'Become a Patron',
-    
-    # UI elements
-    'mouse_input_panel': 'Mouse Input Panel',
-    'controls': 'Controls',
-    'select_app_to_install': 'Select an app to install:',
-    'no_device_connected': 'No device connected',
-    'device_not_connected': 'Device not connected',
-    'connection_error': 'Connection error',
-    'timeout_error': 'Timeout error',
-    'permission_error': 'Permission denied',
-    'file_not_found': 'File not found',
-    'invalid_input': 'Invalid input',
-    
-    # Firmware related
-    'firmware_installation': 'Firmware Installation',
-    'select_firmware': 'Select Firmware',
-    'flashing_firmware': 'Flashing firmware...',
-    'firmware_flash_complete': 'Firmware flash completed',
-    'firmware_flash_failed': 'Firmware flash failed',
-    
-    # Process management
-    'terminating_processes': 'Terminating ADB and Python processes...',
-    'processes_terminated': 'Processes terminated successfully',
-    'save_work_warning': 'Please save your work before continuing',
-    
-    # Update related
-    'update_available': 'Update available',
-    'no_updates': 'No updates available',
-    
-    # Generic states
-    'idle': 'Idle',
-    'cancelled': 'Cancelled',
-    'loading': 'Loading...',
-    'waiting': 'Waiting...',
-    'connecting': 'Connecting...',
-    'disconnected': 'Disconnected',
-    'connected': 'Connected',
-    'searching': 'Searching...',
-    'downloading': 'Downloading...',
-    'installing': 'Installing...',
-    'uninstalling': 'Uninstalling...',
-    'starting': 'Starting...',
-    'stopping': 'Stopping...',
-    'restarting': 'Restarting...',
-    'shutting_down': 'Shutting down...',
-    'initializing': 'Initializing...',
-    'configuring': 'Configuring...',
-    'testing': 'Testing...',
-    'verifying': 'Verifying...',
-    'checking': 'Checking...',
-    'scanning': 'Scanning...',
-    'updating': 'Updating...',
-    'refreshing': 'Refreshing...',
-    'synchronizing': 'Synchronizing...',
-    'backing_up': 'Backing up...',
-    'restoring': 'Restoring...',
-    'repairing': 'Repairing...',
-    'optimizing': 'Optimizing...',
-    'cleaning': 'Cleaning...',
-    'organizing': 'Organizing...',
-    'preparing': 'Preparing...',
-    'finalizing': 'Finalizing...',
-    'completing': 'Completing...',
-    'finishing': 'Finishing...',
-    'done': 'Done',
-    'success': 'Success',
-    'warning': 'Warning',
-    'info': 'Information',
-    'question': 'Question',
-    'confirm': 'Confirm',
-    'cancel': 'Cancel',
-    'ok': 'OK',
-    'yes': 'Yes',
-    'no': 'No',
-    'retry': 'Retry',
-    'ignore': 'Ignore',
-    'skip': 'Skip',
-    'continue': 'Continue',
-    'back': 'Back',
-    'next': 'Next',
-    'previous': 'Previous',
-    'close': 'Close',
-    'exit': 'Exit',
-    'quit': 'Quit',
-    'abort': 'Abort',
-    'stop': 'Stop',
-    'pause': 'Pause',
-    'resume': 'Resume',
-    'restart': 'Restart',
-    'reset': 'Reset',
-    'clear': 'Clear',
-    'delete': 'Delete',
-    'remove': 'Remove',
-    'add': 'Add',
-    'create': 'Create',
-    'new': 'New',
-    'open': 'Open',
-    'save': 'Save',
-    'save_as': 'Save As',
-    'load': 'Load',
-    'import': 'Import',
-    'export': 'Export',
-    'copy': 'Copy',
-    'paste': 'Paste',
-    'cut': 'Cut',
-    'undo': 'Undo',
-    'redo': 'Redo',
-    'select_all': 'Select All',
-    'find': 'Find',
-    'replace': 'Replace',
-    'search': 'Search',
-    'filter': 'Filter',
-    'sort': 'Sort',
-    'expand': 'Expand',
-    'collapse': 'Collapse',
-    'show': 'Show',
-    'hide': 'Hide',
-    'enable': 'Enable',
-    'disable': 'Disable',
-    'on': 'On',
-    'off': 'Off',
-    'enabled': 'Enabled',
-    'disabled': 'Disabled',
-    'active': 'Active',
-    'inactive': 'Inactive',
-    'visible': 'Visible',
-    'hidden': 'Hidden',
-    'locked': 'Locked',
-    'unlocked': 'Unlocked',
-    'secure': 'Secure',
-    'insecure': 'Insecure',
-    'public': 'Public',
-    'private': 'Private',
-    'local': 'Local',
-    'remote': 'Remote',
-    'online': 'Online',
-    'offline': 'Offline',
-    'available': 'Available',
-    'unavailable': 'Unavailable',
-    'supported': 'Supported',
-    'unsupported': 'Unsupported',
-    'compatible': 'Compatible',
-    'incompatible': 'Incompatible',
-    'valid': 'Valid',
-    'invalid': 'Invalid',
-    'correct': 'Correct',
-    'incorrect': 'Incorrect',
-    'true': 'True',
-    'false': 'False',
-    'unknown': 'Unknown',
-    'none': 'None',
-    'empty': 'Empty',
-    'full': 'Full',
-    'partial': 'Partial',
-    'complete': 'Complete',
-    'incomplete': 'Incomplete',
-    'not_ready': 'Not Ready',
-    'ready_to_install': 'Ready to Install',
-    'ready_to_update': 'Ready to Update',
-    'ready_to_restart': 'Ready to Restart',
-    'ready_to_shutdown': 'Ready to Shutdown',
-    'ready_to_connect': 'Ready to Connect',
-    'ready_to_disconnect': 'Ready to Disconnect',
-    'ready_to_sync': 'Ready to Sync',
-    'ready_to_backup': 'Ready to Backup',
-    'ready_to_restore': 'Ready to Restore',
-    'ready_to_repair': 'Ready to Repair',
-    'ready_to_optimize': 'Ready to Optimize',
-    'ready_to_clean': 'Ready to Clean',
-    'ready_to_organize': 'Ready to Organize',
-    'ready_to_prepare': 'Ready to Prepare',
-    'ready_to_finalize': 'Ready to Finalize',
-    'ready_to_complete': 'Ready to Complete',
-    'ready_to_finish': 'Ready to Finish'
-}
 
 def check_and_update_launcher():
     """Check for new_launcher.py and update launcher.py if found"""
@@ -468,7 +219,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.9.1"
+        self.version = "0.9.0"
         
         # Backup current y1_helper.py to .old directory at launch
         self.backup_current_version()
@@ -1173,7 +924,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.9.1"
+        self.version = "0.9.0"
         
         # Backup current y1_helper.py to .old directory at launch
         self.backup_current_version()

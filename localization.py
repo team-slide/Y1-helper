@@ -89,6 +89,20 @@ class LocalizationManager:
                 'connecting_device': 'Connecting to device...',
                 'device_not_found': 'Device not found',
                 
+                # Wireless ADB
+                'wireless_adb': 'Wireless ADB',
+                'enable_wireless_adb': 'Enable Wireless ADB',
+                'wireless_adb_enabled': 'Wireless ADB Enabled',
+                'wireless_adb_disabled': 'Wireless ADB Disabled',
+                'enter_device_ip': 'Enter Device IP Address',
+                'device_ip_prompt': 'Please enter the IP address of your device:',
+                'connecting_wireless': 'Connecting to device wirelessly...',
+                'wireless_connection_success': 'Wireless connection established successfully!',
+                'wireless_connection_failed': 'Failed to connect wirelessly. Please check the IP address and try again.',
+                'wireless_adb_port': 'Wireless ADB Port',
+                'wireless_adb_port_prompt': 'Enter the wireless ADB port (default: 5555):',
+                'wireless_adb_instructions': 'To enable wireless ADB:\n1. Connect your device via USB first\n2. Click "Enable Wireless ADB"\n3. Enter your device IP address\n4. Disconnect USB and use wirelessly',
+                
                 # Buttons and controls
                 'connect': 'Connect',
                 'disconnect': 'Disconnect',
