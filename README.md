@@ -1,4 +1,4 @@
-[**Y1 Helper 0.8.0**](https://github.com/team-slide/Y1-helper/releases/tag/0.8.0) **is now here with improved manual updating, a number of performance improvements, better handling of firmware and app downloads as well as the ability to revert to older versions if needed.**
+[**Y1 Helper 0.9.5**](https://github.com/team-slide/Y1-helper/releases/tag/0.9.5) **is now here for Intel/AMD Windows systems with improved manual updating, a number of performance improvements, better handling of firmware and app downloads as well as the ability to revert to older versions if needed.**
 
 If you had an older version that has stopped working you need to reinstall it manually, to bring its update mechanism up-to-date.
 
