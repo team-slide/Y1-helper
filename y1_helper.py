@@ -7483,17 +7483,29 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"Safe after failed for {widget}: {e}")
     
     def safe_dialog_update(self, dialog, method, *args, **kwargs):
-        """Safely update dialog widgets, checking if dialog and widget exist"""
+        """Safely update dialog widgets, checking if dialog and widget exist.
+        Supports dotted paths like 'status_label.config' when the dialog has
+        corresponding attributes set by show_firmware_progress_modal.
+        """
         try:
-            if dialog and dialog.winfo_exists():
-                if hasattr(dialog, method):
-                    getattr(dialog, method)(*args, **kwargs)
-                else:
-                    # Try to find widget by method name
-                    for widget in dialog.winfo_children():
-                        if hasattr(widget, method):
-                            getattr(widget, method)(*args, **kwargs)
-                            break
+            if not (dialog and dialog.winfo_exists()):
+                return
+            # Support dotted path e.g. 'status_label.config'
+            if "." in method:
+                target_name, target_method = method.split(".", 1)
+                target_obj = getattr(dialog, target_name, None)
+                if target_obj is not None and hasattr(target_obj, target_method):
+                    getattr(target_obj, target_method)(*args, **kwargs)
+                    return
+            # Direct attribute on dialog
+            if hasattr(dialog, method):
+                getattr(dialog, method)(*args, **kwargs)
+                return
+            # Search child widgets
+            for widget in dialog.winfo_children():
+                if hasattr(widget, method):
+                    getattr(widget, method)(*args, **kwargs)
+                    return
         except Exception as e:
             debug_print(f"Safe dialog update failed for {dialog}.{method}: {e}")
     
@@ -8229,6 +8241,11 @@ class Y1HelperApp(tk.Tk):
         ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.DISABLED)
         ok_button.pack(pady=(10, 5))
         
+        # Attach for dotted updates
+        dialog.status_label = status_label
+        dialog.progress_bar = progress_bar
+        dialog.text_widget = text_widget
+        
         return dialog, status_label, ok_button, progress_bar, text_widget
 
     def install_firmware(self, local_file=None):
@@ -8532,23 +8549,11 @@ class Y1HelperApp(tk.Tk):
             self.clear_rom_directory_for_firmware()
             
             os.makedirs(firmware_dir, exist_ok=True)
-            dialog = tk.Toplevel(self)
-            dialog.title("Firmware Flash Progress")
-            dialog.geometry("600x400")
-            dialog.transient(self)
-            dialog.grab_set()
-            dialog.resizable(False, False)
-            frame = ttk.Frame(dialog, padding="20")
-            frame.pack(fill=tk.BOTH, expand=True)
-            status_label = ttk.Label(frame, text="", font=("Segoe UI", 11), wraplength=560, justify=tk.CENTER)
-            status_label.pack(fill=tk.X, pady=(0, 5))
-            warn_label = ttk.Label(frame, text="Please make sure your Y1 is turned off and disconnected.", font=("Segoe UI", 9), foreground="#d9534f")
-            warn_label.pack(fill=tk.X, pady=(0, 10))
-            ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.DISABLED)
-            ok_button.pack(pady=(10, 5))
-            progress_bar = ttk.Progressbar(frame, mode="indeterminate")
-            progress_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
-            progress_bar.stop()  # Only start after download
+            dialog, status_label, ok_button, progress_bar, text_widget = self.show_firmware_progress_modal("Firmware Flash Progress")
+            status_label.config(text="Please make sure your Y1 is turned off and disconnected. When prompted 'Search usb', connect your Y1.")
+            ok_button.config(state=tk.DISABLED)
+            progress_bar.config(mode="indeterminate")
+            progress_bar.stop()
             
             def do_download_and_flash():
                 try:
@@ -8608,11 +8613,10 @@ class Y1HelperApp(tk.Tk):
                                 dialog.after(0, ok_button.config, {"state": "normal"})
                                 return
                             
-                            dialog.after(0, warn_label.pack_forget)
-                            dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
+                            dialog.after(0, status_label.config, {"text": "Search usb... Connect your turned-off Y1 now when prompted."})
                             time.sleep(1.0)
                             debug_print(f"Starting flash with rom directory: {firmware_dir}")
-                            self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar)
+                            self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar, text_widget)
                             return
                         
                         elif system_img_file:
@@ -8645,11 +8649,10 @@ class Y1HelperApp(tk.Tk):
                                 dialog.after(0, ok_button.config, {"state": "normal"})
                                 return
                             
-                            dialog.after(0, warn_label.pack_forget)
-                            dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
+                            dialog.after(0, status_label.config, {"text": "Search usb... Connect your turned-off Y1 now when prompted."})
                             time.sleep(1.0)
                             debug_print(f"Starting flash with rom directory: {firmware_dir}")
-                            self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar)
+                            self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar, text_widget)
                             return
                     
                     # Fallback to original method if no cached files or no suitable files found
@@ -8797,11 +8800,10 @@ class Y1HelperApp(tk.Tk):
                         dialog.after(0, ok_button.config, {"state": "normal"})
                         return
                     
-                    dialog.after(0, warn_label.pack_forget)
-                    dialog.after(0, status_label.config, {"text": "Please connect your device and wait a few minutes."})
+                    dialog.after(0, status_label.config, {"text": "Search usb... Connect your turned-off Y1 now when prompted."})
                     time.sleep(1.0)
                     debug_print(f"Starting flash with rom directory: {firmware_dir}")
-                    self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar)
+                    self._flash_with_modal(dialog, status_label, ok_button, firmware_dir, progress_bar, text_widget)
                     
                 except Exception as e:
                     debug_print(f"Exception in do_download_and_flash: {e}")
@@ -8866,6 +8868,22 @@ class Y1HelperApp(tk.Tk):
             def run_flash():
                 """Enhanced flash process with real-time output processing"""
                 debug_print("Starting enhanced flash_tool.exe subprocess...")
+                # Pause/kill ADB during flash to avoid interference
+                try:
+                    try:
+                        if hasattr(self, "run_adb_command"):
+                            self.run_adb_command("kill-server", timeout=3)
+                    except Exception as _e:
+                        debug_print(f"ADB kill-server error: {_e}")
+                    for _p in psutil.process_iter(["name"]):
+                        _n = (_p.info.get("name") or "").lower()
+                        if _n in ("adb.exe", "adb"):
+                            try:
+                                _p.terminate()
+                            except Exception:
+                                pass
+                except Exception as _outer_e:
+                    debug_print(f"ADB suppression failed: {_outer_e}")
                 
                 # State tracking variables
                 flash_done = False
@@ -8874,6 +8892,8 @@ class Y1HelperApp(tk.Tk):
                 error_seen = False
                 usb_port_seen = False
                 device_connected = False
+                stage = "WAITING_FOR_DEVICE"
+                progress_direct = False
                 
                 # Progress tracking
                 start_time = time.time()
@@ -8918,90 +8938,112 @@ class Y1HelperApp(tk.Tk):
                 
                 def process_output_line(line):
                     """Process a single line of flash tool output and update status"""
-                    nonlocal flash_done, all_done_seen, disconnect_seen, error_seen, usb_port_seen, device_connected
+                    nonlocal flash_done, all_done_seen, disconnect_seen, error_seen, usb_port_seen, device_connected, stage, progress_direct
                     
                     # Also check for flash log files in project directory
                     self._check_flash_log_files()
                     
-                    line = line.strip()
-                    debug_print(f"Flash tool output: {line}")
+                    raw = line.strip()
+                    debug_print(f"Flash tool output: {raw}")
                     
                     # Update text widget if available
                     if text_widget:
                         try:
-                            self.safe_dialog_update(dialog, "text_widget.insert", tk.END, line + "\n")
+                            self.safe_dialog_update(dialog, "text_widget.insert", tk.END, raw + "\n")
                             self.safe_dialog_update(dialog, "text_widget.see", tk.END)
-                        except:
+                        except Exception:
                             pass
                     
-                    # Check for USB port detection (device connection)
-                    if re.search(r'usb port', line.lower()) or re.search(r'com\d+', line.lower()):
+                    low = raw.lower()
+                    
+                    # Prompt when searching USB
+                    if re.search(r"search.*usb|searchusb|scanning usb port", low):
+                        stage = "WAITING_FOR_DEVICE"
+                        self.safe_dialog_update(dialog, "status_label.config", text="Search usb... Connect your turned-off Y1 now.")
+                        return
+                    
+                    # USB port obtained / device connected
+                    if re.search(r"usb port.*obtained|usb port.*detected|com\d+|brom connected", low):
                         usb_port_seen = True
                         device_connected = True
-                        status_msg = f"Device detected on {line.strip()}. Starting flash process..."
-                        print(f"Device connected: {line}")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
-                        
-                    # Check for search USB prompt
-                    elif re.search(r'search.*usb', line.lower()) or re.search(r'search-usb', line.lower()):
-                        status_msg = "Flash tool is searching for USB device. Please connect your turned-off Y1 device."
-                        print("Searching for USB device...")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
-                        
-                    # Check for download progress
-                    elif re.search(r'download.*\d+%', line.lower()) or re.search(r'progress.*\d+%', line.lower()):
-                        status_msg = f"Downloading firmware: {line.strip()}"
-                        print(f"Download progress: {line}")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
-                        
-                    # Check for flash progress
-                    elif re.search(r'flash.*\d+%', line.lower()) or re.search(r'writing.*\d+%', line.lower()):
-                        status_msg = f"Flashing firmware: {line.strip()}"
-                        print(f"Flash progress: {line}")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
-                        
-                    # Check for completion messages
-                    elif re.search(r'all command exec done', line.lower()) or re.search(r'command.*exec.*done', line.lower()):
+                        stage = "BROM_HANDSHAKE"
+                        self.safe_dialog_update(dialog, "status_label.config", text="Device detected. Establishing connection...")
+                        self.safe_dialog_update(dialog, "progress_bar.config", mode="determinate", value=10)
+                        return
+                    
+                    # DA loading / scatter load
+                    if re.search(r"loadda|downloading.*connecting to da|download\s*agent|loadd?\s*scatter|general command ::loadda", low):
+                        stage = "DA_LOADING"
+                        self.safe_dialog_update(dialog, "status_label.config", text="Loading flash agent (DA) to device RAM...")
+                        self.safe_dialog_update(dialog, "progress_bar.config", mode="determinate", value=25)
+                        return
+                    
+                    # Preparing ROMs / scatter
+                    if re.search(r"rom list|loadscatterfile|loadroms|general command exec done", low):
+                        self.safe_dialog_update(dialog, "status_label.config", text="Preparing partitions...")
+                        self.safe_dialog_update(dialog, "progress_bar.config", mode="determinate", value=35)
+                        return
+                    
+                    # Progress percentage (handles CR-updating lines)
+                    m = re.search(r"\[\s*(\d{1,3})%\s*\]", raw)
+                    if not m:
+                        m = re.search(r"(\d{1,3})\s*%", raw)
+                    if m:
+                        try:
+                            p = max(0, min(100, int(m.group(1))))
+                        except Exception:
+                            p = None
+                        if p is not None:
+                            stage = "FLASHING_PARTITION"
+                            progress_direct = True
+                            self.safe_dialog_update(dialog, "progress_bar.config", mode="determinate", value=p)
+                            self.safe_dialog_update(dialog, "status_label.config", text=f"Flashing... {p}%")
+                            return
+                    
+                    # Completion
+                    if re.search(r"all command exec done|download ok|\bok\b", low):
                         all_done_seen = True
                         flash_done = True
-                        status_msg = "Flash completed successfully! Please wait for device to restart."
-                        print("Flash completed successfully!")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
+                        self.safe_dialog_update(dialog, "status_label.config", text="Flash complete. Waiting for device to disconnect...")
                         self.safe_dialog_update(dialog, "progress_bar.config", value=100)
                         if progress_timer:
                             progress_timer.cancel()
-                            
-                    # Check for disconnect message
-                    elif re.search(r'disconnect', line.lower()):
+                        return
+                    
+                    # Disconnect confirmation
+                    if "disconnect" in low:
                         disconnect_seen = True
-                        status_msg = "Device disconnected. Flash process completed."
-                        print("Device disconnected - flash process completed")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
+                        self.safe_dialog_update(dialog, "status_label.config", text="Disconnect! You may now unplug your Y1.")
                         self.safe_dialog_update(dialog, "progress_bar.config", value=100)
                         if progress_timer:
                             progress_timer.cancel()
-                            
-                    # Check for errors
-                    elif re.search(r'error', line.lower()) or re.search(r'failed', line.lower()) or re.search(r'fail', line.lower()):
+                        return
+                    
+                    # Common errors
+                    if re.search(r"failed to find usb port|searchusbportpool failed", low):
                         error_seen = True
-                        status_msg = f"Flash error detected: {line.strip()}"
-                        print(f"Flash error: {line}")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
-                        self.safe_dialog_update(dialog, "progress_bar.config", value=0)
-                        if progress_timer:
-                            progress_timer.cancel()
-                            
-                    # Check for timeout or connection issues
-                    elif re.search(r'timeout', line.lower()) or re.search(r'connection.*lost', line.lower()):
-                        status_msg = f"Connection issue: {line.strip()}"
-                        print(f"Connection issue: {line}")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
-                        
-                    # Generic status update for other important messages
-                    elif any(keyword in line.lower() for keyword in ['start', 'begin', 'init', 'ready', 'waiting']):
-                        status_msg = f"Flash tool: {line.strip()}"
-                        print(f"Flash status: {line}")
-                        self.safe_dialog_update(dialog, "status_label.config", text=status_msg)
+                        self.safe_dialog_update(dialog, "status_label.config", text="Could not detect USB port. Install VCOM drivers and connect while powered off.")
+                        return
+                    
+                    m = re.search(r"brom error\s*:\s*([A-Z0-9_]+)\s*\((\d+)\)", raw, re.I)
+                    if not m:
+                        m = re.search(r"status_([A-Z_]+)\s*\((0x[0-9A-F]+)\)", raw, re.I)
+                    if not m:
+                        t = re.search(r"S_TIMEOUT\((\d+)\)", raw, re.I)
+                        if t:
+                            error_seen = True
+                            self.safe_dialog_update(dialog, "status_label.config", text=f"Timeout waiting for device (S_TIMEOUT({t.group(1)})). Use BROM/Preloader mode and retry.")
+                            return
+                    else:
+                        error_seen = True
+                        code1 = m.group(1)
+                        code2 = m.group(2) if m.lastindex and m.lastindex >= 2 else ""
+                        self.safe_dialog_update(dialog, "status_label.config", text=f"An error occurred. Code: {code1} {code2}".strip())
+                        return
+                    
+                    # Generic status for other messages
+                    if any(k in low for k in ["begin", "start", "init", "ready", "waiting", "connecting to brom", "connection create done"]):
+                        self.safe_dialog_update(dialog, "status_label.config", text=f"Flash tool: {raw}")
                 
                 # Start progress timer
                 update_progress()
@@ -9022,16 +9064,26 @@ class Y1HelperApp(tk.Tk):
                 print("Flash tool started - waiting for device connection...")
                 self.safe_dialog_update(dialog, "status_label.config", text=initial_status)
                 
-                # Read output in real-time
-                debug_print("Reading flash tool output in real-time...")
-                for line in iter(process.stdout.readline, ''):
-                    if not line:
+                # Read output in real-time (supports carriage-return updates)
+                debug_print("Reading flash tool output in real-time (char stream)...")
+                buffer = ""
+                while True:
+                    ch = process.stdout.read(1)
+                    if ch == "" and process.poll() is not None:
+                        if buffer:
+                            process_output_line(buffer)
                         break
-                    process_output_line(line)
-                    
-                    # Check if we should stop reading
-                    if flash_done or all_done_seen or disconnect_seen or error_seen:
-                        break
+                    if not ch:
+                        continue
+                    if ch in ("\r", "\n"):
+                        if buffer:
+                            process_output_line(buffer)
+                            buffer = ""
+                    else:
+                        buffer += ch
+                        if len(buffer) > 4096:
+                            process_output_line(buffer)
+                            buffer = ""
                 
                 # Wait for process to complete
                 process.wait()
