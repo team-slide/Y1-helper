@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 import webbrowser
 import psutil
 import traceback
+from localization import get_text
 
 # Y1 Helper, created by Ryan Specter, Gemini, Claude, GPT, Grok and Cursor IDE for Project Gallagher, Innioasis Y1 Custom Firmware Project
 
@@ -280,7 +281,7 @@ class Y1HelperApp(tk.Tk):
         self.prepare_prompt_shown = False  # Track if prepare prompt has been shown for current connection
         
         # Essential UI variables
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value=get_text('ready'))
         self.scroll_wheel_mode_var = tk.BooleanVar()  # Renamed from launcher_var
         self.disable_dpad_swap_var = tk.BooleanVar()  # Variable for D-pad swap control (now "Invert Scroll Direction")
         self.y1_launcher_detected = False  # Track if com.innioasis.y1 is detected
@@ -342,6 +343,7 @@ class Y1HelperApp(tk.Tk):
         
         # Add a flag to the class
         self.is_flashing_firmware = False
+        self.adb_suppressed_during_flash = False
         
         # Update system variables
         self.update_prompt_shown = False
@@ -5367,7 +5369,7 @@ class Y1HelperApp(tk.Tk):
                 
                 if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
                     self.device_connected = False
-                    self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                    self.status_var.set(get_text('first_time_install_firmware'))
                     
                     # Disable input bindings but keep controls frame visible
                     self.disable_input_bindings()
@@ -5383,7 +5385,7 @@ class Y1HelperApp(tk.Tk):
             
             if self.device_connected or self.device_check_failures >= self.max_device_check_failures:
                 self.device_connected = False
-                self.status_var.set("First time? Install a Firmware from the Device Menu.")
+                self.status_var.set(get_text('first_time_install_firmware'))
                 self.disable_input_bindings()
         finally:
             self.device_connection_lock.release()
@@ -5606,6 +5608,8 @@ class Y1HelperApp(tk.Tk):
     
     def run_adb_command(self, command, timeout=10):
         """Run ADB command and return result with improved error handling"""
+        if getattr(self, 'adb_suppressed_during_flash', False):
+            return False, "", "ADB suppressed during firmware flashing"
         debug_print(f"Running ADB command: {command}")
         try:
             adb_path = self.get_adb_path()
@@ -8184,9 +8188,9 @@ class Y1HelperApp(tk.Tk):
         if hasattr(self, '_splash') and self._splash.winfo_exists():
             self._splash.destroy()
 
-    def show_firmware_progress_modal(self, title="Firmware Flash Progress"):
+    def show_firmware_progress_modal(self, title=None):
         dialog = tk.Toplevel(self)
-        dialog.title(title)
+        dialog.title(title or get_text('firmware_flash_progress'))
         dialog.geometry("600x400")  # Increased height to accommodate text widget
         dialog.transient(self)
         dialog.grab_set()
@@ -8226,7 +8230,7 @@ class Y1HelperApp(tk.Tk):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # OK button at the bottom
-        ok_button = ttk.Button(frame, text="OK", command=dialog.destroy, state=tk.DISABLED)
+        ok_button = ttk.Button(frame, text=get_text('ok'), command=dialog.destroy, state=tk.DISABLED)
         ok_button.pack(pady=(10, 5))
         
         return dialog, status_label, ok_button, progress_bar, text_widget
@@ -8285,7 +8289,7 @@ class Y1HelperApp(tk.Tk):
         """Show loading dialog while fetching firmware manifest"""
         try:
             self.loading_dialog = tk.Toplevel(self)
-            self.loading_dialog.title("Loading Firmware")
+            self.loading_dialog.title(get_text('firmware_installation'))
             self.loading_dialog.geometry("300x150")
             self.loading_dialog.transient(self)
             self.loading_dialog.grab_set()
@@ -8297,14 +8301,14 @@ class Y1HelperApp(tk.Tk):
             frame = ttk.Frame(self.loading_dialog, padding="20")
             frame.pack(fill=tk.BOTH, expand=True)
             
-            label = ttk.Label(frame, text="Fetching firmware manifest...", font=("Segoe UI", 11))
+            label = ttk.Label(frame, text=get_text('fetching_firmware_manifest'), font=("Segoe UI", 11))
             label.pack(pady=(0, 20))
             
             progress = ttk.Progressbar(frame, mode='indeterminate')
             progress.pack(fill=tk.X, pady=(0, 20))
             progress.start()
             
-            cancel_btn = ttk.Button(frame, text="Cancel", command=self.loading_dialog.destroy)
+            cancel_btn = ttk.Button(frame, text=get_text('cancel'), command=self.loading_dialog.destroy)
             cancel_btn.pack()
             
         except Exception as e:
@@ -8407,7 +8411,7 @@ class Y1HelperApp(tk.Tk):
 
     def browse_firmware_file(self):
         file_path = filedialog.askopenfilename(
-            title="Select Firmware File",
+            title=get_text('select_firmware_file'),
             filetypes=[("Firmware files", "*.img"), ("All files", "*.")]
         )
         if not file_path:
@@ -8415,13 +8419,13 @@ class Y1HelperApp(tk.Tk):
         # Custom popup with 'Continue' button
         root = self if isinstance(self, tk.Tk) else tk.Tk()
         popup = tk.Toplevel(root)
-        popup.title("Unplug Device")
+        popup.title(get_text('firmware_installation'))
         popup.geometry("400x120")
         popup.transient(root)
         popup.grab_set()
-        msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+        msg = ttk.Label(popup, text=get_text('turn_off_unplug_y1_continue'), font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
         msg.pack(pady=(20, 10), padx=10)
-        btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+        btn = ttk.Button(popup, text=get_text('continue'), command=popup.destroy)
         btn.pack(pady=(0, 15))
         popup.wait_window()
         self.install_firmware(local_file=file_path)
@@ -8433,19 +8437,17 @@ class Y1HelperApp(tk.Tk):
 
     def _prepare_rom_files(self, firmware_dir, dialog, status_label, progress_bar):
         """
-        Replace pre-populated ROM files with downloaded files and run flash_tool.exe.
+        Replace pre-populated ROM files with downloaded files.
         
         This function:
         1. Replaces files in the ROM directory with downloaded files (if available)
         2. Ensures system.img comes from the downloaded ROM
-        3. Runs flash_tool.exe -c -d -f install_rom.xml
         
-        The ROM directory is pre-populated at app startup, so this function just handles
-        file replacement and flash tool execution.
+        Flashing is handled by _flash_with_modal using scatter-based download.
         """
         try:
             debug_print(f"Preparing ROM files in: {firmware_dir}")
-            self.safe_dialog_update(dialog, "status_label.config", text="Preparing ROM files...")
+            self.safe_dialog_update(dialog, "status_label.config", text=get_text('preparing_rom_files'))
             
             # Ensure ROM directory exists
             os.makedirs(firmware_dir, exist_ok=True)
@@ -8475,45 +8477,7 @@ class Y1HelperApp(tk.Tk):
             debug_print(f"ROM preparation completed: {len(existing_files)} files present")
             dialog.after(0, status_label.config, {"text": f"ROM files prepared successfully ({len(existing_files)} files)"})
             
-            # Run flash_tool.exe -c -d -f install_rom.xml
-            def run_flash_tool():
-                try:
-                    debug_print("Running flash_tool.exe -c -d -f install_rom.xml...")
-                    flash_tool_path = os.path.join(self.base_dir, "assets", "flash_tool.exe")
-                    install_rom_xml = os.path.join(firmware_dir, "install_rom.xml")
-                    
-                    if not os.path.exists(flash_tool_path):
-                        debug_print("flash_tool.exe not found in assets directory")
-                        return
-                    
-                    if not os.path.exists(install_rom_xml):
-                        debug_print("install_rom.xml not found in ROM directory")
-                        return
-                    
-                    # Run flash tool in assets directory with correct syntax for SP Flash Tool 5.1904
-                    import subprocess
-                    assets_dir_path = os.path.join(self.base_dir, "assets")
-                    scatter_file = os.path.join(assets_dir_path, "rom", "MT6572_Android_scatter.txt")
-                    
-                    # SP Flash Tool 5.1904 syntax: flash_tool -c download -s scatter_file
-                    cmd = [flash_tool_path, "-c", "download", "-s", scatter_file]
-                    debug_print(f"Running command: {' '.join(cmd)} in {assets_dir_path}")
-                    
-                    result = subprocess.run(cmd, cwd=assets_dir_path, capture_output=True, text=True, timeout=300)
-                    debug_print(f"Flash tool output: {result.stdout}")
-                    if result.stderr:
-                        debug_print(f"Flash tool errors: {result.stderr}")
-                    
-                    debug_print(f"Flash tool completed with return code: {result.returncode}")
-                    
-                except Exception as e:
-                    debug_print(f"Error running flash_tool.exe: {e}")
-            
-            # Run flash tool in a separate thread to avoid blocking UI
-            import threading
-            flash_thread = threading.Thread(target=run_flash_tool, daemon=True)
-            flash_thread.start()
-            
+            # No flashing here; handled by _flash_with_modal
             return True
                 
         except Exception as e:
@@ -8824,26 +8788,15 @@ class Y1HelperApp(tk.Tk):
             terminal_print("Starting enhanced flash process with real-time output relay...")
             debug_print("Entered _flash_with_modal")
             flash_tool_path = os.path.join(assets_dir, "flash_tool.exe")
-            install_rom_path = os.path.join(assets_dir, "install_rom.xml")
             
             debug_print(f"Checking for flash_tool.exe at: {flash_tool_path}")
             if not os.path.exists(flash_tool_path):
                 debug_print("flash_tool.exe not found!")
                 error_msg = "flash_tool.exe not found in assets directory. Please ensure the flash tool is properly installed."
-                self.safe_dialog_update(dialog, "status_label.config", text=error_msg)
-                self.safe_dialog_update(dialog, "ok_button.pack")
-                self.safe_dialog_update(dialog, "ok_button.config", state=tk.NORMAL)
+                status_label.config(text=error_msg)
+                ok_button.pack()
+                ok_button.config(state=tk.NORMAL)
                 messagebox.showerror("Flash Tool Missing", error_msg)
-                return
-                
-            debug_print(f"Checking for install_rom.xml at: {install_rom_path}")
-            if not os.path.exists(install_rom_path):
-                debug_print("install_rom.xml not found!")
-                error_msg = "install_rom.xml not found in assets directory. This file is required for firmware installation."
-                self.safe_dialog_update(dialog, "status_label.config", text=error_msg)
-                self.safe_dialog_update(dialog, "ok_button.pack")
-                self.safe_dialog_update(dialog, "ok_button.config", state=tk.NORMAL)
-                messagebox.showerror("Configuration Missing", error_msg)
                 return
                 
             if progress_bar is None:
@@ -8866,6 +8819,15 @@ class Y1HelperApp(tk.Tk):
             def run_flash():
                 """Enhanced flash process with real-time output processing"""
                 debug_print("Starting enhanced flash_tool.exe subprocess...")
+                
+                # Pause ADB to avoid interference
+                try:
+                    self.adb_suppressed_during_flash = True
+                    adb_path = self.get_adb_path()
+                    subprocess.run([adb_path, 'kill-server'], capture_output=True, text=True, timeout=2)
+                    debug_print("ADB server killed to prevent interference during flashing")
+                except Exception as e:
+                    debug_print(f"Failed to pause ADB: {e}")
                 
                 # State tracking variables
                 flash_done = False
@@ -9057,15 +9019,24 @@ class Y1HelperApp(tk.Tk):
                     self.safe_dialog_update(dialog, "status_label.config", text=final_status)
                     self.safe_dialog_update(dialog, "progress_bar.config", value=100)
                 
-                # Show OK button
+                                # Show OK button
                 self.safe_dialog_update(dialog, "ok_button.pack")
                 self.safe_dialog_update(dialog, "ok_button.config", state=tk.NORMAL)
                 
                 # Clean up timer
                 if progress_timer:
                     progress_timer.cancel()
-                    
+                
                 print("Flash process completed - OK button enabled")
+                
+                # Ensure ADB is resumed even if errors occur
+                try:
+                    adb_path = self.get_adb_path()
+                    subprocess.run([adb_path, 'start-server'], capture_output=True, text=True, timeout=3)
+                    debug_print("ADB server restarted after flashing")
+                except Exception as e:
+                    debug_print(f"Failed to resume ADB: {e}")
+                self.adb_suppressed_during_flash = False
             
             # Start flash process in background thread
             threading.Thread(target=run_flash, daemon=True).start()
@@ -9294,25 +9265,25 @@ class Y1HelperApp(tk.Tk):
         
         def browse_and_install():
             dialog.destroy()
-            file_path = filedialog.askopenfilename(
-                title="Select Firmware File",
+                        file_path = filedialog.askopenfilename(
+                title=get_text('select_firmware_file'),
                 filetypes=[("Firmware files", "*.img"), ("All files", "*.")]
             )
             if not file_path:
                 return
             root = self if isinstance(self, tk.Tk) else tk.Tk()
             popup = tk.Toplevel(root)
-            popup.title("Unplug Device")
+            popup.title(get_text('firmware_installation'))
             popup.geometry("400x120")
             popup.transient(root)
             popup.grab_set()
-            msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+            msg = ttk.Label(popup, text=get_text('turn_off_unplug_y1_continue'), font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
             msg.pack(pady=(20, 10), padx=10)
-            btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+            btn = ttk.Button(popup, text=get_text('continue'), command=popup.destroy)
             btn.pack(pady=(0, 15))
             popup.wait_window()
             self.install_firmware(local_file=file_path)
-        browse_btn = ttk.Button(frame, text="Browse Firmware (.img)", command=browse_and_install)
+            browse_btn = ttk.Button(frame, text="Browse Firmware (.img)", command=browse_and_install)
         browse_btn.pack(pady=(5, 0))
         
         # Add close button
@@ -9394,13 +9365,13 @@ class Y1HelperApp(tk.Tk):
                 return
             root = self if isinstance(self, tk.Tk) else tk.Tk()
             popup = tk.Toplevel(root)
-            popup.title("Unplug Device")
+            popup.title(get_text('firmware_installation'))
             popup.geometry("400x120")
             popup.transient(root)
             popup.grab_set()
-            msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+            msg = ttk.Label(popup, text=get_text('turn_off_unplug_y1_continue'), font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
             msg.pack(pady=(20, 10), padx=10)
-            btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+            btn = ttk.Button(popup, text=get_text('continue'), command=popup.destroy)
             btn.pack(pady=(0, 15))
             popup.wait_window()
             self.install_firmware(local_file=file_path)
@@ -9411,13 +9382,13 @@ class Y1HelperApp(tk.Tk):
         if selected[0] is not None:
             root = self if isinstance(self, tk.Tk) else tk.Tk()
             popup = tk.Toplevel(root)
-            popup.title("Unplug Device")
+            popup.title(get_text('firmware_installation'))
             popup.geometry("400x120")
             popup.transient(root)
             popup.grab_set()
-            msg = ttk.Label(popup, text="Please turn off and unplug your Y1, then click Continue to proceed.", font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
+            msg = ttk.Label(popup, text=get_text('turn_off_unplug_y1_continue'), font=("Segoe UI", 10), wraplength=380, justify=tk.CENTER)
             msg.pack(pady=(20, 10), padx=10)
-            btn = ttk.Button(popup, text="Continue", command=popup.destroy)
+            btn = ttk.Button(popup, text=get_text('continue'), command=popup.destroy)
             btn.pack(pady=(0, 15))
             popup.wait_window()
             self._download_and_flash_selected_firmware(selected[0])
@@ -10376,7 +10347,7 @@ class FileExplorerDialog:
         self.tree.bind('<F5>', lambda e: self.refresh_current())
         
         # Status bar
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value=get_text('ready'))
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN)
         status_bar.pack(fill=tk.X, pady=(5, 0))
         
