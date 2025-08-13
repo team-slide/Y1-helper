@@ -1,8 +1,8 @@
-[**Y1 Helper 0.8.0**](https://github.com/team-slide/Y1-helper/releases/tag/0.8.0) **is now here with improved manual updating, a number of performance improvements, better handling of firmware and app downloads as well as the ability to revert to older versions if needed.**
+[**Y1 Helper 0.9.8**](https://github.com/team-slide/Y1-helper/releases/tag/0.9.8) **is now here for Intel/AMD Windows computers with improved manual updating, a number of performance improvements, better handling of firmware and app downloads as well as the ability to revert to older versions if needed.**
 
 If you had an older version that has stopped working you need to reinstall it manually, to bring its update mechanism up-to-date.
 
-If your version has updated itself to 0.8.0, please reinstall the app from the Help / Update menu to get the improved auto update functionality.
+If your version has updated itself to 0.9.8, please reinstall the app from the Help / Update menu to get the improved auto update functionality.
 
 # What is Y1 Helper?
 
@@ -54,7 +54,7 @@ and this is great for anyone that wants to live life on the wild side with Proje
 
 If after clicking Device > Update >Install Project Gallagher Core to setup Rockbox on your Y1 you find there's an issue, please use the Rockbox Feedback Thread pinned on the subreddit or report an issue at [github.com/rockbox-y1/rockbox](http://github.com/rockbox-y1/rockbox)
 
-# What something breaks?
+# What if something breaks?
 
 ![img](c7fedpv4c3gf1 "You can always install the latest software on your Y1 and make it work just like it originally did.")
 

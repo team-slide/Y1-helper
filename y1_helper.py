@@ -208,7 +208,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.9.5"
+        self.version = "0.9.8"
         
         # Backup current y1_helper.py to .old directory at launch
         self.backup_current_version()
@@ -9294,7 +9294,7 @@ class Y1HelperApp(tk.Tk):
                 )
                 
 
-                initial_status = "Please Connect your Y1 and WAIT for Firmware To Install. It's normal to see nothing happen."
+                initial_status = "Connect Y1 and WAIT 5-10 mins for Firmware To Install."
                 print("Flash tool started - waiting for device connection...")
                 self.safe_dialog_update(dialog, "status_label.config", text=initial_status)
                 
