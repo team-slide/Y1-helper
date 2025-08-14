@@ -4458,9 +4458,47 @@ class Y1HelperApp(tk.Tk):
         main_frame = ttk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
-        # Buy Us A Coffee button in top right with Ko-Fi styling
+        # Social media buttons frame in top right
+        social_buttons_frame = ttk.Frame(main_frame)
+        social_buttons_frame.pack(side=tk.TOP, anchor=tk.NE, pady=(0, 10))
+        
+        # r/innioasis button
+        self.reddit_btn = tk.Button(
+            social_buttons_frame,
+            text="r/innioasis",
+            command=lambda: webbrowser.open_new_tab("https://reddit.com/r/innioasis"),
+            bg="#FF4500",  # Reddit brand orange
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            activebackground="#E63E00",  # Darker orange on hover
+            activeforeground="white"
+        )
+        self.reddit_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        
+        # Discord button
+        self.discord_btn = tk.Button(
+            social_buttons_frame,
+            text="Discord",
+            command=lambda: webbrowser.open_new_tab("https://discord.gg/jv8jEd8Uv5"),
+            bg="#5865F2",  # Discord brand blue
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            activebackground="#4752C4",  # Darker blue on hover
+            activeforeground="white"
+        )
+        self.discord_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        
+        # Buy Us A Coffee button
         self.buy_coffee_btn = tk.Button(
-            main_frame,
+            social_buttons_frame,
             text="☕ Buy Us A Coffee",
             command=lambda: webbrowser.open_new_tab("https://ko-fi.com/teamslide"),
             bg="#FF5E5B",  # Ko-Fi brand red
@@ -4473,7 +4511,7 @@ class Y1HelperApp(tk.Tk):
             activebackground="#E54542",  # Darker red on hover
             activeforeground="white"
         )
-        self.buy_coffee_btn.pack(side=tk.TOP, anchor=tk.NE, pady=(0, 10))
+        self.buy_coffee_btn.pack(side=tk.RIGHT)
         
         # Screen viewer frame with modern styling
         screen_frame = ttk.LabelFrame(main_frame, text="Mouse Input Panel (480x360)", padding=8)
