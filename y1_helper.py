@@ -8636,11 +8636,26 @@ class Y1HelperApp(tk.Tk):
         try:
             import subprocess
             import os
+            import threading
+            import time
+            
+            # Show waiting cursor for 6 seconds
+            self.config(cursor="wait")
+            
+            def reset_cursor():
+                """Reset cursor after 6 seconds"""
+                time.sleep(6)
+                self.config(cursor="")
+            
+            # Start cursor reset timer in background thread
+            cursor_thread = threading.Thread(target=reset_cursor, daemon=True)
+            cursor_thread.start()
             
             # Get the path to the Innioasis Updater
             local_app_data = os.getenv('LOCALAPPDATA')
             if not local_app_data:
                 debug_print("LOCALAPPDATA environment variable not found")
+                self.config(cursor="")  # Reset cursor immediately on error
                 return
                 
             updater_path = os.path.join(local_app_data, "Y1 Helper", "Innioasis Updater")
@@ -8649,10 +8664,12 @@ class Y1HelperApp(tk.Tk):
             
             if not os.path.exists(python_exe):
                 debug_print(f"Python executable not found at: {python_exe}")
+                self.config(cursor="")  # Reset cursor immediately on error
                 return
                 
             if not os.path.exists(script_path):
                 debug_print(f"firmware_downloader.py not found at: {script_path}")
+                self.config(cursor="")  # Reset cursor immediately on error
                 return
             
             # Run the firmware downloader
@@ -8663,6 +8680,7 @@ class Y1HelperApp(tk.Tk):
             
         except Exception as e:
             debug_print(f"Error running firmware downloader: {e}")
+            self.config(cursor="")  # Reset cursor immediately on error
 
     def _prepare_rom_files(self, firmware_dir, dialog, status_label, progress_bar):
         """
