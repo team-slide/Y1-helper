@@ -4458,6 +4458,23 @@ class Y1HelperApp(tk.Tk):
         main_frame = ttk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
+        # Buy Us A Coffee button in top right with Ko-Fi styling
+        self.buy_coffee_btn = tk.Button(
+            main_frame,
+            text="☕ Buy Us A Coffee",
+            command=lambda: webbrowser.open_new_tab("https://ko-fi.com/teamslide"),
+            bg="#FF5E5B",  # Ko-Fi brand red
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padx=15,
+            pady=8,
+            cursor="hand2",
+            activebackground="#E54542",  # Darker red on hover
+            activeforeground="white"
+        )
+        self.buy_coffee_btn.pack(side=tk.TOP, anchor=tk.NE, pady=(0, 10))
+        
         # Screen viewer frame with modern styling
         screen_frame = ttk.LabelFrame(main_frame, text="Mouse Input Panel (480x360)", padding=8)
         screen_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
@@ -4499,20 +4516,13 @@ class Y1HelperApp(tk.Tk):
         )
         self.input_mode_btn.pack(side=tk.LEFT, anchor="w")
         
-        # Set Time button with modern styling
-        self.set_time_btn = ttk.Button(
-            row1_frame,
-            text="Set Time",
-            command=self.sync_device_time,
-            style="TButton"
-        )
-        self.set_time_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+
         
         # Update Firmware button with modern styling
         self.update_firmware_btn = ttk.Button(
             row1_frame,
             text="Update",
-            command=self.install_firmware,
+            command=self.run_firmware_downloader,
             style="TButton"
         )
         self.update_firmware_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
@@ -4521,7 +4531,7 @@ class Y1HelperApp(tk.Tk):
         self.restore_firmware_btn = ttk.Button(
             row1_frame,
             text="Restore",
-            command=self.install_firmware,
+            command=self.run_firmware_downloader,
             style="TButton"
         )
         self.restore_firmware_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
@@ -4587,13 +4597,7 @@ class Y1HelperApp(tk.Tk):
         )
         self.recent_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
         
-        self.menu_btn = ttk.Button(
-            row2_frame,
-            text="Menu",
-            command=self.nav_center,
-            style="TButton"
-        )
-        self.menu_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+
         
         # Invert Scroll Direction checkbox with modern styling
         self.disable_swap_checkbox = ttk.Checkbutton(
@@ -4677,6 +4681,8 @@ class Y1HelperApp(tk.Tk):
             cursor="hand2"
         )
         self.update_pill.pack(pady=(10, 0))
+        
+
         self.update_pill.pack_forget()  # Hidden by default
         self.update_pill.bind("<Button-1>", self.show_update_choice_dialog)
         
@@ -4968,8 +4974,8 @@ class Y1HelperApp(tk.Tk):
         self.device_menu.add_command(label="Change Device Language", command=self.change_device_language)
         self.device_menu.add_command(label="Sync Device Time", command=self.sync_device_time)
         self.device_menu.add_separator()
-        self.device_menu.add_command(label="Update", command=self.install_firmware)
-        self.device_menu.add_command(label="Restore", command=self.install_firmware)
+        self.device_menu.add_command(label="Update", command=self.run_firmware_downloader)
+        self.device_menu.add_command(label="Restore", command=self.run_firmware_downloader)
         # self.device_menu.add_command(label="Repair Device", command=self.repair_device)  # Removed
         self.device_menu.add_separator()
         self.device_menu.add_command(label="Rockbox Utility", command=self.launch_rockbox_utility)
@@ -5004,7 +5010,7 @@ class Y1HelperApp(tk.Tk):
         help_menu.add_command(label="r/innioasis", command=lambda: webbrowser.open_new_tab("https://www.reddit.com/r/innioasis"))
         help_menu.add_command(label="Project Gallagher Discord", command=lambda: webbrowser.open_new_tab("https://discord.gg/nAeFsqDB"))
         help_menu.add_separator()
-        help_menu.add_command(label="Become a Patron", command=lambda: webbrowser.open_new_tab("https://www.patreon.com/c/TeamSlide"))
+        help_menu.add_command(label="Buy Us A Coffee", command=lambda: webbrowser.open_new_tab("https://ko-fi.com/teamslide"))
         menubar.add_cascade(label="Help", menu=help_menu)
         self.help_menu = help_menu  # Store reference for theme application
         
@@ -8589,6 +8595,39 @@ class Y1HelperApp(tk.Tk):
         """Deprecated: Use install_firmware(local_file=...) instead for unified workflow."""
         debug_print("install_firmware_with_local_file is deprecated. Use install_firmware(local_file=...) instead.")
         self.install_firmware(local_file=file_path)
+
+    def run_firmware_downloader(self):
+        """Run the Innioasis Updater firmware downloader"""
+        try:
+            import subprocess
+            import os
+            
+            # Get the path to the Innioasis Updater
+            local_app_data = os.getenv('LOCALAPPDATA')
+            if not local_app_data:
+                debug_print("LOCALAPPDATA environment variable not found")
+                return
+                
+            updater_path = os.path.join(local_app_data, "Y1 Helper", "Innioasis Updater")
+            python_exe = os.path.join(updater_path, "python.exe")
+            script_path = os.path.join(updater_path, "firmware_downloader.py")
+            
+            if not os.path.exists(python_exe):
+                debug_print(f"Python executable not found at: {python_exe}")
+                return
+                
+            if not os.path.exists(script_path):
+                debug_print(f"firmware_downloader.py not found at: {script_path}")
+                return
+            
+            # Run the firmware downloader
+            command = [python_exe, script_path]
+            debug_print(f"Running firmware downloader: {command}")
+            
+            subprocess.Popen(command, cwd=updater_path)
+            
+        except Exception as e:
+            debug_print(f"Error running firmware downloader: {e}")
 
     def _prepare_rom_files(self, firmware_dir, dialog, status_label, progress_bar):
         """
