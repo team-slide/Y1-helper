@@ -238,7 +238,7 @@ class Y1HelperApp(tk.Tk):
                 debug_print(f'Failed to copy/delete new.xml: {e}')
         
         self.title(f"Y1 Helper v{self.version} - created by Ryan Specter - u/respectyarn")
-        self.geometry("600x600")  # Reduced height, increased width
+        self.geometry("575x775")  # Custom window size for better layout
         self.resizable(True, True)
         
         # Ensure window gets focus and appears in front
@@ -249,9 +249,9 @@ class Y1HelperApp(tk.Tk):
         
         # Center window on screen
         self.update_idletasks()  # Update window info
-        x = (self.winfo_screenwidth() // 2) - (600 // 2)
-        y = (self.winfo_screenheight() // 2) - (600 // 2)
-        self.geometry(f"600x600+{x}+{y}")
+        x = (self.winfo_screenwidth() // 2) - (575 // 2)
+        y = (self.winfo_screenheight() // 2) - (775 // 2)
+        self.geometry(f"575x775+{x}+{y}")
         
         # Detect Windows 11 theme
         self.setup_windows_11_theme()
@@ -4551,7 +4551,7 @@ class Y1HelperApp(tk.Tk):
             text="Touch Screen Mode",
             command=self.toggle_scroll_wheel_mode,
             style="TButton",
-            width=16  # Consistent width for all buttons
+            width=20  # Wider width to accommodate the longer label
         )
         self.input_mode_btn.pack(side=tk.LEFT, anchor="w")
         
