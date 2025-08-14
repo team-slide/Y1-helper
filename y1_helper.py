@@ -208,7 +208,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.9.8"
+        self.version = "0.9.9"
         
         # Backup current y1_helper.py to .old directory at launch
         self.backup_current_version()
@@ -9018,20 +9018,20 @@ class Y1HelperApp(tk.Tk):
                 
                                 # USB detection timeout tracking
                 usb_timeout_timer = None
-                usb_timeout_duration = 119  # 119 seconds to allow for 120 second total
+                usb_timeout_duration = 900  # 900 seconds (15 minutes) to allow for proper device detection
                 
                 # Output queue for thread-safe communication
                 output_queue = queue.Queue()
                 
                 def usb_timeout_handler():
-                    """Handle USB detection timeout after 119 seconds"""
+                    """Handle USB detection timeout after 15 minutes"""
                     nonlocal usb_timeout_timer, error_seen
                     if usb_port_seen:
                         return  # USB was detected, no timeout needed
                     
                     # USB detection timed out
                     error_seen = True
-                    timeout_msg = "Process timed out after 2 minutes. You didn't connect your Y1 within the required time. You can Retry."
+                    timeout_msg = "Process timed out after 15 minutes. You didn't connect your Y1 within the required time. You can Retry."
                     print(f"USB detection timeout: {timeout_msg}")
                     self.safe_dialog_update(dialog, "status_label.config", text=timeout_msg)
                     self.safe_dialog_update(dialog, "progress_bar.config", mode="determinate", value=0)
@@ -9298,7 +9298,7 @@ class Y1HelperApp(tk.Tk):
                 print("Flash tool started - waiting for device connection...")
                 self.safe_dialog_update(dialog, "status_label.config", text=initial_status)
                 
-                # Start USB detection timeout timer (119 seconds)
+                # Start USB detection timeout timer (15 minutes)
                 usb_timeout_timer = threading.Timer(usb_timeout_duration, usb_timeout_handler)
                 usb_timeout_timer.start()
                 print(f"USB detection timeout timer started ({usb_timeout_duration} seconds)")
