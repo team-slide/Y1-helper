@@ -208,7 +208,7 @@ class Y1HelperApp(tk.Tk):
         self.download_and_unpack_config()
         
         # Version information
-        self.version = "0.9.991"
+        self.version = "1.0.0"
         
         # Backup current y1_helper.py to .old directory at launch
         self.backup_current_version()
