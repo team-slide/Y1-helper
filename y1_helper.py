@@ -4705,10 +4705,7 @@ class Y1HelperApp(tk.Tk):
             "Use this for apps that expect the opposite scroll behavior."
         ))
         
-        self._add_tooltip(self.set_time_btn, (
-            "Set Time: Synchronize the device's time with your computer's current time. "
-            "This only works on Rooted Firmwares like Multiwirth's Rockbox Wi-FI ROM or the future slideOS - Codename: Gallagher."
-        ))
+
         
         self._add_tooltip(self.update_btn, (
             "Update Available: A newer version of Y1 Helper is available for download. "
