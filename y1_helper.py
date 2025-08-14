@@ -4550,47 +4550,50 @@ class Y1HelperApp(tk.Tk):
             row1_frame,
             text="Touch Screen Mode",
             command=self.toggle_scroll_wheel_mode,
-            style="TButton"
+            style="TButton",
+            width=16  # Consistent width for all buttons
         )
         self.input_mode_btn.pack(side=tk.LEFT, anchor="w")
-        
-
         
         # Update Firmware button with modern styling
         self.update_firmware_btn = ttk.Button(
             row1_frame,
             text="Update",
             command=self.run_firmware_downloader,
-            style="TButton"
+            style="TButton",
+            width=16  # Consistent width for all buttons
         )
-        self.update_firmware_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.update_firmware_btn.pack(side=tk.LEFT, padx=(8, 0), anchor="w")
         
         # Restore Firmware button with modern styling
         self.restore_firmware_btn = ttk.Button(
             row1_frame,
             text="Restore",
             command=self.run_firmware_downloader,
-            style="TButton"
+            style="TButton",
+            width=16  # Consistent width for all buttons
         )
-        self.restore_firmware_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.restore_firmware_btn.pack(side=tk.LEFT, padx=(8, 0), anchor="w")
         
         # Screenshot button with modern styling
         self.screenshot_btn = ttk.Button(
             row1_frame,
             text="Screenshot",
             command=self.take_screenshot,
-            style="TButton"
+            style="TButton",
+            width=16  # Consistent width for all buttons
         )
-        self.screenshot_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.screenshot_btn.pack(side=tk.LEFT, padx=(8, 0), anchor="w")
         
         # Restart Rockbox button with modern styling (hidden by default)
         self.restart_rockbox_btn = ttk.Button(
             row1_frame,
             text="Restart Rockbox",
             command=self.restart_rockbox,
-            style="TButton"
+            style="TButton",
+            width=16  # Consistent width for all buttons
         )
-        self.restart_rockbox_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.restart_rockbox_btn.pack(side=tk.LEFT, padx=(8, 0), anchor="w")
         self.restart_rockbox_btn.pack_forget()  # Hidden by default
         
         # Update Available button (hidden by default, shown when update is available)
@@ -4598,9 +4601,10 @@ class Y1HelperApp(tk.Tk):
             row1_frame,
             text="Update Available",
             command=self.check_and_show_update,
-            style="TButton"
+            style="TButton",
+            width=16  # Consistent width for all buttons
         )
-        self.update_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.update_btn.pack(side=tk.LEFT, padx=(8, 0), anchor="w")
         self.update_btn.pack_forget()  # Hidden by default
         
         # Update pill will be positioned in bottom right corner later
@@ -4614,7 +4618,8 @@ class Y1HelperApp(tk.Tk):
             row2_frame,
             text="Home",
             command=self.go_home,
-            style="TButton"
+            style="TButton",
+            width=12  # Consistent width for navigation buttons
         )
         self.home_btn.pack(side=tk.LEFT, anchor="w")
         
@@ -4622,18 +4627,20 @@ class Y1HelperApp(tk.Tk):
             row2_frame,
             text="Back",
             command=self.send_back_key,
-            style="TButton"
+            style="TButton",
+            width=12  # Consistent width for navigation buttons
         )
-        self.back_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.back_btn.pack(side=tk.LEFT, padx=(8, 0), anchor="w")
         
         # Additional navigation buttons
         self.recent_btn = ttk.Button(
             row2_frame,
             text="Recent",
             command=self.show_recent_apps,
-            style="TButton"
+            style="TButton",
+            width=12  # Consistent width for navigation buttons
         )
-        self.recent_btn.pack(side=tk.LEFT, padx=(12, 0), anchor="w")
+        self.recent_btn.pack(side=tk.LEFT, padx=(8, 0), anchor="w")
         
 
         
