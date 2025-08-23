@@ -17,8 +17,8 @@ r/innioasis Mods
 - u/Key-Brilliant5623
 Team Slide branding lead
 - u/_allstar
-TikTok creator
-- Ryan/cat - @catsteal3r
+TikTok / YouTube creator
+- Ryan/ Corduroy cat - @catsteal3r on TikTok
   
 ## MTKclient Credits
 
