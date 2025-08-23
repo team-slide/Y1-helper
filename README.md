@@ -1,69 +1,184 @@
-[**Y1 Helper 0.9.8**](https://github.com/team-slide/Y1-helper/releases/tag/0.9.8) **is now here for Intel/AMD Windows computers with improved manual updating, a number of performance improvements, better handling of firmware and app downloads as well as the ability to revert to older versions if needed.**
+<div align="right">
+</div>
 
-If you had an older version that has stopped working you need to reinstall it manually, to bring its update mechanism up-to-date.
+# Innioasis Updater
+<img src="https://www.github.com/team-slide/Innioasis-Updater/mtkclient/gui/images/icon.png" alt="Innioasis Updater Icon" width="128"/>
+Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 MP3 player running Android firmwares. It is a modification of mtkclient to enable the installation of Updates, Factory Restore and installation of Custom Firmwares like the Multiwirth ROM with Rockbox.
 
-If your version has updated itself to 0.9.8, please reinstall the app from the Help / Update menu to get the improved auto update functionality.
+## 🐍 Python Script written in 🧠💻Cursor AI by
+- Ryan Specter of Team Slide
 
-# What is Y1 Helper?
+## Special Thanks to
 
-Y1 Helper is a package that includes the Y1 Helper app, an app that lets you update and factory restore your device with the latest Innioasis Y1 Software, take screenshots, set your Y1's time automatically and....
+- u/wa-a-melyn
+- u/multiwirth
+- u/TwitchyMcJoe
+- u/Key-Brilliant5623
+- u/_allstar
+  
+## MTKclient Credits
 
-![img]([https://preview.redd.it/y1-helper-0-8-0-released-download-here-v0-9kfjz2ex83gf1.png?width=320&crop=smart&auto=webp&s=96031c1ebbb587c02d1db1af933dc7d9efd465ed])
+- bkerler for creating mtkclient
+- kamakiri [xyzz]
+- linecode exploit [chimera]
+- Chaosmaster
+- Geert-Jan Kreileman (GUI, design & fixes)
 
-it also lets you install custom firmwares like Gallagher Core which include Rockbox-y1 which, while missing a few of the original Y1 features, like photo viewing, it offers a better music playback experience in a number of areas such as having gapless playback, scrolling titles and proper tags display.
 
-![img](7ydsn1c5a3gf1 "It'll let you install Rockbox ")
+## Install
 
-![img](fcn9esdia3gf1 "Rockbox themes like Widepod can be installed from Rockbox Utility included in the package.")
+### Windows
 
-To make things super-easy for you as the proud owner of a Y1, we also make sure you've got everything you need for the Y1...
+Easy Install: You can auto-install a preview version of this with Y1 Helper [here](https://www.github.com/team-slide/Y1-Helper/releases/latest)
 
-# What do I get?
+### Linux - (Ubuntu recommended, no patched kernel needed except for kamakiri)
 
-In addition to the Y1 Helper app itself, the package installs...
+#### Install python >=3.8, git and other deps
 
-![img](w94hrhpi93gf1)
+#### For Debian/Ubuntu
+```
+sudo apt install python3 git libusb-1.0-0 python3-pip
+```
+#### For ArchLinux
+```
+(sudo) pacman -S  python python-pip python-pipenv git libusb
+```
+or
+```
+yay -S python python-pip git libusb
+```
 
-**SP Flash Tool**, the **MediaTek USB Driver**, **Y1 Helper** itself and **Rockbox Utility** to assist with installing your favourite iPod classic Rockbox themes on your Y1
+#### For Fedora
+```
+sudo dnf install python3 git libusb1
+```
 
-![img](ehe8h2bwa3gf1 "You can install iPod Classic 6G themes to the Y1 using Rockbox Utility with USB Mode on Y1")
+#### Grab files
+```
+git clone https://github.com/team-slide/Innioasis-Updater
+cd Innioasis-Updater
+pip3 install -r requirements.txt
+pip3 install .
+```
 
-# How do I use it?
+### Using venv
+```
+python3 -m venv ~/.venv
+git clone https://github.com/team-slide/Innioasis-Updater
+cd Innioasis-Updater
+. ~/.venv/bin/activate
+pip install -r requirements.txt
+pip install .
+```
 
-While we will make a video explaining how to use it soon. honestly, just give it a spin! It is my hope that this version makes a lot more sense and doesn't show confusing messages about device connections, and with better explanation on how it works in the app itself.
+#### Install rules
+```
+sudo usermod -a -G plugdev $USER
+sudo usermod -a -G dialout $USER
+sudo cp mtkclient/Setup/Linux/*.rules /etc/udev/rules.d
+sudo udevadm control -R
+sudo udevadm trigger
+```
+Make sure to reboot after adding the user to dialout/plugdev. If the device
+has a vendor interface 0xFF (like LG), make sure to add "blacklist qcaux" to
+the "/etc/modprobe.d/blacklist.conf".
 
-![img](teiy4zc7c3gf1)
+---------------------------------------------------------------------------------------------------------------
 
-This isn't just an app it's an installation package that sets up your PC with everything you need to keep your Y1 maintained and up to date, while opening the door for extra features and more fun!
+### macOS Easy App Setup (Needs work)
 
-It is my hope that the Y1 community appreciates this utility, and we'll be sure to keep you informed on how it fits into your Y1 lifestyle.
+An experimental .app version is available to try [here](https://www.github.com/team-slide/Innioasis-Updater/releases/latest) this is intended to be easy for most users to install but if it doesnt run for you, please file an issue with a copy of your launcher.log from /Users/yourname/Library/Application Support/Innioasis Updater (you'll need to press cmd, shift, . to reveal this in Finder)
 
-# Why should I use THIS?
+### macOS Manual Setup
 
-Firstly, its a way easier way to keep your Y1 up-to-date from Innioasis, without having to follow instructions and manually involve yourself, it makes updating your Y1 way more like updating an iPod on iTunes, turn it off, plug it in and click Install, simple as that
+#### Install brew, macFUSE, OpenSSL
 
-![img](3nf224a9b3gf1)
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install libusb openssl
+```
 
-If you make themes for the Y1 this is a dream tool as you can enable screenshotting on your device by installing an update from the Y1 Helper app, even if you've already updated it to the latest version. The app will explain this when you run it.
+You may need to **reboot**
 
-and this is great for anyone that wants to live life on the wild side with Project Gallagher, a custom rom running a Rockbox based launcher that has impressed Innioasis themselves, and there is potential for collaboration between the r/innioasis community and the company themselves to improve the player for its users. Watch this space
+#### Grab files
+```
+git clone https://github.com/team-slide/Innioasis-Updater
+cd Innioasis-Updater
+```
 
-# How do I get help with Rockbox?
+#### Create python 3.9 venv and install dependencies
+```
+python3.9 -m venv mtk_venv
+source mtk_venv/bin/activate
+pip3 install --pre --no-binary capstone capstone
+pip3 install PySide6 libusb
+pip3 install -r requirements.txt
+```
 
-![img](n0ymao2kb3gf1)
+---------------------------------------------------------------------------------------------------------------
 
-If after clicking Device > Update >Install Project Gallagher Core to setup Rockbox on your Y1 you find there's an issue, please use the Rockbox Feedback Thread pinned on the subreddit or report an issue at [github.com/rockbox-y1/rockbox](http://github.com/rockbox-y1/rockbox)
+### Windows Manual Python Script Setup
 
-# What if something breaks?
+#### Install python + git
+- Install python >= 3.9 and git
+- If you install python from microsoft store, "python setup.py install" will fail, but that step isn't required.
+- WIN+R ```cmd```
 
-![img](c7fedpv4c3gf1 "You can always install the latest software on your Y1 and make it work just like it originally did.")
+#### Install Winfsp (for fuse)
+Download and install [here](https://winfsp.dev/rel/)
 
-This tool can install and factory restore the original software on your device, so if, just like with iPhone jailbreaking or installing Rockbox on an iPod, something goes wrong, you have tools at your disposal to make it good as new! Simply run an update to the Original Software in Y1 Helper or use the included SP Flash Tool the manually install an update to recover your device
+#### Install OpenSSL 1.1.1 (for python scrypt dependency)
+Download and install [here](https://sourceforge.net/projects/openssl-for-windows/files/)
 
-The choice is yours. Whether you decide to stick with the Original Y1 setup, or try new things, this tool has something for you
+#### Grab files and install
+```
+git clone https://github.com/team-slide/Innioasis-Updater
+cd Innioasis-Updater
+pip3 install -r requirements.txt
+```
 
-# [Click Here to Download Y1 Helper](https://www.github.com/team-slide/y1-helper/releases/latest)
+#### Get latest UsbDk 64-Bit
+- Install normal MTK Serial Port driver (or use default Windows COM Port one, make sure no exclamation is seen)
+- Get usbdk installer (.msi) from [here](https://github.com/daynix/UsbDk/releases/) and install it
+- Test on device connect using "UsbDkController -n" if you see a device with 0x0E8D 0x0003
+- Works fine under Windows 10 and 11 :D
 
-Made with <3 by Ryan Specter - u/respectyarn
+#### Building wheel issues (creds to @Oyoh-Edmond)
+##### Download and Install the Build Tools:
+    Go to the Visual Studio Build Tools [download](https://visualstudio.microsoft.com/visual-cpp-build-tools) page.
+    Download the installer and run it.
 
-Lead of Team Slide and Project Gallagher.
+###### Select the Necessary Workloads:
+    In the installer, select the "Desktop development with C++" workload.
+    Ensure that the "MSVC v142 - VS 2019 C++ x64/x86 build tools" (or later) component is selected.
+    You can also check "Windows 10 SDK" if it’s not already selected.
+
+###### Complete the Installation:
+    Click on the "Install" button to begin the installation.
+    Follow the prompts to complete the installation.
+    Restart your computer if required.
+
+---------------------------------------------------------------------------------------------------------------
+## Usage
+### Activating your venv
+In order to activate your venv you'll need to run these commands
+```
+. ~/.venv/bin/activate
+```
+You should see something like this...
+```
+(.venv) [user@hostname]$ 
+```
+This means you are on venv folder!
+
+### Using Innioasis Updater:
+To start installing firmwares:
+```
+python updater.py
+```
+
+or:
+
+```
+python3 updater.py
+```
