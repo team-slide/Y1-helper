@@ -5,7 +5,7 @@
 <img src="https://github.com/team-slide/Innioasis-Updater/blob/main/mtkclient/gui/images/icon.png" alt="Innioasis Updater Icon" width="128"/>
 Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 MP3 player running Android firmwares. It is a modification of mtkclient to enable the installation of Updates, Factory Restore and installation of Custom Firmwares like the Multiwirth ROM with Rockbox.
 
-## 🐍 Python Script written in 🧠💻Cursor AI by
+## Devloped by
 - Ryan Specter of Team Slide
 
 ## Special Thanks to
@@ -54,32 +54,36 @@ Easy Install: You can easily install this with the Windows and Driver setup pack
 
 ### macOS Easy App Setup (Needs work)
 
+[Download here](https://www.github.com/team-slide/Innioasis-Updater/releases/latest)
 An experimental .app version is available to try [here](https://www.github.com/team-slide/Innioasis-Updater/releases/latest) this is intended to be easy for most users to install
 if it doesnt run for you, please file an issue with a copy of your launcher.log from /Users/yourname/Library/Application Support/Innioasis Updater (you'll need to press cmd, shift, . to reveal this in Finder)
 
-#### If the app doesn't work after two tries, run these commands first.
+#### If the app doesn't work after two tries, please run these commands a line at a time, by copy-pasting into Terminal and hitting Enter/Return after each.
 ```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install libusb openssl cmake pkg-config
 cd "$HOME/Library/Application Support/Innioasis Updater"
-pip install -r requirements.txt
+python3 -m pip install --upgrade pip
+python3 -m pip install --upgrade wheel setuptools pyusb pycryptodome pycryptodomex colorama shiboken6 pyside6 mock pyserial flake8 keystone-engine capstone unicorn keystone requests
 python3 updater.py
 ```
 
-### macOS Manual Setup and Terminal Commands - for those whose .app isn't at all.
+### macOS Manual Setup and Terminal Commands - for those whose .app didn't run at all / are experienced with using the Terminal.
 
-#### Install brew, libusb, OpenSSL
-
+#### Set up and run Python Script - you may.
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install libusb openssl
-```
-
-You may need to **reboot**
-
-#### Set up and run Python Script.
-```
+brew install libusb openssl cmake pkg-config
 git clone https://github.com/team-slide/Innioasis-Updater
 cd Innioasis-Updater
+python3 -m pip install --upgrade pip
+python3 -m pip install --upgrade wheel setuptools pyusb pycryptodome pycryptodomex colorama shiboken6 pyside6 mock pyserial flake8 keystone-engine capstone unicorn keystone requests
 pip install -r requirements.txt
+```
+Then reboot your mac, and run Innioasis Updater in terminal with 
+
+```
+cd Innioasis-Updater
 python3 updater.py
 ```
 
