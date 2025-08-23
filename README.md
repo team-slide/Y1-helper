@@ -43,7 +43,7 @@ Easy Install: You can easily install this with the Windows and Driver setup pack
 - Restart your PC
 
  Notice to ARM64 Users: You can only use the Remote Control, Screenshot and App Install features of Y1 Helper (part of Innioasis Updater on Windows), 
- you'll need to use another OS / computer to install your firmware if you have an ARM64 (e.g Snapdragon) Windows PC
+ you'll need to use another OS / computer to install your firmware if you have an ARM64 (e.g Snapdragon) Windows PC or run it in WSL with USBIPD. (Advanced)
 
 ### macOS Easy App Setup (Needs work)
 
@@ -51,7 +51,7 @@ An experimental .app version is available to try [here](https://www.github.com/t
 
 ### macOS Manual Setup and Terminal Commands - for those who can't get the .app working - the .app should run after running these commands.
 
-#### Install brew, macFUSE, OpenSSL
+#### Install brew, libusb, OpenSSL
 
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -146,6 +146,16 @@ This means you are on venv folder!
 To start installing firmwares:
 ```
 python updater.py
+```
+
+or:
+
+```
+
+or:
+
+```
+python3 updater.py
 ```
 
 or:
