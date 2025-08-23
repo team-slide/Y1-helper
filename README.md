@@ -18,7 +18,7 @@ Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 
 ### Team Slide branding lead
 - u/_allstar
 ### TikTok / YouTube creator
-- Ryan/ Corduroy cat - @catsteal3r on TikTok
+- Ryan / Corduroy cat - @catsteal3r on TikTok
   
 ## MTKclient Credits
 
@@ -31,15 +31,18 @@ Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 
 
 ## Install
 
-### Windows
+### Windows (64bit Intel/AMD Only)
 
 Easy Install: You can easily install this with the Windows and Driver setup packages 
+
 [Download here](https://www.github.com/team-slide/Innioasis-Updater/releases/latest)
 
 #### Driver Setup
 - Install normal MTK Serial Port driver (driver_mtk.exe)
 - Install USB Development Kit (driver_usbdk.msi)
 - Restart your PC
+
+  You can only use the Remote Control, Screenshot and App Install features of Y1 Helper (part of Innioasis Updater on Windows), you'll need to use another OS / computer to install your firmware if you have an ARM64 (e.g Snapdragon) Windows PC
 
 ### macOS Easy App Setup (Needs work)
 
