@@ -5,6 +5,8 @@
 <img src="https://github.com/team-slide/Innioasis-Updater/blob/main/mtkclient/gui/images/icon.png" alt="Innioasis Updater Icon" width="128"/>
 Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 MP3 player running Android firmwares. It is a modification of mtkclient to enable the installation of Updates, Factory Restore and installation of Custom Firmwares like the Multiwirth ROM with Rockbox.
 
+[How to Install](https://github.com/team-slide/Innioasis-Updater/tree/main?tab=readme-ov-file#mtkclient-credits)
+
 ## Devloped by
 - Ryan Specter of Team Slide
 
@@ -45,8 +47,8 @@ Easy Install: You can easily install this with the Windows and Driver setup pack
 [Download here](https://www.github.com/team-slide/Innioasis-Updater/releases/latest)
 
 #### Driver Setup
-- Install normal MTK Serial Port driver (driver_mtk.exe)
-- Install USB Development Kit (driver_usbdk.msi)
+- Install normal MTK Serial Port driver ([driver_mtk.exe](https://github.com/team-slide/Innioasis-Updater/releases/download/1.0.0/driver_mtk.exe))
+- Install USB Development Kit ([driver_usbdk.msi](https://github.com/team-slide/Innioasis-Updater/releases/download/1.0.0/driver_usbdk.msi)
 - Restart your PC
 
  Notice to ARM64 Users: You can only use the Remote Control, Screenshot and App Install features of Y1 Helper (part of Innioasis Updater on Windows), 
@@ -55,35 +57,65 @@ Easy Install: You can easily install this with the Windows and Driver setup pack
 ### macOS Easy App Setup (Needs work)
 
 [Download here](https://www.github.com/team-slide/Innioasis-Updater/releases/latest)
+
 An experimental .app version is available to try [here](https://www.github.com/team-slide/Innioasis-Updater/releases/latest) this is intended to be easy for most users to install
 if it doesnt run for you, please file an issue with a copy of your launcher.log from /Users/yourname/Library/Application Support/Innioasis Updater (you'll need to press cmd, shift, . to reveal this in Finder)
 
-#### If the app doesn't work after two tries, please run these commands a line at a time, by copy-pasting into Terminal and hitting Enter/Return after each.
+### Troubleshooting: If the Mac .app doesn't work after two tries, please run these commands a line at a time, by copy-pasting into Terminal and hitting Enter/Return after each.
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+```
 brew install libusb openssl cmake pkg-config
+```
+```
 cd "$HOME/Library/Application Support/Innioasis Updater"
-python3 -m pip install --upgrade pip
-python3 -m pip install --upgrade wheel setuptools pyusb pycryptodome pycryptodomex colorama shiboken6 pyside6 mock pyserial flake8 keystone-engine capstone unicorn keystone requests
-python3 updater.py
 ```
+```
+python3 -m pip install --upgrade pip
+```
+```
+python3 -m pip install --upgrade wheel setuptools pyusb pycryptodome pycryptodomex colorama shiboken6 pyside6 mock pyserial flake8 keystone-engine capstone unicorn keystone requests
+```
+Then reboot the mac and launch the .app again
 
-### macOS Manual Setup and Terminal Commands - for those whose .app didn't run at all / are experienced with using the Terminal.
+### If the .app STILL doesnt work below you can...
 
-#### Set up and run Python Script - you may.
+#### Set up and run Python Script Manually on Mac
+
+Open Terminal and run each of these a line at a time.
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+```
 brew install libusb openssl cmake pkg-config
+```
+```
 git clone https://github.com/team-slide/Innioasis-Updater
+```
+
+```
 cd Innioasis-Updater
+```
+
+```
 python3 -m pip install --upgrade pip
+```
+
+```
 python3 -m pip install --upgrade wheel setuptools pyusb pycryptodome pycryptodomex colorama shiboken6 pyside6 mock pyserial flake8 keystone-engine capstone unicorn keystone requests
+```
+
+```
 pip install -r requirements.txt
 ```
+
 Then reboot your mac, and run Innioasis Updater in terminal with 
 
 ```
 cd Innioasis-Updater
+```
+```
 python3 updater.py
 ```
 
@@ -155,7 +187,14 @@ You should see something like this...
 ```
 This means you are on venv folder!
 
-### Using Innioasis Updater:
+### Using Innioasis Updater om Windows
+Run Innioasis Updater from the Start Menu
+
+### Using Innioasis Updater.app on Mac
+Launch the app, if it doesnt work, try again.
+if it still doesnt work check the Mac troubleshooting instructions.
+
+### Using Innioasis Updater on Linux:
 To start installing firmwares:
 ```
 python updater.py
