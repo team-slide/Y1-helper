@@ -1,7 +1,7 @@
 <div align="right">
 </div>
 
-# Y1 Helper is no longer available, please use Innioasis Updater for updates, restores and custom firmware setups, if you still have Y1 Helper, please update to Innioasis Updater and let it remove your Y1 Helper shortcuts for the best results, all features from the original Y1 Helper will be available in Innioasis Updater too!
+# Y1 Helper is no longer available, please use [Innioasis Updater](https://innioasis.app) for updates, restores and custom firmware setups, if you still have Y1 Helper, please update to Innioasis Updater and let it remove your Y1 Helper shortcuts for the best results, all features from the original Y1 Helper will be available in Innioasis Updater too!
 
 Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 MP3 player running Android firmwares. It is a modification of mtkclient to enable the installation of Updates, Factory Restore and installation of Custom Firmwares like the Multiwirth ROM with Rockbox.
 
