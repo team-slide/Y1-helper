@@ -1,7 +1,0 @@
-pillow
-<<<<<<< Current (Your changes)
-numpy 
-=======
-numpy
-psutil 
->>>>>>> Incoming (Background Agent changes)
