@@ -1,4 +1,4 @@
-# Hi, it's nice to see you here, but... Y1 Helper is retired... Sorry to anyone who came here from an older tutorial video, new ones are on the way when I can find the time, and I think some other friendly faces are working on some too :) You might not need a tutorial with this newer version as most of the guidance is built in.
+# Hi, thanks for coming here from YouTube. Reddit, TikTok, Discord! it means a lot to us, if you watched [an OLD tutorial that Innioasis had taken without permission, great news! The process is easier.] 
 
 # Please head over to [innioasis.app](https://innioasis.app) to get our new [Innioasis Updater](https://innioasis.app) for Windows, Mac and Linux
 
