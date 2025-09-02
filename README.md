@@ -1,4 +1,4 @@
-# Hi, thanks for coming here from YouTube. Reddit, TikTok, Discord! it means a lot to us, if you watched [an OLD tutorial that Innioasis had taken without permission, great news! The process is easier.] 
+# Hi, thanks for coming here from YouTube. Reddit, TikTok, Discord! it means a lot to us, if you're from one of brilliant older video tutorials, great news! The process is now easier, we'll guide the way from here.
 
 # Please head over to [innioasis.app](https://innioasis.app) to get our new [Innioasis Updater](https://innioasis.app) for Windows, Mac and Linux
 
