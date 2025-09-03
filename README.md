@@ -1,5 +1,5 @@
-[<img src="https://innioasis.app/start_here.png" alt="Click Here to begin"/>](https://innioasis.app/imstallguide.html)
-[<img src="https://innioasis.app/mtkclient/gui/images/screenshot.jpg" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/imstallguide.html)
+[<img src="https://innioasis.app/start_here.png" alt="Click Here to begin"/>](https://innioasis.app/installguide.html)
+[<img src="https://innioasis.app/mtkclient/gui/images/screenshot.jpg" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
 # Hi, thanks for coming here from YouTube. Reddit, TikTok, Discord! it means a lot to us, if you're from one of brilliant older video tutorials, great news! The process is now easier, we'll guide the way from here.
 
 # Please head over to [innioasis.app](https://innioasis.app) to get our new [Innioasis Updater](https://innioasis.app) for Windows, Mac and Linux
