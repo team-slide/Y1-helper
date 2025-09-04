@@ -1,14 +1,140 @@
-[<img src="https://innioasis.app/start_here.png" alt="Click Here to begin"/>](https://innioasis.app/installguide.html)
-[<img src="https://innioasis.app/mtkclient/gui/images/screenshot.jpg" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
-# Hi, thanks for coming here from YouTube. Reddit, TikTok, Discord! it means a lot to us, if you're from one of brilliant older video tutorials, great news! The process is now easier, we'll guide the way from here.
+[<img src="start_here.png" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
+[<img src="mtkclient/gui/images/screenshot.jpg" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
 
-# Please head over to [innioasis.app](https://innioasis.app) to get our new [Innioasis Updater](https://innioasis.app) for Windows, Mac and Linux
+# Innioasis Updater
+<img src="mtkclient/gui/images/icon.png" alt="Innioasis Updater Icon" width="128"/>
+Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 MP3 player running Android firmwares. It is a modification of mtkclient to enable the installation of Updates, Factory Restore and installation of Custom Firmwares like the Multiwirth ROM with Rockbox.
 
-# [Setup Guide for Windows Mac and Linux](https://innioasis.app/installguide.html)
-# [Driver downloads for Windows](https://innioasis.app/installguide.html)
+# [Download for Mac and Windows](https://innioasis.app)
 
-As with any driver installation, it's best to follow the guide on screen. If you're asked to remove original driver during the MTK driver install. just say yes and let it continue. If the UsbDk installer gives you an error, this usually means its already installed, but reboot your PC and check Installed Apps, try again if not.
 
-## If you had Y1 Helper before and it updated itself to Innioasis Updater preview, please uninstall it / update it to Innioasis Updater and remove old Y1 Helper shortcuts from your start menu if asked to do so. 
 
-Its features have been replaced by the stable [Innioasis Updater](https://innioasis.app)
+## Devloped by
+- Ryan Specter of Team Slide
+
+## Special Thanks to
+
+### Team Slide branding lead
+- u/_allstar
+  
+### r/innioasis Mods
+- u/wa-a-melyn
+- u/multiwirth
+- u/TwitchyMcJoe
+- u/Key-Brilliant5623
+
+### ROM Developer
+ - [@Multiwirth](https://www.github.com/multiwirth)
+
+### Rockbox Y1 Port Developer
+ - [@rockbox-y1 (u/After-Acanthaceae547)](https://www.github.com/rockbox-y1)
+### TikTok / YouTube creator
+- Ryan / Corduroy cat - @catsteal3r on TikTok
+  
+## MTKclient Credits
+
+- bkerler for creating mtkclient
+- kamakiri [xyzz]
+- linecode exploit [chimera]
+- Chaosmaster
+- Geert-Jan Kreileman (GUI, design & fixes)
+
+## Installing on Linux
+
+### Linux - (Ubuntu recommended)
+
+#### Install python >=3.8, git and other deps
+
+#### For Debian/Ubuntu
+```
+sudo apt install python3 git libusb-1.0-0 python3-pip android-sdk-platform-tools
+```
+#### For ArchLinux
+```
+(sudo) pacman -S  python python-pip python-pipenv git libusb
+```
+or
+```
+yay -S python python-pip git libusb
+```
+
+#### For Fedora
+```
+sudo dnf install python3 git libusb1 android-tools
+```
+
+#### Grab files
+```
+git clone https://github.com/team-slide/Innioasis-Updater
+cd Innioasis-Updater
+pip3 install -r requirements.txt
+pip3 install .
+```
+
+### Using venv
+```
+python3 -m venv ~/.venv
+git clone https://github.com/team-slide/Innioasis-Updater
+cd Innioasis-Updater
+. ~/.venv/bin/activate
+pip install -r requirements.txt
+pip install .
+```
+
+#### Install rules
+```
+sudo usermod -a -G plugdev $USER
+sudo usermod -a -G dialout $USER
+sudo cp mtkclient/Setup/Linux/*.rules /etc/udev/rules.d
+sudo udevadm control -R
+sudo udevadm trigger
+```
+Make sure to reboot after adding the user to dialout/plugdev. If the device
+has a vendor interface 0xFF (like LG), make sure to add "blacklist qcaux" to
+the "/etc/modprobe.d/blacklist.conf".
+
+---------------------------------------------------------------------------------------------------------------
+## Usage
+### Activating your venv
+In order to activate your venv you'll need to run these commands
+```
+. ~/.venv/bin/activate
+```
+You should see something like this...
+```
+(.venv) [user@hostname]$ 
+```
+This means you are on venv folder!
+
+### Using Innioasis Updater on Linux:
+To start installing firmwares:
+```
+python updater.py
+```
+or:
+```
+python3 updater.py
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Windows 64Bit Intel/AMD Only 
+# Please follow the setup steps at www.innioasis.app to get the drivers you need.
