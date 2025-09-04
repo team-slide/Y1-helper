@@ -1,8 +1,8 @@
-[<img src="https;//innioasis.app/start_here.png" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
-[<img src="https;//innioasis.app/mtkclient/gui/images/screenshot.jpg" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
+[<img src="https://innioasis.app/start_here.png" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
+[<img src="https://innioasis.app/mtkclient/gui/images/screenshot.jpg" alt="Innioasis Updater Screenshot"/>](https://innioasis.app/installguide.html)
 
 # Innioasis Updater
-<img src="https;//innioasis.app/mtkclient/gui/images/icon.png" alt="Innioasis Updater Icon" width="128"/>
+<img src="https://innioasis.app/mtkclient/gui/images/icon.png" alt="Innioasis Updater Icon" width="128"/>
 Innioasis Updater is an easy, one-click firmware installer for the Innioasis Y1 MP3 player running Android firmwares. It is a modification of mtkclient to enable the installation of Updates, Factory Restore and installation of Custom Firmwares like the Multiwirth ROM with Rockbox.
 
 # [Download for Mac and Windows](https://innioasis.app)
